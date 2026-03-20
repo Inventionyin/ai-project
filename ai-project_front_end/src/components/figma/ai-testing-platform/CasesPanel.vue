@@ -443,10 +443,11 @@ function openBatchReport() {
   const projectId = String(route.params.projectId || '').trim()
   const runId = batchRunRunId.value
   if (!projectId || !runId || !canGenerateBatchReport.value) return
-  void router.push({
-    path: `/projects/${projectId}/reports`,
+  const target = router.resolve({
+    path: `/projects/${projectId}/reports/allure`,
     query: { runId }
   })
+  window.open(target.href, '_blank', 'noopener,noreferrer')
 }
 
 function closeAiGenerateCase() {

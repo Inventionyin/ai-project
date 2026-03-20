@@ -1,13 +1,20 @@
 from __future__ import annotations
 
+import mimetypes
 import uuid
+import zipfile
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi.responses import FileResponse, RedirectResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, get_current_user, get_request_id, to_unix_ts
 from app.core.database import get_db
-from app.models.enums import CaseRunStatus, RunStatus
+from app.core.security import decode_access_token
+from app.models.enums import ArtifactType, CaseRunStatus, RunStatus
+from app.models.run import Artifact, Job
 from app.schemas.common import ApiResponse, PageData
 from app.schemas.run import (
     CaseRunListItem,
@@ -31,6 +38,42 @@ from app.services.run import (
 )
 
 router = APIRouter(prefix="/runs")
+
+
+def _resolve_user_with_optional_token(user: CurrentUser, access_token: str | None) -> CurrentUser:
+    token = str(access_token or "").strip()
+    if not token:
+        return user
+    payload = decode_access_token(token)
+    return CurrentUser(id=payload.user_id, tenant_id=payload.tenant_id, roles=payload.roles)
+
+
+def _find_allure_report_dir(*, artifact_path: Path | None, workspace_path: Path | None) -> Path | None:
+    report_dir: Path | None = None
+    if artifact_path is not None:
+        if artifact_path.is_dir():
+            report_dir = artifact_path
+        elif artifact_path.suffix.lower() == ".zip" and artifact_path.exists():
+            extract_root = artifact_path.parent
+            target = extract_root / "allure-report"
+            if not target.exists():
+                with zipfile.ZipFile(artifact_path, mode="r") as archive:
+                    archive.extractall(path=extract_root)
+            report_dir = target
+    if (report_dir is None or not report_dir.exists()) and workspace_path is not None:
+        candidate = workspace_path / "allure-report"
+        if candidate.exists():
+            report_dir = candidate
+    if report_dir is None or not report_dir.exists():
+        return None
+    return report_dir.resolve()
+
+
+def _safe_resolve_report_file(report_dir: Path, asset_path: str) -> Path:
+    normalized = str(asset_path or "").strip("/")
+    target = (report_dir / normalized).resolve() if normalized else (report_dir / "index.html").resolve()
+    target.relative_to(report_dir)
+    return target
 
 
 def _to_run_detail(run, done: int, total: int) -> RunDetailData:
@@ -190,6 +233,66 @@ async def get_(
 ) -> ApiResponse[RunDetailData]:
     run, done, total = await get_run(db, user=user, run_id=runId)
     return ApiResponse(data=_to_run_detail(run, done, total), requestId=request_id)
+
+
+@router.get("/{runId}/allure-report", include_in_schema=False)
+async def redirect_allure_report_(
+    runId: uuid.UUID,
+) -> RedirectResponse:
+    return RedirectResponse(url=f"/api/runs/{runId}/allure-report/")
+
+
+@router.get("/{runId}/allure-report/", include_in_schema=False)
+@router.get("/{runId}/allure-report/{asset_path:path}", include_in_schema=False)
+async def get_allure_report_(
+    runId: uuid.UUID,
+    asset_path: str = "",
+    access_token: str | None = Query(default=None, alias="access_token"),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+) -> FileResponse:
+    resolved_user = _resolve_user_with_optional_token(user, access_token)
+    run, _, _ = await get_run(db, user=resolved_user, run_id=runId)
+    artifact_rows = (
+        await db.execute(
+            select(Artifact)
+            .where(
+                Artifact.tenant_id == resolved_user.tenant_id,
+                Artifact.run_id == run.id,
+                Artifact.type == ArtifactType.LOG_BUNDLE,
+            )
+            .order_by(Artifact.created_at.desc())
+        )
+    ).scalars()
+    allure_artifact = next(
+        (
+            row
+            for row in artifact_rows
+            if isinstance(row.meta_json, dict) and str(row.meta_json.get("kind") or "").upper() == "ALLURE_REPORT"
+        ),
+        None,
+    )
+    artifact_path = Path(str(allure_artifact.storage_url)).expanduser() if allure_artifact is not None else None
+    workspace_row = await db.scalar(
+        select(Job)
+        .where(Job.tenant_id == resolved_user.tenant_id, Job.run_id == run.id)
+        .order_by(Job.created_at.desc())
+    )
+    workspace_value = None
+    if workspace_row is not None and isinstance(workspace_row.meta_json, dict):
+        workspace_value = workspace_row.meta_json.get("workspace")
+    workspace_path = Path(str(workspace_value)).expanduser() if workspace_value else None
+    report_dir = _find_allure_report_dir(artifact_path=artifact_path, workspace_path=workspace_path)
+    if report_dir is None:
+        raise HTTPException(status_code=404, detail="Allure report not found")
+    try:
+        target = _safe_resolve_report_file(report_dir, asset_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Allure report file not found") from exc
+    if not target.exists() or not target.is_file():
+        raise HTTPException(status_code=404, detail="Allure report file not found")
+    media_type = mimetypes.guess_type(str(target))[0]
+    return FileResponse(path=target, media_type=media_type)
 
 
 @router.get("/{runId}/case-runs", response_model=ApiResponse[PageData[CaseRunListItem]])

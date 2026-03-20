@@ -81,6 +81,11 @@ function isMainLinkActive(item: LinkItem) {
   return route.path.startsWith(item.to)
 }
 
+function isExtraLinkActive(item: LinkItem) {
+  if (!item.to) return false
+  return route.path === item.to || route.path.startsWith(`${item.to}/`)
+}
+
 const mainLinks = computed<LinkItem[]>(() => [
   { label: '仪表盘', icon: navDashboard, to: `/projects/${projectId.value}/dashboard` }
 ])
@@ -110,6 +115,7 @@ const groups = computed<GroupItem[]>(() => [
 
 const extraLinks = computed<LinkItem[]>(() => [
   { label: '报告中心', icon: navReports, to: `/projects/${projectId.value}/reports` },
+  { label: 'Allure报告', icon: navReports, to: `/projects/${projectId.value}/reports/allure` },
   { label: 'AI 助手', icon: navAiAssistant }
 ])
 
@@ -206,11 +212,17 @@ const settingsLinks = computed<LinkItem[]>(() => [
           :key="item.label"
           type="button"
           class="flex h-[36px] w-full items-center gap-[8px] rounded-[10px] pl-[12px]"
-          :class="isCollapsed ? 'justify-center pl-0' : ''"
+          :class="[isExtraLinkActive(item) ? 'bg-[#155DFC]' : '', isCollapsed ? 'justify-center pl-0' : '']"
           @click="navigateTo(item)"
         >
-          <img :src="item.icon" alt="" class="h-[16px] w-[16px] flex-shrink-0" />
-          <span v-if="!isCollapsed" class="text-[14px] font-medium leading-[20px] text-[rgba(10,10,10,0.7)]">{{ item.label }}</span>
+          <img :src="item.icon" alt="" class="h-[16px] w-[16px] flex-shrink-0" :class="isExtraLinkActive(item) ? 'filter brightness-0 invert' : ''" />
+          <span
+            v-if="!isCollapsed"
+            class="text-[14px] font-medium leading-[20px]"
+            :class="isExtraLinkActive(item) ? 'text-white' : 'text-[rgba(10,10,10,0.7)]'"
+          >
+            {{ item.label }}
+          </span>
         </button>
       </div>
 

@@ -12,6 +12,7 @@ import RunsPanel from '@/components/figma/ai-testing-platform/RunsPanel.vue'
 import WorkersPanel from '@/components/figma/ai-testing-platform/WorkersPanel.vue'
 import SuiteDetailPanel from '@/components/figma/ai-testing-platform/SuiteDetailPanel.vue'
 import ReportsPanel from '@/components/figma/ai-testing-platform/ReportsPanel.vue'
+import AllureReportPanel from '@/components/figma/ai-testing-platform/AllureReportPanel.vue'
 import TestCaseDetailPanel from '@/components/figma/ai-testing-platform/TestCaseDetailPanel.vue'
 import AiTestingPlatform16_3 from '@/views/figma/AiTestingPlatform16_3.vue'
 
@@ -63,6 +64,7 @@ const ProjectDataSets = createProjectShellPage('测试数据', DataSetsPanel)
 const ProjectRuns = createProjectShellPage('运行记录', RunsPanel)
 const ProjectWorkers = createProjectShellPage('Worker 管理', WorkersPanel)
 const ProjectReports = createProjectShellPage('', ReportsPanel)
+const ProjectAllureReport = createProjectShellPage('', AllureReportPanel)
 
 const router = createRouter({
   history: createWebHistory(),
@@ -140,6 +142,10 @@ const router = createRouter({
     {
       path: '/projects/:projectId/reports',
       component: ProjectReports
+    },
+    {
+      path: '/projects/:projectId/reports/allure',
+      component: ProjectAllureReport
     },
     {
       path: '/projects/:projectId/settings/environments',
