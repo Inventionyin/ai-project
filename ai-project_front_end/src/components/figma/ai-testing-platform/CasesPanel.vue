@@ -72,6 +72,7 @@ type TestCaseListItem = {
   apiUrl?: string | null
   apiParams?: Record<string, unknown>
   apiHeaders?: Record<string, string>
+  expectedResult?: string | null
   ownerId?: string | null
 }
 
@@ -91,6 +92,7 @@ type TestCaseDetail = {
   apiUrl?: string | null
   apiParams?: Record<string, unknown>
   apiHeaders?: Record<string, string>
+  expectedResult?: string | null
 }
 
 type CreateCasePayload = {
@@ -106,6 +108,7 @@ type CreateCasePayload = {
   apiUrl?: string
   apiParams: Record<string, unknown>
   apiHeaders: Record<string, string>
+  expectedResult: string
 }
 
 type EditCasePayload = {
@@ -286,6 +289,7 @@ const loadCases = async () => {
       interfaceUrl: item.apiUrl || '-',
       method: String(item.apiMethod || '').toUpperCase() || '-',
       apiParams: item.apiParams || null,
+      expectedResult: item.expectedResult || null,
       owner: resolveOwnerDisplayName(item.ownerId),
       lastRun: resolveLastRunLabel(item.lastRun),
       updatedAt: formatDateTime(item.updatedAt)
@@ -492,7 +496,8 @@ async function saveCreateCase(payload: CreateCasePayload) {
         apiMethod: payload.apiMethod || null,
         apiUrl: payload.apiUrl || null,
         apiParams: payload.apiParams || {},
-        apiHeaders: payload.apiHeaders || {}
+        apiHeaders: payload.apiHeaders || {},
+        expectedResult: payload.expectedResult
       })
     })
     const result = await response.json() as ApiResponse<TestCaseListItem>

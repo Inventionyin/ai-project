@@ -12,6 +12,7 @@ export type Row = {
   interfaceUrl: string
   method: string
   apiParams: Record<string, unknown> | null
+  expectedResult?: string | null
   owner: string
   lastRun: '通过' | '失败' | '-' | '跳过'
   updatedAt: string

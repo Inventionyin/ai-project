@@ -14,6 +14,7 @@ TagStr = Annotated[str, Field(min_length=1, max_length=64)]
 FeatureStr = Annotated[str, Field(min_length=1, max_length=128)]
 ApiMethodStr = Annotated[str, Field(min_length=1, max_length=16)]
 ApiUrlStr = Annotated[str, Field(min_length=1, max_length=1024)]
+ExpectedResultStr = Annotated[str, Field(min_length=1, max_length=5000)]
 
 
 class TestCaseCreateRequest(BaseSchema):
@@ -30,6 +31,7 @@ class TestCaseCreateRequest(BaseSchema):
     apiUrl: ApiUrlStr
     apiParams: dict[str, Any] = Field(default_factory=dict)
     apiHeaders: dict[str, str] = Field(default_factory=dict)
+    expectedResult: ExpectedResultStr
 
 
 class TestCaseUpdateRequest(BaseSchema):
@@ -46,6 +48,7 @@ class TestCaseUpdateRequest(BaseSchema):
     apiUrl: ApiUrlStr | None = None
     apiParams: dict[str, Any] | None = None
     apiHeaders: dict[str, str] | None = None
+    expectedResult: ExpectedResultStr | None = None
 
 
 class TestCasePutRequest(BaseSchema):
@@ -62,6 +65,7 @@ class TestCasePutRequest(BaseSchema):
     apiUrl: ApiUrlStr | None = None
     apiParams: dict[str, Any] | None = None
     apiHeaders: dict[str, str] | None = None
+    expectedResult: ExpectedResultStr | None = None
 
 
 class TestCaseRestoreRequest(BaseSchema):
@@ -96,6 +100,7 @@ class TestCaseDetail(BaseSchema):
     apiUrl: ApiUrlStr | None = None
     apiParams: dict[str, Any] = Field(default_factory=dict)
     apiHeaders: dict[str, str] = Field(default_factory=dict)
+    expectedResult: str | None = None
 
 
 class TestCaseVersionSchema(BaseSchema):
@@ -123,6 +128,7 @@ class TestCaseListItem(BaseSchema):
     apiUrl: ApiUrlStr | None = None
     apiParams: dict[str, Any] = Field(default_factory=dict)
     apiHeaders: dict[str, str] = Field(default_factory=dict)
+    expectedResult: str | None = None
     lastRun: CaseRunStatus | None = None
     updatedAt: UnixTs
 

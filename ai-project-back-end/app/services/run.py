@@ -103,6 +103,28 @@ def _extract_testcase_api_params(ai_meta_json: object) -> dict[str, object]:
     return dict(raw)
 
 
+def _extract_testcase_api_headers(ai_meta_json: object) -> dict[str, str]:
+    if not isinstance(ai_meta_json, dict):
+        return {}
+    raw = ai_meta_json.get("apiHeaders")
+    if not isinstance(raw, dict):
+        return {}
+    normalized: dict[str, str] = {}
+    for key, value in raw.items():
+        normalized[str(key)] = str(value)
+    return normalized
+
+
+def _extract_testcase_expected_result(ai_meta_json: object) -> str | None:
+    if not isinstance(ai_meta_json, dict):
+        return None
+    value = ai_meta_json.get("expectedResult")
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    return normalized or None
+
+
 def _build_execution_spec(runner_type: str) -> JobExecution:
     if runner_type != _RUNNER_TYPE_PYTEST_ALLURE:
         return JobExecution(runnerType=_RUNNER_TYPE_DEFAULT, artifactSpec=[])
@@ -176,6 +198,8 @@ async def _execute_inline_pytest_allure_job(
                 apiMethod=str(item.get("apiMethod") or "").strip().upper() or None,
                 apiUrl=str(item.get("apiUrl") or "").strip() or None,
                 params=dict(item.get("params") or {}),
+                headers={str(k): str(v) for k, v in dict(item.get("headers") or {}).items()},
+                expectedResult=str(item.get("expectedResult") or "").strip() or None,
             )
         )
 
@@ -812,6 +836,8 @@ async def create_run_from_testcases_http(
             "api_method": r[3],
             "api_url": r[4],
             "api_params": _extract_testcase_api_params(r[5]),
+            "api_headers": _extract_testcase_api_headers(r[5]),
+            "expected_result": _extract_testcase_expected_result(r[5]),
             "content_md": r[6],
         }
         for r in testcase_rows
@@ -832,6 +858,7 @@ async def create_run_from_testcases_http(
             raise HTTPException(status_code=400, detail=f"testcase_api_missing:{testcase_id}")
         merged_params = dict(testcase_item["api_params"] or {})
         merged_params.update(dict(row["overrideParams"] or {}))
+        merged_headers = dict(testcase_item["api_headers"] or {})
         suite_snapshot_items.append(
             {
                 "orderNo": order_no,
@@ -839,6 +866,8 @@ async def create_run_from_testcases_http(
                 "apiMethod": api_method,
                 "apiUrl": api_url,
                 "params": merged_params,
+                "headers": merged_headers,
+                "expectedResult": testcase_item["expected_result"],
             }
         )
 
@@ -939,6 +968,7 @@ async def create_run_from_testcases_http(
         api_url = str(testcase_item["api_url"] or "").strip()
         merged_params = dict(testcase_item["api_params"] or {})
         merged_params.update(dict(row["overrideParams"] or {}))
+        merged_headers = dict(testcase_item["api_headers"] or {})
         case_run = case_runs[order_no - 1]
         items_for_job.append(
             {
@@ -948,6 +978,8 @@ async def create_run_from_testcases_http(
                 "apiMethod": api_method,
                 "apiUrl": api_url,
                 "params": merged_params,
+                "headers": merged_headers,
+                "expectedResult": testcase_item["expected_result"],
                 "orderNo": order_no,
             }
         )

@@ -50,6 +50,13 @@ def _normalize_optional_text(value: str | None) -> str | None:
     return cleaned or None
 
 
+def _normalize_expected_result(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    return cleaned or None
+
+
 def _normalize_api_headers(value: dict[str, str] | None) -> dict[str, str]:
     if value is None:
         return {}
@@ -72,12 +79,15 @@ def _merge_api_meta(
     *,
     api_params: dict | None = None,
     api_headers: dict[str, str] | None = None,
+    expected_result: str | None = None,
 ) -> dict:
     base = meta_json.copy() if isinstance(meta_json, dict) else {}
     if api_params is not None:
         base["apiParams"] = api_params
     if api_headers is not None:
         base["apiHeaders"] = _normalize_api_headers(api_headers)
+    if expected_result is not None:
+        base["expectedResult"] = expected_result.strip()
     return base
 
 
@@ -131,6 +141,9 @@ async def create_testcase(
         raise HTTPException(status_code=400, detail="API method is required")
     if api_url is None:
         raise HTTPException(status_code=400, detail="API URL is required")
+    expected_result = _normalize_expected_result(payload.expectedResult)
+    if expected_result is None:
+        raise HTTPException(status_code=400, detail="expectedResult is required")
 
     owner_id = user.id
     if payload.ownerId:
@@ -153,7 +166,12 @@ async def create_testcase(
         feature=feature,
         api_url=api_url,
         api_method=api_method,
-        ai_meta_json=_merge_api_meta({}, api_params=payload.apiParams, api_headers=payload.apiHeaders),
+        ai_meta_json=_merge_api_meta(
+            {},
+            api_params=payload.apiParams,
+            api_headers=payload.apiHeaders,
+            expected_result=expected_result,
+        ),
         created_by=user.id,
         owner_id=owner_id,
         version=0,
@@ -277,6 +295,11 @@ async def update_testcase(
         testcase.ai_meta_json = _merge_api_meta(testcase.ai_meta_json, api_params=payload.apiParams)
     if payload.apiHeaders is not None:
         testcase.ai_meta_json = _merge_api_meta(testcase.ai_meta_json, api_headers=payload.apiHeaders)
+    if payload.expectedResult is not None:
+        expected_result = _normalize_expected_result(payload.expectedResult)
+        if expected_result is None:
+            raise HTTPException(status_code=400, detail="expectedResult cannot be empty")
+        testcase.ai_meta_json = _merge_api_meta(testcase.ai_meta_json, expected_result=expected_result)
     if payload.ownerId is not None:
         testcase.owner_id = uuid.UUID(payload.ownerId)
 

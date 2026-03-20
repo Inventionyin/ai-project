@@ -179,6 +179,7 @@ class PytestAllureRunnerService:
                         f"    params = {json.dumps(dict(item.params or {}), ensure_ascii=False)}",
                         f"    headers = {json.dumps(headers, ensure_ascii=False)}",
                         f"    masked_headers = {json.dumps(masked_headers, ensure_ascii=False)}",
+                        f"    expected_result = {json.dumps(str(item.expectedResult or '').strip(), ensure_ascii=False)}",
                         "    assert api_url",
                         "    full_url = api_url if api_url.startswith(('http://', 'https://')) else urljoin(base_url.rstrip('/') + '/', api_url.lstrip('/'))",
                         "    if method in ('GET', 'DELETE', 'HEAD', 'OPTIONS'):",
@@ -188,6 +189,8 @@ class PytestAllureRunnerService:
                         "    allure.attach(json.dumps({'method': method, 'url': full_url, 'params': params, 'headers': masked_headers}, ensure_ascii=False, indent=2), 'request', allure.attachment_type.JSON)",
                         "    allure.attach(response.text[:20000], 'response_body', allure.attachment_type.TEXT)",
                         "    assert 200 <= int(response.status_code) < 400",
+                        "    if expected_result:",
+                        "        assert expected_result in response.text",
                     ]
                 ),
                 encoding="utf-8",

@@ -66,6 +66,16 @@ def _extract_api_headers(ai_meta_json: dict | None) -> dict[str, str]:
     return normalized
 
 
+def _extract_expected_result(ai_meta_json: dict | None) -> str | None:
+    if not isinstance(ai_meta_json, dict):
+        return None
+    value = ai_meta_json.get("expectedResult")
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    return normalized or None
+
+
 @router.post("/ai-import/jobs", response_model=ApiResponse[AiImportCreateJobData])
 async def create_ai_import_job_(
     payload: AiImportCreateJobRequest,
@@ -218,6 +228,7 @@ async def create(
             apiUrl=testcase.api_url,
             apiParams=_extract_api_params(testcase.ai_meta_json),
             apiHeaders=_extract_api_headers(testcase.ai_meta_json),
+            expectedResult=_extract_expected_result(testcase.ai_meta_json),
         ),
         requestId=request_id,
     )
@@ -277,6 +288,7 @@ async def list_(
                 apiUrl=tc.api_url,
                 apiParams=_extract_api_params(tc.ai_meta_json),
                 apiHeaders=_extract_api_headers(tc.ai_meta_json),
+                expectedResult=_extract_expected_result(tc.ai_meta_json),
                 lastRun=latest_case_run.status if latest_case_run else None,
                 updatedAt=to_unix_ts(tc.updated_at),
             )
@@ -332,6 +344,7 @@ async def get(
             apiUrl=testcase.api_url,
             apiParams=_extract_api_params(testcase.ai_meta_json),
             apiHeaders=_extract_api_headers(testcase.ai_meta_json),
+            expectedResult=_extract_expected_result(testcase.ai_meta_json),
         ),
         requestId=request_id,
     )
@@ -369,6 +382,7 @@ async def update(
             apiUrl=testcase.api_url,
             apiParams=_extract_api_params(testcase.ai_meta_json),
             apiHeaders=_extract_api_headers(testcase.ai_meta_json),
+            expectedResult=_extract_expected_result(testcase.ai_meta_json),
         ),
         requestId=request_id,
     )
@@ -460,6 +474,7 @@ async def restore(
             apiUrl=testcase.api_url,
             apiParams=_extract_api_params(testcase.ai_meta_json),
             apiHeaders=_extract_api_headers(testcase.ai_meta_json),
+            expectedResult=_extract_expected_result(testcase.ai_meta_json),
         ),
         requestId=request_id,
     )

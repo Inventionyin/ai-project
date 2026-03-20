@@ -29,6 +29,7 @@ const emit = defineEmits<{
     apiUrl?: string
     apiParams: Record<string, unknown>
     apiHeaders: Record<string, string>
+    expectedResult: string
   }): void
 }>()
 
@@ -57,6 +58,7 @@ const apiMethod = ref('')
 const apiUrl = ref('')
 const apiParamsInput = ref('')
 const apiHeadersInput = ref('')
+const expectedResultInput = ref('')
 
 function resetForm() {
   title.value = ''
@@ -71,6 +73,7 @@ function resetForm() {
   apiUrl.value = ''
   apiParamsInput.value = ''
   apiHeadersInput.value = ''
+  expectedResultInput.value = ''
 }
 
 function handleSave() {
@@ -81,6 +84,7 @@ function handleSave() {
   const cleanApiUrl = apiUrl.value.trim()
   const rawApiParams = apiParamsInput.value.trim()
   const rawApiHeaders = apiHeadersInput.value.trim()
+  const cleanExpectedResult = expectedResultInput.value.trim()
   if (!cleanFeature) {
     window.alert('请输入功能模块')
     return
@@ -99,6 +103,10 @@ function handleSave() {
   }
   if (!rawApiParams) {
     window.alert('请输入接口参数')
+    return
+  }
+  if (!cleanExpectedResult) {
+    window.alert('请输入预期结果')
     return
   }
   let parsedApiParams: Record<string, unknown> = {}
@@ -152,7 +160,8 @@ function handleSave() {
     apiMethod: cleanApiMethod || undefined,
     apiUrl: cleanApiUrl || undefined,
     apiParams: parsedApiParams,
-    apiHeaders: parsedApiHeaders
+    apiHeaders: parsedApiHeaders,
+    expectedResult: cleanExpectedResult
   })
 }
 
@@ -258,6 +267,17 @@ watch(
               v-model="apiHeadersInput"
               class="h-[88px] w-full resize-none rounded-[10px] border border-black/10 bg-white px-[12px] py-[8px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
               placeholder="可选，JSON对象，例如：{&quot;Authorization&quot;:&quot;Bearer xxx&quot;,&quot;X-Trace-Id&quot;:&quot;abc&quot;}"
+            />
+          </div>
+
+          <div class="flex flex-col gap-[6px]">
+            <div class="text-[12px] font-medium leading-[16px] text-[#0A0A0A]">
+              预期结果 <span class="text-[#FB2C36]">*</span>
+            </div>
+            <textarea
+              v-model="expectedResultInput"
+              class="h-[88px] w-full resize-none rounded-[10px] border border-black/10 bg-white px-[12px] py-[8px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
+              placeholder="请输入预期结果，用于自动化断言校验，例如：code=0"
             />
           </div>
 

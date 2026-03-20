@@ -28,6 +28,11 @@ function formatApiParams(apiParams: Row['apiParams']) {
     return '-'
   }
 }
+
+function formatExpectedResult(expectedResult: Row['expectedResult']) {
+  const value = String(expectedResult || '').trim()
+  return value || '-'
+}
 </script>
 
 <template>
@@ -47,18 +52,19 @@ function formatApiParams(apiParams: Row['apiParams']) {
 
         <div class="min-h-0 flex-1 overflow-auto px-[20px] py-[16px]">
           <div class="w-full overflow-x-auto rounded-[12px] border border-black/10">
-            <div class="min-w-[1040px]">
-              <div class="grid grid-cols-[160px_minmax(200px,1fr)_100px_260px_320px] border-b border-black/10 bg-[rgba(236,236,240,0.3)]">
+            <div class="min-w-[1320px]">
+              <div class="grid grid-cols-[160px_minmax(200px,1fr)_100px_260px_300px_300px] border-b border-black/10 bg-[rgba(236,236,240,0.3)]">
                 <div class="px-[12px] py-[10px] text-[12px] font-medium leading-[16px] text-[#717182]">功能模块</div>
                 <div class="px-[12px] py-[10px] text-[12px] font-medium leading-[16px] text-[#717182]">标题</div>
                 <div class="px-[12px] py-[10px] text-[12px] font-medium leading-[16px] text-[#717182]">调用方式</div>
                 <div class="px-[12px] py-[10px] text-[12px] font-medium leading-[16px] text-[#717182]">interfaceUrl</div>
                 <div class="px-[12px] py-[10px] text-[12px] font-medium leading-[16px] text-[#717182]">接口参数</div>
+                <div class="px-[12px] py-[10px] text-[12px] font-medium leading-[16px] text-[#717182]">预期结果</div>
               </div>
               <div
                 v-for="row in rows"
                 :key="row.id"
-                class="grid grid-cols-[160px_minmax(200px,1fr)_100px_260px_320px] border-b border-black/10 last:border-b-0"
+                class="grid grid-cols-[160px_minmax(200px,1fr)_100px_260px_300px_300px] border-b border-black/10 last:border-b-0"
               >
                 <div class="truncate px-[12px] py-[12px] text-[12px] leading-[16px] text-[#717182]" :title="row.module || '-'">
                   {{ row.module || '-' }}
@@ -74,6 +80,9 @@ function formatApiParams(apiParams: Row['apiParams']) {
                 </div>
                 <div class="truncate px-[12px] py-[12px] text-[12px] leading-[16px] text-[#717182]" :title="formatApiParams(row.apiParams)">
                   {{ formatApiParams(row.apiParams) }}
+                </div>
+                <div class="truncate px-[12px] py-[12px] text-[12px] leading-[16px] text-[#717182]" :title="formatExpectedResult(row.expectedResult)">
+                  {{ formatExpectedResult(row.expectedResult) }}
                 </div>
               </div>
             </div>
