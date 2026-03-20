@@ -50,10 +50,34 @@ def _normalize_optional_text(value: str | None) -> str | None:
     return cleaned or None
 
 
-def _merge_api_params(meta_json: dict | None, api_params: dict | None) -> dict:
+def _normalize_api_headers(value: dict[str, str] | None) -> dict[str, str]:
+    if value is None:
+        return {}
+    normalized: dict[str, str] = {}
+    for raw_key, raw_value in value.items():
+        key = str(raw_key).strip()
+        if not key:
+            raise HTTPException(status_code=400, detail="apiHeaders key cannot be empty")
+        if "\r" in key or "\n" in key:
+            raise HTTPException(status_code=400, detail="apiHeaders key contains invalid characters")
+        header_value = str(raw_value)
+        if "\r" in header_value or "\n" in header_value:
+            raise HTTPException(status_code=400, detail="apiHeaders value contains invalid characters")
+        normalized[key] = header_value
+    return normalized
+
+
+def _merge_api_meta(
+    meta_json: dict | None,
+    *,
+    api_params: dict | None = None,
+    api_headers: dict[str, str] | None = None,
+) -> dict:
     base = meta_json.copy() if isinstance(meta_json, dict) else {}
     if api_params is not None:
         base["apiParams"] = api_params
+    if api_headers is not None:
+        base["apiHeaders"] = _normalize_api_headers(api_headers)
     return base
 
 
@@ -129,7 +153,7 @@ async def create_testcase(
         feature=feature,
         api_url=api_url,
         api_method=api_method,
-        ai_meta_json=_merge_api_params({}, payload.apiParams),
+        ai_meta_json=_merge_api_meta({}, api_params=payload.apiParams, api_headers=payload.apiHeaders),
         created_by=user.id,
         owner_id=owner_id,
         version=0,
@@ -250,7 +274,9 @@ async def update_testcase(
     if payload.apiMethod is not None:
         testcase.api_method = _normalize_optional_text(payload.apiMethod.upper())
     if payload.apiParams is not None:
-        testcase.ai_meta_json = _merge_api_params(testcase.ai_meta_json, payload.apiParams)
+        testcase.ai_meta_json = _merge_api_meta(testcase.ai_meta_json, api_params=payload.apiParams)
+    if payload.apiHeaders is not None:
+        testcase.ai_meta_json = _merge_api_meta(testcase.ai_meta_json, api_headers=payload.apiHeaders)
     if payload.ownerId is not None:
         testcase.owner_id = uuid.UUID(payload.ownerId)
 

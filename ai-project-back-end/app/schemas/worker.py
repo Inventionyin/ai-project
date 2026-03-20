@@ -61,6 +61,7 @@ class JobItem(BaseSchema):
     apiMethod: str | None = None
     apiUrl: str | None = None
     params: dict[str, object] = Field(default_factory=dict)
+    headers: dict[str, str] = Field(default_factory=dict)
 
 
 class JobArtifactSpec(BaseSchema):

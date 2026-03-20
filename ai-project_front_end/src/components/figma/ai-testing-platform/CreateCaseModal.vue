@@ -28,6 +28,7 @@ const emit = defineEmits<{
     apiMethod?: string
     apiUrl?: string
     apiParams: Record<string, unknown>
+    apiHeaders: Record<string, string>
   }): void
 }>()
 
@@ -55,6 +56,7 @@ const feature = ref('')
 const apiMethod = ref('')
 const apiUrl = ref('')
 const apiParamsInput = ref('')
+const apiHeadersInput = ref('')
 
 function resetForm() {
   title.value = ''
@@ -68,6 +70,7 @@ function resetForm() {
   apiMethod.value = ''
   apiUrl.value = ''
   apiParamsInput.value = ''
+  apiHeadersInput.value = ''
 }
 
 function handleSave() {
@@ -77,6 +80,7 @@ function handleSave() {
   const cleanApiMethod = apiMethod.value.trim()
   const cleanApiUrl = apiUrl.value.trim()
   const rawApiParams = apiParamsInput.value.trim()
+  const rawApiHeaders = apiHeadersInput.value.trim()
   if (!cleanFeature) {
     window.alert('请输入功能模块')
     return
@@ -109,6 +113,33 @@ function handleSave() {
     window.alert('接口参数需为合法JSON对象')
     return
   }
+  let parsedApiHeaders: Record<string, string> = {}
+  if (rawApiHeaders) {
+    try {
+      const parsed = JSON.parse(rawApiHeaders) as unknown
+      if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
+        window.alert('Header 需为合法JSON对象')
+        return
+      }
+      const nextHeaders: Record<string, string> = {}
+      for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+        const headerKey = String(key || '').trim()
+        if (!headerKey) {
+          window.alert('Header 键不能为空')
+          return
+        }
+        if (typeof value !== 'string') {
+          window.alert('Header 值必须为字符串')
+          return
+        }
+        nextHeaders[headerKey] = value
+      }
+      parsedApiHeaders = nextHeaders
+    } catch {
+      window.alert('Header 需为合法JSON对象')
+      return
+    }
+  }
   emit('save', {
     title: cleanTitle,
     type: type.value,
@@ -120,7 +151,8 @@ function handleSave() {
     feature: cleanFeature || undefined,
     apiMethod: cleanApiMethod || undefined,
     apiUrl: cleanApiUrl || undefined,
-    apiParams: parsedApiParams
+    apiParams: parsedApiParams,
+    apiHeaders: parsedApiHeaders
   })
 }
 
@@ -215,6 +247,17 @@ watch(
               v-model="apiParamsInput"
               class="h-[88px] w-full resize-none rounded-[10px] border border-black/10 bg-white px-[12px] py-[8px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
               placeholder="请输入接口参数，例如：{&quot;userId&quot;:&quot;123&quot;,&quot;page&quot;:1}"
+            />
+          </div>
+
+          <div class="flex flex-col gap-[6px]">
+            <div class="text-[12px] font-medium leading-[16px] text-[#0A0A0A]">
+              Header
+            </div>
+            <textarea
+              v-model="apiHeadersInput"
+              class="h-[88px] w-full resize-none rounded-[10px] border border-black/10 bg-white px-[12px] py-[8px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
+              placeholder="可选，JSON对象，例如：{&quot;Authorization&quot;:&quot;Bearer xxx&quot;,&quot;X-Trace-Id&quot;:&quot;abc&quot;}"
             />
           </div>
 

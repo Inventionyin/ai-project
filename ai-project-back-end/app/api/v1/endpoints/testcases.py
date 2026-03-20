@@ -54,6 +54,18 @@ def _extract_api_params(ai_meta_json: dict | None) -> dict:
     return value
 
 
+def _extract_api_headers(ai_meta_json: dict | None) -> dict[str, str]:
+    if not isinstance(ai_meta_json, dict):
+        return {}
+    value = ai_meta_json.get("apiHeaders")
+    if not isinstance(value, dict):
+        return {}
+    normalized: dict[str, str] = {}
+    for key, item in value.items():
+        normalized[str(key)] = str(item)
+    return normalized
+
+
 @router.post("/ai-import/jobs", response_model=ApiResponse[AiImportCreateJobData])
 async def create_ai_import_job_(
     payload: AiImportCreateJobRequest,
@@ -205,6 +217,7 @@ async def create(
             apiMethod=testcase.api_method,
             apiUrl=testcase.api_url,
             apiParams=_extract_api_params(testcase.ai_meta_json),
+            apiHeaders=_extract_api_headers(testcase.ai_meta_json),
         ),
         requestId=request_id,
     )
@@ -263,6 +276,7 @@ async def list_(
                 apiMethod=tc.api_method,
                 apiUrl=tc.api_url,
                 apiParams=_extract_api_params(tc.ai_meta_json),
+                apiHeaders=_extract_api_headers(tc.ai_meta_json),
                 lastRun=latest_case_run.status if latest_case_run else None,
                 updatedAt=to_unix_ts(tc.updated_at),
             )
@@ -317,6 +331,7 @@ async def get(
             apiMethod=testcase.api_method,
             apiUrl=testcase.api_url,
             apiParams=_extract_api_params(testcase.ai_meta_json),
+            apiHeaders=_extract_api_headers(testcase.ai_meta_json),
         ),
         requestId=request_id,
     )
@@ -353,6 +368,7 @@ async def update(
             apiMethod=testcase.api_method,
             apiUrl=testcase.api_url,
             apiParams=_extract_api_params(testcase.ai_meta_json),
+            apiHeaders=_extract_api_headers(testcase.ai_meta_json),
         ),
         requestId=request_id,
     )
@@ -443,6 +459,7 @@ async def restore(
             apiMethod=testcase.api_method,
             apiUrl=testcase.api_url,
             apiParams=_extract_api_params(testcase.ai_meta_json),
+            apiHeaders=_extract_api_headers(testcase.ai_meta_json),
         ),
         requestId=request_id,
     )

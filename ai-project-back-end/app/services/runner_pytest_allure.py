@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import platform
 import subprocess
 import tempfile
 import time
@@ -13,6 +14,25 @@ from app.core.config import get_settings
 from app.models.enums import ArtifactType, CaseRunStatus, JobStatus
 from app.schemas.run import ArtifactIndex, CaseRunMetrics, CaseRunResult
 from app.schemas.worker import JobPayload
+
+_SENSITIVE_HEADER_KEYS = {
+    "authorization",
+    "proxy-authorization",
+    "cookie",
+    "set-cookie",
+    "x-api-key",
+    "x-auth-token",
+}
+
+
+def _mask_sensitive_headers(headers: dict[str, str]) -> dict[str, str]:
+    masked: dict[str, str] = {}
+    for key, value in headers.items():
+        if str(key).strip().lower() in _SENSITIVE_HEADER_KEYS:
+            masked[str(key)] = "******"
+        else:
+            masked[str(key)] = str(value)
+    return masked
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +74,7 @@ class PytestAllureRunnerService:
     def execute(self, job: JobPayload) -> PytestAllureExecutionOutput:
         workspace, generated_cases = self._prepare_workspace(job)
         allure_results_dir = workspace / "allure-results"
+        self._prepare_allure_metadata(job=job, allure_results_dir=allure_results_dir)
         execution_log = workspace / "execution.log"
         timeout_sec = max(int(job.suiteConfig.timeoutSec), 1)
         case_outputs: list[_CaseExecutionOutput] = []
@@ -140,6 +161,8 @@ class PytestAllureRunnerService:
             test_file = tests_dir / f"test_case_{index:04d}_{item.caseRunId.replace('-', '_')}.py"
             method = str(item.apiMethod or "GET").strip().upper() or "GET"
             api_url = str(item.apiUrl or "").strip()
+            headers = {str(k): str(v) for k, v in dict(item.headers or {}).items()}
+            masked_headers = _mask_sensitive_headers(headers)
             test_file.write_text(
                 "\n".join(
                     [
@@ -154,13 +177,15 @@ class PytestAllureRunnerService:
                         f"    api_url = {json.dumps(api_url, ensure_ascii=False)}",
                         f"    base_url = {json.dumps(str(job.env.baseUrl or ''), ensure_ascii=False)}",
                         f"    params = {json.dumps(dict(item.params or {}), ensure_ascii=False)}",
+                        f"    headers = {json.dumps(headers, ensure_ascii=False)}",
+                        f"    masked_headers = {json.dumps(masked_headers, ensure_ascii=False)}",
                         "    assert api_url",
                         "    full_url = api_url if api_url.startswith(('http://', 'https://')) else urljoin(base_url.rstrip('/') + '/', api_url.lstrip('/'))",
                         "    if method in ('GET', 'DELETE', 'HEAD', 'OPTIONS'):",
-                        "        response = requests.request(method=method, url=full_url, params=params, timeout=30)",
+                        "        response = requests.request(method=method, url=full_url, params=params, headers=headers, timeout=30)",
                         "    else:",
-                        "        response = requests.request(method=method, url=full_url, json=params, timeout=30)",
-                        "    allure.attach(json.dumps({'method': method, 'url': full_url, 'params': params}, ensure_ascii=False, indent=2), 'request', allure.attachment_type.JSON)",
+                        "        response = requests.request(method=method, url=full_url, json=params, headers=headers, timeout=30)",
+                        "    allure.attach(json.dumps({'method': method, 'url': full_url, 'params': params, 'headers': masked_headers}, ensure_ascii=False, indent=2), 'request', allure.attachment_type.JSON)",
                         "    allure.attach(response.text[:20000], 'response_body', allure.attachment_type.TEXT)",
                         "    assert 200 <= int(response.status_code) < 400",
                     ]
@@ -169,6 +194,33 @@ class PytestAllureRunnerService:
             )
             generated_cases.append(_GeneratedCase(case_run_id=item.caseRunId, test_file=test_file))
         return workspace, generated_cases
+
+    def _prepare_allure_metadata(self, *, job: JobPayload, allure_results_dir: Path) -> None:
+        allure_results_dir.mkdir(parents=True, exist_ok=True)
+        env_lines = [
+            f"baseUrl={job.env.baseUrl}",
+            f"runId={job.runId}",
+            f"jobId={job.jobId}",
+            f"timeoutSec={int(job.suiteConfig.timeoutSec)}",
+            f"retryCount={int(job.suiteConfig.retryCount)}",
+            f"host={platform.node() or 'unknown'}",
+            f"os={platform.system()} {platform.release()}".strip(),
+            f"python={platform.python_version()}",
+        ]
+        for key in sorted(job.env.variables.keys()):
+            env_lines.append(f"env.{key}={job.env.variables[key]}")
+        (allure_results_dir / "environment.properties").write_text("\n".join(env_lines) + "\n", encoding="utf-8")
+        executor_payload = {
+            "name": "AI Testing Platform",
+            "type": "pytest",
+            "buildName": f"Run {job.runId}",
+            "buildOrder": int(time.time()),
+            "reportName": f"Allure Report - {job.runId}",
+        }
+        (allure_results_dir / "executor.json").write_text(
+            json.dumps(executor_payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
 
     def _zip_allure_results(self, allure_results_dir: Path) -> Path | None:
         if not allure_results_dir.exists():

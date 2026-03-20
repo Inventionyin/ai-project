@@ -29,6 +29,7 @@ class TestCaseCreateRequest(BaseSchema):
     apiMethod: ApiMethodStr
     apiUrl: ApiUrlStr
     apiParams: dict[str, Any] = Field(default_factory=dict)
+    apiHeaders: dict[str, str] = Field(default_factory=dict)
 
 
 class TestCaseUpdateRequest(BaseSchema):
@@ -44,6 +45,7 @@ class TestCaseUpdateRequest(BaseSchema):
     apiMethod: ApiMethodStr | None = None
     apiUrl: ApiUrlStr | None = None
     apiParams: dict[str, Any] | None = None
+    apiHeaders: dict[str, str] | None = None
 
 
 class TestCasePutRequest(BaseSchema):
@@ -59,6 +61,7 @@ class TestCasePutRequest(BaseSchema):
     apiMethod: ApiMethodStr | None = None
     apiUrl: ApiUrlStr | None = None
     apiParams: dict[str, Any] | None = None
+    apiHeaders: dict[str, str] | None = None
 
 
 class TestCaseRestoreRequest(BaseSchema):
@@ -92,6 +95,7 @@ class TestCaseDetail(BaseSchema):
     apiMethod: ApiMethodStr | None = None
     apiUrl: ApiUrlStr | None = None
     apiParams: dict[str, Any] = Field(default_factory=dict)
+    apiHeaders: dict[str, str] = Field(default_factory=dict)
 
 
 class TestCaseVersionSchema(BaseSchema):
@@ -118,6 +122,7 @@ class TestCaseListItem(BaseSchema):
     apiMethod: ApiMethodStr | None = None
     apiUrl: ApiUrlStr | None = None
     apiParams: dict[str, Any] = Field(default_factory=dict)
+    apiHeaders: dict[str, str] = Field(default_factory=dict)
     lastRun: CaseRunStatus | None = None
     updatedAt: UnixTs
 

@@ -71,6 +71,7 @@ type TestCaseListItem = {
   apiMethod?: string | null
   apiUrl?: string | null
   apiParams?: Record<string, unknown>
+  apiHeaders?: Record<string, string>
   ownerId?: string | null
 }
 
@@ -85,6 +86,11 @@ type TestCaseDetail = {
   tags: string[]
   ownerId?: string | null
   contentMd: string
+  feature?: string | null
+  apiMethod?: string | null
+  apiUrl?: string | null
+  apiParams?: Record<string, unknown>
+  apiHeaders?: Record<string, string>
 }
 
 type CreateCasePayload = {
@@ -99,6 +105,7 @@ type CreateCasePayload = {
   apiMethod?: string
   apiUrl?: string
   apiParams: Record<string, unknown>
+  apiHeaders: Record<string, string>
 }
 
 type EditCasePayload = {
@@ -484,7 +491,8 @@ async function saveCreateCase(payload: CreateCasePayload) {
         feature: payload.feature || null,
         apiMethod: payload.apiMethod || null,
         apiUrl: payload.apiUrl || null,
-        apiParams: payload.apiParams || {}
+        apiParams: payload.apiParams || {},
+        apiHeaders: payload.apiHeaders || {}
       })
     })
     const result = await response.json() as ApiResponse<TestCaseListItem>
