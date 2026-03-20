@@ -106,7 +106,7 @@ const rowHeight = '56.67px'
 <template>
   <div class="w-full overflow-x-auto">
     <div class="min-w-[1480px]">
-      <div class="grid grid-cols-[45px_160px_minmax(160px,260px)_70px_70px_70px_220px_90px_260px_90px_80px_110px_150px] bg-[rgba(236,236,240,0.3)] border-b border-black/10">
+      <div class="grid grid-cols-[45px_160px_minmax(160px,260px)_70px_70px_70px_220px_90px_260px_90px_80px_110px_150px] bg-[rgba(236,236,240,0.3)] border-x border-b border-black/10 divide-x divide-black/10">
         <div class="flex h-[56.33px] items-center justify-center">
           <input
             type="checkbox"
@@ -135,7 +135,7 @@ const rowHeight = '56.67px'
         <div
           v-for="(row, index) in rows"
           :key="row.id"
-          class="grid grid-cols-[45px_160px_minmax(160px,260px)_70px_70px_70px_220px_90px_260px_90px_80px_110px_150px] border-b border-black/10 last:border-b-0"
+          class="grid grid-cols-[45px_160px_minmax(160px,260px)_70px_70px_70px_220px_90px_260px_90px_80px_110px_150px] border-x border-b border-black/10 divide-x divide-black/10 last:border-b-0"
           :style="{ height: rowHeight }"
         >
           <div class="relative h-full">
@@ -146,6 +146,12 @@ const rowHeight = '56.67px'
               aria-label="Select row"
               @change="toggleRowSelection(row.id)"
             />
+          </div>
+
+          <div class="relative h-full">
+            <div class="absolute left-[12px] right-[12px] top-1/2 -translate-y-1/2 truncate text-[12px] leading-[16px] text-[#717182]">
+              {{ row.module || '-' }}
+            </div>
           </div>
 
           <div class="relative h-full">
@@ -177,12 +183,6 @@ const rowHeight = '56.67px'
           <div class="relative h-full">
             <div class="absolute left-[12px] top-1/2 -translate-y-1/2 text-[12px] font-medium leading-[16px]" :style="{ color: statusClass(row.status) }">
               {{ row.status }}
-            </div>
-          </div>
-
-          <div class="relative h-full">
-            <div class="absolute left-[12px] right-[12px] top-1/2 -translate-y-1/2 truncate text-[12px] leading-[16px] text-[#717182]">
-              {{ row.module || '-' }}
             </div>
           </div>
 
@@ -228,8 +228,8 @@ const rowHeight = '56.67px'
             </div>
           </div>
 
-          <div class="relative h-full">
-            <div class="absolute left-[12px] right-[12px] top-1/2 flex -translate-y-1/2 items-center gap-[12px]">
+          <div class="flex h-full items-center justify-center">
+            <div class="flex items-center gap-[12px]">
               <button
                 type="button"
                 class="text-[12px] font-medium leading-[16px] text-[#155DFC] hover:underline"
