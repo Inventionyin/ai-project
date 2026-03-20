@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any
 
 from pydantic import Field
 
@@ -11,6 +11,9 @@ from app.schemas.types import IdStr, TitleStr, UnixTs
 TestCaseVersionStr = Annotated[str, Field(min_length=1, max_length=32, pattern=r"^(?:v?1(?:\.\d+)?)$")]
 
 TagStr = Annotated[str, Field(min_length=1, max_length=64)]
+FeatureStr = Annotated[str, Field(min_length=1, max_length=128)]
+ApiMethodStr = Annotated[str, Field(min_length=1, max_length=16)]
+ApiUrlStr = Annotated[str, Field(min_length=1, max_length=1024)]
 
 
 class TestCaseCreateRequest(BaseSchema):
@@ -22,6 +25,10 @@ class TestCaseCreateRequest(BaseSchema):
     tags: list[TagStr] = Field(default_factory=list, max_length=50)
     contentMd: str = Field(min_length=1)
     ownerId: IdStr | None = None
+    feature: FeatureStr | None = None
+    apiMethod: ApiMethodStr | None = None
+    apiUrl: ApiUrlStr | None = None
+    apiParams: dict[str, Any] = Field(default_factory=dict)
 
 
 class TestCaseUpdateRequest(BaseSchema):
@@ -33,6 +40,10 @@ class TestCaseUpdateRequest(BaseSchema):
     tags: list[TagStr] | None = Field(default=None, max_length=50)
     contentMd: str | None = Field(default=None, min_length=1)
     ownerId: IdStr | None = None
+    feature: FeatureStr | None = None
+    apiMethod: ApiMethodStr | None = None
+    apiUrl: ApiUrlStr | None = None
+    apiParams: dict[str, Any] | None = None
 
 
 class TestCasePutRequest(BaseSchema):
@@ -44,6 +55,10 @@ class TestCasePutRequest(BaseSchema):
     tags: list[TagStr] = Field(default_factory=list, max_length=50)
     contentMd: str = Field(min_length=1)
     ownerId: IdStr | None = None
+    feature: FeatureStr | None = None
+    apiMethod: ApiMethodStr | None = None
+    apiUrl: ApiUrlStr | None = None
+    apiParams: dict[str, Any] | None = None
 
 
 class TestCaseRestoreRequest(BaseSchema):
@@ -73,6 +88,10 @@ class TestCaseDetail(BaseSchema):
     ownerName: str | None = None
     version: TestCaseVersionStr
     contentMd: str = Field(min_length=1)
+    feature: FeatureStr | None = None
+    apiMethod: ApiMethodStr | None = None
+    apiUrl: ApiUrlStr | None = None
+    apiParams: dict[str, Any] = Field(default_factory=dict)
 
 
 class TestCaseVersionSchema(BaseSchema):
@@ -95,6 +114,9 @@ class TestCaseListItem(BaseSchema):
     ownerId: IdStr | None = None
     ownerName: str | None = None
     version: TestCaseVersionStr
+    feature: FeatureStr | None = None
+    apiMethod: ApiMethodStr | None = None
+    apiUrl: ApiUrlStr | None = None
     lastRun: CaseRunStatus | None = None
     updatedAt: UnixTs
 

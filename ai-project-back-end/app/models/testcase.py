@@ -26,6 +26,12 @@ class TestCase(Base, TimestampMixin):
 
     content_md: Mapped[str] = mapped_column(Text, nullable=False, default="")
     tags_json: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    feature: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    story: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    api_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    api_method: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    ai_meta_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    generated_by_ai: Mapped[bool] = mapped_column(nullable=False, default=False)
 
     owner_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True, index=True)
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True, index=True)

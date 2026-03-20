@@ -1,0 +1,321 @@
+{
+  "info": {
+    "_postman_id": "a2b7e7f8-8b56-4d90-9a54-2b2fbf2a1001",
+    "name": "AI Testing Platform - 绑定关联校验",
+    "description": "校验用例绑定是否关联接口目标与数据集。含接口关联完整流程，数据集关联为可选步骤。",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8000" },
+    { "key": "username", "value": "your_user" },
+    { "key": "password", "value": "your_password" },
+    { "key": "token", "value": "" },
+    { "key": "userId", "value": "" },
+    { "key": "projectId", "value": "" },
+    { "key": "testcaseId", "value": "" },
+    { "key": "bindingId", "value": "" },
+    { "key": "bindingVersion", "value": "1" },
+    { "key": "apiTargetId", "value": "" },
+    { "key": "datasetIdPreset", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "01 登录",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/api/auth/login",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"{{password}}\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "const res = pm.response.json();",
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "pm.test('code=0', () => pm.expect(res.code).to.eql(0));",
+              "pm.collectionVariables.set('token', res.data.accessToken);"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 获取当前用户",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token}}" }
+        ],
+        "url": "{{baseUrl}}/api/auth/me"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "const res = pm.response.json();",
+              "pm.test('code=0', () => pm.expect(res.code).to.eql(0));",
+              "pm.collectionVariables.set('userId', res.data.userId);"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 创建项目",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/api/projects",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"关联校验项目\",\n  \"ownerId\": \"{{userId}}\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "const res = pm.response.json();",
+              "pm.test('code=0', () => pm.expect(res.code).to.eql(0));",
+              "pm.collectionVariables.set('projectId', res.data.id);"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "04 创建测试用例",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/api/testcases",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"projectId\": \"{{projectId}}\",\n  \"title\": \"关联校验用例\",\n  \"type\": \"API\",\n  \"priority\": \"P1\",\n  \"status\": \"DRAFT\",\n  \"contentMd\": \"用于绑定关联校验\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "const res = pm.response.json();",
+              "pm.test('code=0', () => pm.expect(res.code).to.eql(0));",
+              "pm.collectionVariables.set('testcaseId', res.data.id);"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "05 创建初始绑定(无接口/无数据集)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/api/testcases/{{testcaseId}}/bindings",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"binding-association-check\",\n  \"datasetId\": null,\n  \"apiTargetId\": null,\n  \"params\": {},\n  \"priority\": 100,\n  \"enabled\": true\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "const res = pm.response.json();",
+              "pm.test('code=0', () => pm.expect(res.code).to.eql(0));",
+              "pm.collectionVariables.set('bindingId', res.data.id);",
+              "pm.collectionVariables.set('bindingVersion', String(res.data.version || 1));"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "06 创建接口目标",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/api/api-targets",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"projectId\": \"{{projectId}}\",\n  \"name\": \"关联校验目标\",\n  \"baseUrl\": \"https://api.example.com\",\n  \"defaultMethod\": \"POST\",\n  \"defaultPath\": \"/demo\",\n  \"headers\": {},\n  \"authRef\": {},\n  \"timeoutMs\": 10000,\n  \"enabled\": true\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "const res = pm.response.json();",
+              "pm.test('code=0', () => pm.expect(res.code).to.eql(0));",
+              "pm.collectionVariables.set('apiTargetId', res.data.id);"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "07 绑定关联接口目标",
+      "request": {
+        "method": "PUT",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/api/testcase-bindings/{{bindingId}}",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"binding-association-check\",\n  \"datasetId\": null,\n  \"apiTargetId\": \"{{apiTargetId}}\",\n  \"params\": {},\n  \"priority\": 100,\n  \"enabled\": true,\n  \"version\": {{bindingVersion}}\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "const res = pm.response.json();",
+              "pm.test('code=0', () => pm.expect(res.code).to.eql(0));",
+              "pm.collectionVariables.set('bindingVersion', String(res.data.version));"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "08 校验绑定状态(应有接口/无数据集)",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token}}" }
+        ],
+        "url": "{{baseUrl}}/api/testcases/{{testcaseId}}/bindings?page=1&pageSize=50"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "const res = pm.response.json();",
+              "pm.test('code=0', () => pm.expect(res.code).to.eql(0));",
+              "const rows = (res.data && res.data.items) || [];",
+              "const id = pm.collectionVariables.get('bindingId');",
+              "const row = rows.find(x => x.id === id);",
+              "pm.test('目标绑定存在', () => pm.expect(!!row).to.eql(true));",
+              "pm.test('已关联接口目标', () => pm.expect(!!row.apiTargetId).to.eql(true));",
+              "pm.test('仍未关联数据集', () => pm.expect(row.datasetId === null || row.datasetId === '').to.eql(true));"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "09 可选: 绑定关联数据集(需预置datasetIdPreset)",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "exec": [
+              "const ds = pm.collectionVariables.get('datasetIdPreset');",
+              "if (!ds) {",
+              "  postman.setNextRequest('10 校验最终绑定');",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "const ds = pm.collectionVariables.get('datasetIdPreset');",
+              "if (!ds) {",
+              "  pm.test('未提供datasetIdPreset，已跳过', () => pm.expect(true).to.eql(true));",
+              "} else {",
+              "  const res = pm.response.json();",
+              "  pm.test('code=0', () => pm.expect(res.code).to.eql(0));",
+              "  pm.collectionVariables.set('bindingVersion', String(res.data.version));",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "PUT",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/api/testcase-bindings/{{bindingId}}",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"binding-association-check\",\n  \"datasetId\": \"{{datasetIdPreset}}\",\n  \"apiTargetId\": \"{{apiTargetId}}\",\n  \"params\": {},\n  \"priority\": 100,\n  \"enabled\": true,\n  \"version\": {{bindingVersion}}\n}"
+        }
+      }
+    },
+    {
+      "name": "10 校验最终绑定",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token}}" }
+        ],
+        "url": "{{baseUrl}}/api/testcases/{{testcaseId}}/bindings?page=1&pageSize=50"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "const res = pm.response.json();",
+              "pm.test('code=0', () => pm.expect(res.code).to.eql(0));",
+              "const rows = (res.data && res.data.items) || [];",
+              "const id = pm.collectionVariables.get('bindingId');",
+              "const row = rows.find(x => x.id === id);",
+              "pm.test('目标绑定存在', () => pm.expect(!!row).to.eql(true));",
+              "pm.test('接口目标仍已关联', () => pm.expect(!!row.apiTargetId).to.eql(true));",
+              "const ds = pm.collectionVariables.get('datasetIdPreset');",
+              "if (ds) {",
+              "  pm.test('数据集已关联', () => pm.expect(row.datasetId).to.eql(ds));",
+              "} else {",
+              "  pm.test('未配置datasetIdPreset时数据集可为空', () => pm.expect(row.datasetId === null || row.datasetId === '').to.eql(true));",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    }
+  ]
+}

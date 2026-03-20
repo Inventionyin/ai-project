@@ -43,6 +43,20 @@ def _format_version(minor: int) -> str:
     return f"v1.{minor}"
 
 
+def _normalize_optional_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    return cleaned or None
+
+
+def _merge_api_params(meta_json: dict | None, api_params: dict | None) -> dict:
+    base = meta_json.copy() if isinstance(meta_json, dict) else {}
+    if api_params is not None:
+        base["apiParams"] = api_params
+    return base
+
+
 async def _check_project_permission(
     db: AsyncSession,
     user: CurrentUser,
@@ -103,6 +117,10 @@ async def create_testcase(
         status=payload.status,
         tags_json=payload.tags,
         content_md=payload.contentMd,
+        feature=_normalize_optional_text(payload.feature),
+        api_url=_normalize_optional_text(payload.apiUrl),
+        api_method=_normalize_optional_text(payload.apiMethod.upper() if payload.apiMethod else None),
+        ai_meta_json=_merge_api_params({}, payload.apiParams),
         created_by=user.id,
         owner_id=owner_id,
         version=0,
@@ -216,6 +234,14 @@ async def update_testcase(
     testcase.status = payload.status
     testcase.tags_json = payload.tags
     testcase.content_md = payload.contentMd
+    if payload.feature is not None:
+        testcase.feature = _normalize_optional_text(payload.feature)
+    if payload.apiUrl is not None:
+        testcase.api_url = _normalize_optional_text(payload.apiUrl)
+    if payload.apiMethod is not None:
+        testcase.api_method = _normalize_optional_text(payload.apiMethod.upper())
+    if payload.apiParams is not None:
+        testcase.ai_meta_json = _merge_api_params(testcase.ai_meta_json, payload.apiParams)
     if payload.ownerId is not None:
         testcase.owner_id = uuid.UUID(payload.ownerId)
 

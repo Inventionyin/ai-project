@@ -24,6 +24,10 @@ const emit = defineEmits<{
     tags: string[]
     contentMd: string
     ownerId: string
+    feature?: string
+    apiMethod?: string
+    apiUrl?: string
+    apiParams: Record<string, unknown>
   }): void
 }>()
 
@@ -47,6 +51,10 @@ const status = ref<CaseStatus>('DRAFT')
 const tagsInput = ref('')
 const contentMd = ref('')
 const ownerId = ref('')
+const feature = ref('')
+const apiMethod = ref('')
+const apiUrl = ref('')
+const apiParamsInput = ref('')
 
 function resetForm() {
   title.value = ''
@@ -56,11 +64,19 @@ function resetForm() {
   tagsInput.value = ''
   contentMd.value = ''
   ownerId.value = props.defaultOwnerId
+  feature.value = ''
+  apiMethod.value = ''
+  apiUrl.value = ''
+  apiParamsInput.value = ''
 }
 
 function handleSave() {
   const cleanTitle = title.value.trim()
   const cleanContent = contentMd.value.trim()
+  const cleanFeature = feature.value.trim()
+  const cleanApiMethod = apiMethod.value.trim()
+  const cleanApiUrl = apiUrl.value.trim()
+  const rawApiParams = apiParamsInput.value.trim()
   if (!cleanTitle) {
     window.alert('请输入用例标题')
     return
@@ -69,6 +85,20 @@ function handleSave() {
     window.alert('请输入用例内容')
     return
   }
+  let parsedApiParams: Record<string, unknown> = {}
+  if (rawApiParams) {
+    try {
+      const parsed = JSON.parse(rawApiParams) as unknown
+      if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
+        window.alert('接口参数需为合法JSON对象')
+        return
+      }
+      parsedApiParams = parsed as Record<string, unknown>
+    } catch {
+      window.alert('接口参数需为合法JSON对象')
+      return
+    }
+  }
   emit('save', {
     title: cleanTitle,
     type: type.value,
@@ -76,7 +106,11 @@ function handleSave() {
     status: status.value,
     tags: tagsInput.value.split(',').map((item) => item.trim()).filter(Boolean),
     contentMd: cleanContent,
-    ownerId: ownerId.value
+    ownerId: ownerId.value,
+    feature: cleanFeature || undefined,
+    apiMethod: cleanApiMethod || undefined,
+    apiUrl: cleanApiUrl || undefined,
+    apiParams: parsedApiParams
   })
 }
 
@@ -100,10 +134,10 @@ watch(
 </script>
 
 <template>
-  <div v-if="isOpen" class="fixed inset-0 z-50 flex items-center justify-center">
+  <div v-if="isOpen" class="fixed inset-0 z-50">
     <button class="absolute inset-0 bg-black/40" type="button" aria-label="Close" @click="emit('close')" />
 
-    <div class="relative max-h-[calc(100vh-32px)] w-full max-w-[calc(100vw-32px)] overflow-auto rounded-[16px] bg-white px-[24px] pt-[24px] shadow-[0px_25px_50px_-12px_rgba(0,0,0,0.25)] sm:h-[424px] sm:w-[512px] sm:max-w-[512px]">
+    <div class="absolute inset-y-0 right-0 z-10 flex h-full w-full max-w-[560px] flex-col bg-white px-[24px] pb-[24px] pt-[24px] shadow-[-10px_0_30px_-12px_rgba(0,0,0,0.3)]">
       <div class="flex items-center justify-between">
         <div class="h-[20px] w-[56px]">
           <div class="text-[14px] font-semibold leading-[20px] text-[#0A0A0A]">新建用例</div>
@@ -113,100 +147,141 @@ watch(
         </button>
       </div>
 
-      <div class="mt-[20px] flex flex-col gap-[16px]">
-        <div class="flex flex-col gap-[6px]">
-          <div class="text-[12px] font-medium leading-[16px] text-[#0A0A0A]">
-            标题 <span class="text-[#FB2C36]">*</span>
-          </div>
-          <input
-            v-model="title"
-            class="h-[36px] w-full rounded-[10px] border border-black/10 bg-white px-[12px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
-            type="text"
-            placeholder="请输入用例标题"
-          />
-        </div>
-
-        <div class="grid grid-cols-1 gap-x-[16px] gap-y-[16px] sm:grid-cols-2">
+      <div class="mt-[20px] flex-1 overflow-auto">
+        <div class="flex flex-col gap-[16px] pb-[4px]">
           <div class="flex flex-col gap-[6px]">
             <div class="text-[12px] font-medium leading-[16px] text-[#0A0A0A]">
-              类型 <span class="text-[#FB2C36]">*</span>
+              标题 <span class="text-[#FB2C36]">*</span>
             </div>
-            <select
-              v-model="type"
+            <input
+              v-model="title"
               class="h-[36px] w-full rounded-[10px] border border-black/10 bg-white px-[12px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
-            >
-              <option v-for="item in typeOptions" :key="item.value" :value="item.value">
-                {{ item.label }}
-              </option>
-            </select>
+              type="text"
+              placeholder="请输入用例标题"
+            />
           </div>
 
-          <div class="flex flex-col gap-[6px]">
-            <div class="text-[12px] font-medium leading-[16px] text-[#0A0A0A]">
-              优先级 <span class="text-[#FB2C36]">*</span>
+          <div class="grid grid-cols-1 gap-x-[16px] gap-y-[16px] sm:grid-cols-2">
+            <div class="flex flex-col gap-[6px]">
+              <div class="text-[12px] font-medium leading-[16px] text-[#0A0A0A]">
+                类型 <span class="text-[#FB2C36]">*</span>
+              </div>
+              <select
+                v-model="type"
+                class="h-[36px] w-full rounded-[10px] border border-black/10 bg-white px-[12px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
+              >
+                <option v-for="item in typeOptions" :key="item.value" :value="item.value">
+                  {{ item.label }}
+                </option>
+              </select>
             </div>
-            <select
-              v-model="priority"
-              class="h-[36px] w-full rounded-[10px] border border-black/10 bg-white px-[12px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
-            >
-              <option v-for="item in priorityOptions" :key="item" :value="item">
-                {{ item }}
-              </option>
-            </select>
-          </div>
 
-          <div class="flex flex-col gap-[6px]">
-            <div class="text-[12px] font-medium leading-[16px] text-[#0A0A0A]">
-              状态 <span class="text-[#FB2C36]">*</span>
+            <div class="flex flex-col gap-[6px]">
+              <div class="text-[12px] font-medium leading-[16px] text-[#0A0A0A]">
+                优先级 <span class="text-[#FB2C36]">*</span>
+              </div>
+              <select
+                v-model="priority"
+                class="h-[36px] w-full rounded-[10px] border border-black/10 bg-white px-[12px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
+              >
+                <option v-for="item in priorityOptions" :key="item" :value="item">
+                  {{ item }}
+                </option>
+              </select>
             </div>
-            <select
-              v-model="status"
-              class="h-[36px] w-full rounded-[10px] border border-black/10 bg-white px-[12px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
-            >
-              <option v-for="item in statusOptions" :key="item.value" :value="item.value">
-                {{ item.label }}
-              </option>
-            </select>
+
+            <div class="flex flex-col gap-[6px]">
+              <div class="text-[12px] font-medium leading-[16px] text-[#0A0A0A]">
+                状态 <span class="text-[#FB2C36]">*</span>
+              </div>
+              <select
+                v-model="status"
+                class="h-[36px] w-full rounded-[10px] border border-black/10 bg-white px-[12px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
+              >
+                <option v-for="item in statusOptions" :key="item.value" :value="item.value">
+                  {{ item.label }}
+                </option>
+              </select>
+            </div>
+
+            <div class="flex flex-col gap-[6px]">
+              <div class="relative h-[16px] w-full">
+                <img :src="modalOwnerIcon" alt="" class="absolute left-0 top-[2.5px] h-[11px] w-[11px]" />
+                <div class="absolute left-[15px] top-0 text-[12px] font-medium leading-[16px] text-[#0A0A0A]">维护人</div>
+              </div>
+              <select
+                v-model="ownerId"
+                class="h-[36px] w-full rounded-[10px] border border-black/10 bg-white px-[12px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
+              >
+                <option v-for="item in ownerOptions" :key="item.id" :value="item.id">
+                  {{ item.username }}
+                </option>
+              </select>
+            </div>
           </div>
 
           <div class="flex flex-col gap-[6px]">
             <div class="relative h-[16px] w-full">
-              <img :src="modalOwnerIcon" alt="" class="absolute left-0 top-[2.5px] h-[11px] w-[11px]" />
-              <div class="absolute left-[15px] top-0 text-[12px] font-medium leading-[16px] text-[#0A0A0A]">维护人</div>
+              <img :src="modalTagsIcon" alt="" class="absolute left-0 top-[2.5px] h-[11px] w-[11px]" />
+              <div class="absolute left-[15px] top-0 text-[12px] font-medium leading-[16px] text-[#0A0A0A]">标签</div>
             </div>
-            <select
-              v-model="ownerId"
+            <input
+              v-model="tagsInput"
               class="h-[36px] w-full rounded-[10px] border border-black/10 bg-white px-[12px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
-            >
-              <option v-for="item in ownerOptions" :key="item.id" :value="item.id">
-                {{ item.username }}
-              </option>
-            </select>
+              type="text"
+              placeholder="多个标签用英文逗号分隔，如 smoke, order"
+            />
           </div>
-        </div>
 
-        <div class="flex flex-col gap-[6px]">
-          <div class="relative h-[16px] w-full">
-            <img :src="modalTagsIcon" alt="" class="absolute left-0 top-[2.5px] h-[11px] w-[11px]" />
-            <div class="absolute left-[15px] top-0 text-[12px] font-medium leading-[16px] text-[#0A0A0A]">标签</div>
+          <div class="flex flex-col gap-[6px]">
+            <div class="text-[12px] font-medium leading-[16px] text-[#0A0A0A]">
+              用例内容 <span class="text-[#FB2C36]">*</span>
+            </div>
+            <textarea
+              v-model="contentMd"
+              class="h-[88px] w-full resize-none rounded-[10px] border border-black/10 bg-white px-[12px] py-[8px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
+              placeholder="请输入用例步骤、预期结果等内容"
+            />
           </div>
-          <input
-            v-model="tagsInput"
-            class="h-[36px] w-full rounded-[10px] border border-black/10 bg-white px-[12px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
-            type="text"
-            placeholder="多个标签用英文逗号分隔，如 smoke, order"
-          />
-        </div>
 
-        <div class="flex flex-col gap-[6px]">
-          <div class="text-[12px] font-medium leading-[16px] text-[#0A0A0A]">
-            用例内容 <span class="text-[#FB2C36]">*</span>
+          <div class="grid grid-cols-1 gap-x-[16px] gap-y-[16px] sm:grid-cols-2">
+            <div class="flex flex-col gap-[6px]">
+              <div class="text-[12px] font-medium leading-[16px] text-[#0A0A0A]">功能模块</div>
+              <input
+                v-model="feature"
+                class="h-[36px] w-full rounded-[10px] border border-black/10 bg-white px-[12px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
+                type="text"
+                placeholder="请输入用例所属模块"
+              />
+            </div>
+            <div class="flex flex-col gap-[6px]">
+              <div class="text-[12px] font-medium leading-[16px] text-[#0A0A0A]">调用方式</div>
+              <input
+                v-model="apiMethod"
+                class="h-[36px] w-full rounded-[10px] border border-black/10 bg-white px-[12px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
+                type="text"
+                placeholder="请输入调用方式,例如：post、get"
+              />
+            </div>
+            <div class="flex flex-col gap-[6px] sm:col-span-2">
+              <div class="text-[12px] font-medium leading-[16px] text-[#0A0A0A]">interfaceUrl</div>
+              <input
+                v-model="apiUrl"
+                class="h-[36px] w-full rounded-[10px] border border-black/10 bg-white px-[12px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
+                type="text"
+                placeholder="请输入接口url"
+              />
+            </div>
           </div>
-          <textarea
-            v-model="contentMd"
-            class="h-[88px] w-full resize-none rounded-[10px] border border-black/10 bg-white px-[12px] py-[8px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
-            placeholder="请输入用例步骤、预期结果等内容"
-          />
+
+          <div class="flex flex-col gap-[6px]">
+            <div class="text-[12px] font-medium leading-[16px] text-[#0A0A0A]">接口参数</div>
+            <textarea
+              v-model="apiParamsInput"
+              class="h-[88px] w-full resize-none rounded-[10px] border border-black/10 bg-white px-[12px] py-[8px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
+              placeholder="请输入接口参数，例如：{&quot;userId&quot;:&quot;123&quot;,&quot;page&quot;:1}"
+            />
+          </div>
         </div>
       </div>
 

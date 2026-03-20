@@ -45,6 +45,15 @@ def _format_version(minor: int) -> str:
     return f"v1.{minor}"
 
 
+def _extract_api_params(ai_meta_json: dict | None) -> dict:
+    if not isinstance(ai_meta_json, dict):
+        return {}
+    value = ai_meta_json.get("apiParams")
+    if not isinstance(value, dict):
+        return {}
+    return value
+
+
 @router.post("/ai-import/jobs", response_model=ApiResponse[AiImportCreateJobData])
 async def create_ai_import_job_(
     payload: AiImportCreateJobRequest,
@@ -192,6 +201,10 @@ async def create(
             ownerId=str(testcase.owner_id) if testcase.owner_id else None,
             version=_format_version(testcase.version),
             contentMd=testcase.content_md,
+            feature=testcase.feature,
+            apiMethod=testcase.api_method,
+            apiUrl=testcase.api_url,
+            apiParams=_extract_api_params(testcase.ai_meta_json),
         ),
         requestId=request_id,
     )
@@ -246,6 +259,9 @@ async def list_(
                 ownerId=str(tc.owner_id) if tc.owner_id else None,
                 ownerName=None,
                 version=_format_version(tc.version),
+                feature=tc.feature,
+                apiMethod=tc.api_method,
+                apiUrl=tc.api_url,
                 lastRun=latest_case_run.status if latest_case_run else None,
                 updatedAt=to_unix_ts(tc.updated_at),
             )
@@ -296,6 +312,10 @@ async def get(
             ownerName=owner_name,
             version=_format_version(testcase.version),
             contentMd=testcase.content_md,
+            feature=testcase.feature,
+            apiMethod=testcase.api_method,
+            apiUrl=testcase.api_url,
+            apiParams=_extract_api_params(testcase.ai_meta_json),
         ),
         requestId=request_id,
     )
@@ -328,6 +348,10 @@ async def update(
             ownerId=str(testcase.owner_id) if testcase.owner_id else None,
             version=_format_version(testcase.version),
             contentMd=testcase.content_md,
+            feature=testcase.feature,
+            apiMethod=testcase.api_method,
+            apiUrl=testcase.api_url,
+            apiParams=_extract_api_params(testcase.ai_meta_json),
         ),
         requestId=request_id,
     )
@@ -414,6 +438,10 @@ async def restore(
             ownerId=str(testcase.owner_id) if testcase.owner_id else None,
             version=_format_version(testcase.version),
             contentMd=testcase.content_md,
+            feature=testcase.feature,
+            apiMethod=testcase.api_method,
+            apiUrl=testcase.api_url,
+            apiParams=_extract_api_params(testcase.ai_meta_json),
         ),
         requestId=request_id,
     )

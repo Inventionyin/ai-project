@@ -95,6 +95,10 @@ type CreateCasePayload = {
   tags: string[]
   contentMd: string
   ownerId: string
+  feature?: string
+  apiMethod?: string
+  apiUrl?: string
+  apiParams: Record<string, unknown>
 }
 
 type EditCasePayload = {
@@ -453,7 +457,11 @@ async function saveCreateCase(payload: CreateCasePayload) {
         status: payload.status,
         tags: payload.tags,
         contentMd: payload.contentMd,
-        ownerId: payload.ownerId || null
+        ownerId: payload.ownerId || null,
+        feature: payload.feature || null,
+        apiMethod: payload.apiMethod || null,
+        apiUrl: payload.apiUrl || null,
+        apiParams: payload.apiParams || {}
       })
     })
     const result = await response.json() as ApiResponse<TestCaseListItem>
