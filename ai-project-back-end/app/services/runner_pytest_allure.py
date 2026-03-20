@@ -15,6 +15,7 @@ from app.models.enums import ArtifactType, CaseRunStatus, JobStatus
 from app.schemas.run import ArtifactIndex, CaseRunMetrics, CaseRunResult
 from app.schemas.worker import JobPayload
 
+_ALLURE_RUNS_ROOT = Path("D:/ai-project/allure-data/runs")
 _SENSITIVE_HEADER_KEYS = {
     "authorization",
     "proxy-authorization",
@@ -59,6 +60,22 @@ class _CaseExecutionOutput:
     error_message: str
 
 
+@dataclass(frozen=True, slots=True)
+class AllureGenerateOutput:
+    report_dir: Path | None
+    stdout: str
+    stderr: str
+    error_code: str | None
+
+
+def resolve_run_allure_paths(run_id: str) -> tuple[Path, Path]:
+    run_key = str(run_id).strip()
+    if not run_key:
+        raise ValueError("run_id_empty")
+    run_root = _ALLURE_RUNS_ROOT / run_key
+    return run_root / "allure-results", run_root / "allure-report"
+
+
 class PytestAllureRunnerService:
     def __init__(
         self,
@@ -73,7 +90,7 @@ class PytestAllureRunnerService:
 
     def execute(self, job: JobPayload) -> PytestAllureExecutionOutput:
         workspace, generated_cases = self._prepare_workspace(job)
-        allure_results_dir = workspace / "allure-results"
+        allure_results_dir, allure_report_dir = resolve_run_allure_paths(job.runId)
         self._prepare_allure_metadata(job=job, allure_results_dir=allure_results_dir)
         execution_log = workspace / "execution.log"
         timeout_sec = max(int(job.suiteConfig.timeoutSec), 1)
@@ -107,6 +124,14 @@ class PytestAllureRunnerService:
                     stderr=(exc.stderr or ""),
                 )
                 error_message = "pytest_timeout"
+            except FileNotFoundError:
+                completed = subprocess.CompletedProcess(
+                    args=pytest_cmd,
+                    returncode=1,
+                    stdout="",
+                    stderr=f"{self._python_executable} not found",
+                )
+                error_message = "pytest_cli_not_found"
             case_end = int(time.time())
             case_output = _CaseExecutionOutput(
                 case_run_id=generated.case_run_id,
@@ -127,14 +152,36 @@ class PytestAllureRunnerService:
                     ]
                 ).strip()
             )
-        report_dir = self._generate_allure_report(workspace, allure_results_dir, timeout_sec=timeout_sec)
+        report_output = self._generate_allure_report(
+            allure_results_dir=allure_results_dir,
+            report_dir=allure_report_dir,
+            timeout_sec=timeout_sec,
+        )
+        if report_output.error_code:
+            logs.append(
+                "\n".join(
+                    [
+                        f"[allureGenerate] errorCode={report_output.error_code}",
+                        report_output.stdout,
+                        report_output.stderr,
+                    ]
+                ).strip()
+            )
         execution_log.write_text("\n\n".join(logs).strip(), encoding="utf-8")
         allure_zip = self._zip_allure_results(allure_results_dir)
-        allure_report_zip = self._zip_allure_report(report_dir)
+        allure_report_zip = self._zip_allure_report(report_output.report_dir)
         artifacts = self._build_artifacts(execution_log, allure_zip, allure_report_zip)
         results = self._build_case_results(case_outputs=case_outputs, artifacts=artifacts)
         job_status = JobStatus.DONE if all(item.return_code == 0 for item in case_outputs) else JobStatus.FAILED
         return PytestAllureExecutionOutput(job_status=job_status, results=results, workspace=workspace)
+
+    def generate_report_for_run(self, run_id: str, *, timeout_sec: int) -> AllureGenerateOutput:
+        allure_results_dir, allure_report_dir = resolve_run_allure_paths(run_id)
+        return self._generate_allure_report(
+            allure_results_dir=allure_results_dir,
+            report_dir=allure_report_dir,
+            timeout_sec=max(int(timeout_sec), 1),
+        )
 
     def _prepare_workspace(self, job: JobPayload) -> tuple[Path, list[_GeneratedCase]]:
         root = self._workspace_root or Path(tempfile.gettempdir()) / "ai-test-platform-runners"
@@ -182,15 +229,26 @@ class PytestAllureRunnerService:
                         f"    expected_result = {json.dumps(str(item.expectedResult or '').strip(), ensure_ascii=False)}",
                         "    assert api_url",
                         "    full_url = api_url if api_url.startswith(('http://', 'https://')) else urljoin(base_url.rstrip('/') + '/', api_url.lstrip('/'))",
-                        "    if method in ('GET', 'DELETE', 'HEAD', 'OPTIONS'):",
-                        "        response = requests.request(method=method, url=full_url, params=params, headers=headers, timeout=30)",
-                        "    else:",
-                        "        response = requests.request(method=method, url=full_url, json=params, headers=headers, timeout=30)",
                         "    allure.attach(json.dumps({'method': method, 'url': full_url, 'params': params, 'headers': masked_headers}, ensure_ascii=False, indent=2), 'request', allure.attachment_type.JSON)",
+                        "    try:",
+                        "        if method in ('GET', 'DELETE', 'HEAD', 'OPTIONS'):",
+                        "            response = requests.request(method=method, url=full_url, params=params, headers=headers, timeout=30)",
+                        "        else:",
+                        "            response = requests.request(method=method, url=full_url, json=params, headers=headers, timeout=30)",
+                        "    except requests.exceptions.Timeout as exc:",
+                        "        allure.attach(str(exc), 'request_error', allure.attachment_type.TEXT)",
+                        "        raise AssertionError('REQUEST_TIMEOUT') from exc",
+                        "    except requests.exceptions.ConnectionError as exc:",
+                        "        allure.attach(str(exc), 'request_error', allure.attachment_type.TEXT)",
+                        "        raise AssertionError('REQUEST_CONNECTION_ERROR') from exc",
+                        "    except requests.exceptions.RequestException as exc:",
+                        "        allure.attach(str(exc), 'request_error', allure.attachment_type.TEXT)",
+                        "        raise AssertionError('REQUEST_ERROR') from exc",
+                        "    allure.attach(str(response.status_code), 'response_status', allure.attachment_type.TEXT)",
                         "    allure.attach(response.text[:20000], 'response_body', allure.attachment_type.TEXT)",
-                        "    assert 200 <= int(response.status_code) < 400",
+                        "    assert 200 <= int(response.status_code) < 400, f'HTTP_ASSERT_FAIL:{response.status_code}'",
                         "    if expected_result:",
-                        "        assert expected_result in response.text",
+                        "        assert expected_result in response.text, 'EXPECTED_RESULT_NOT_FOUND'",
                     ]
                 ),
                 encoding="utf-8",
@@ -245,12 +303,18 @@ class PytestAllureRunnerService:
                     zf.write(child, child.relative_to(report_dir.parent))
         return zip_path
 
-    def _generate_allure_report(self, workspace: Path, allure_results_dir: Path, *, timeout_sec: int) -> Path | None:
+    def _generate_allure_report(
+        self,
+        *,
+        allure_results_dir: Path,
+        report_dir: Path,
+        timeout_sec: int,
+    ) -> AllureGenerateOutput:
         if not allure_results_dir.exists():
-            return None
-        report_dir = workspace / "allure-report"
+            return AllureGenerateOutput(report_dir=None, stdout="", stderr="", error_code="allure_results_not_found")
+        report_dir.parent.mkdir(parents=True, exist_ok=True)
         try:
-            subprocess.run(
+            completed = subprocess.run(
                 [
                     self._allure_command,
                     "generate",
@@ -259,17 +323,46 @@ class PytestAllureRunnerService:
                     str(report_dir),
                     "--clean",
                 ],
-                cwd=workspace,
+                cwd=report_dir.parent,
                 capture_output=True,
                 text=True,
                 timeout=max(timeout_sec, 1),
                 check=False,
             )
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            return None
+        except FileNotFoundError:
+            return AllureGenerateOutput(
+                report_dir=None,
+                stdout="",
+                stderr=f"{self._allure_command} not found",
+                error_code="allure_cli_not_found",
+            )
+        except subprocess.TimeoutExpired as exc:
+            return AllureGenerateOutput(
+                report_dir=None,
+                stdout=str(exc.stdout or ""),
+                stderr=str(exc.stderr or ""),
+                error_code="allure_generate_timeout",
+            )
+        if int(completed.returncode) != 0:
+            return AllureGenerateOutput(
+                report_dir=None,
+                stdout=str(completed.stdout or ""),
+                stderr=str(completed.stderr or ""),
+                error_code="allure_generate_failed",
+            )
         if not report_dir.exists():
-            return None
-        return report_dir
+            return AllureGenerateOutput(
+                report_dir=None,
+                stdout=str(completed.stdout or ""),
+                stderr=str(completed.stderr or ""),
+                error_code="allure_report_not_found",
+            )
+        return AllureGenerateOutput(
+            report_dir=report_dir,
+            stdout=str(completed.stdout or ""),
+            stderr=str(completed.stderr or ""),
+            error_code=None,
+        )
 
     def _build_artifacts(
         self, execution_log: Path, allure_zip: Path | None, allure_report_zip: Path | None
@@ -338,3 +431,13 @@ def execute_pytest_allure_job(job: JobPayload) -> PytestAllureExecutionOutput:
         python_executable=settings.runner_python_executable,
         allure_command=settings.runner_allure_command,
     ).execute(job)
+
+
+def generate_allure_report_for_run(run_id: str, *, timeout_sec: int) -> AllureGenerateOutput:
+    settings = get_settings()
+    workspace_root = Path(settings.runner_workspace_root) if settings.runner_workspace_root else None
+    return PytestAllureRunnerService(
+        workspace_root=workspace_root,
+        python_executable=settings.runner_python_executable,
+        allure_command=settings.runner_allure_command,
+    ).generate_report_for_run(run_id, timeout_sec=timeout_sec)

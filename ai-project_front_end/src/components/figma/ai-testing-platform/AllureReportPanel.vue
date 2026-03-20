@@ -43,7 +43,7 @@ const iframeSrc = computed(() => {
           class="h-[calc(100vh-176px)] w-full border-0"
           title="Allure报告"
           loading="lazy"
-          referrerpolicy="no-referrer"
+          referrerpolicy="same-origin"
         ></iframe>
       </div>
       <div v-else class="rounded-[12px] border border-dashed border-black/10 bg-white px-[16px] py-[18px] text-[13px] leading-[20px] text-[#717182]">

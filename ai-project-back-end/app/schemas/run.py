@@ -124,6 +124,16 @@ class RunRetryRequest(BaseSchema):
     failedOnly: bool = Field(default=True)
 
 
+class RunAllureReportGenerateData(BaseSchema):
+    runId: IdStr
+    reportStatus: str
+    reportUrl: str | None = None
+    reportPath: str | None = None
+    resultsPath: str | None = None
+    errorCode: str | None = None
+    errorMessage: str | None = None
+
+
 class RunDebugRequest(BaseSchema):
     projectId: IdStr
     testcaseId: IdStr

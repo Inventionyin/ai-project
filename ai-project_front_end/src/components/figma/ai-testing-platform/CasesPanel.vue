@@ -14,7 +14,7 @@ import CreateCaseModal from '@/components/figma/ai-testing-platform/CreateCaseMo
 import EditCaseModal from '@/components/figma/ai-testing-platform/EditCaseModal.vue'
 import AiGenerateCaseModal from '@/components/figma/ai-testing-platform/AiGenerateCaseModal.vue'
 import BatchRunDrawer from '@/components/figma/ai-testing-platform/BatchRunDrawer.vue'
-import { buildRunPayloadDirect, fetchRunCaseRuns, runFromTestcasesHttp, type BatchRunDirectFormItem, type BatchRunDirectFormState } from '@/lib/aiTestingPlatformApi'
+import { buildRunPayloadDirect, fetchRunCaseRuns, generateRunAllureReport, runFromTestcasesHttp, type BatchRunDirectFormItem, type BatchRunDirectFormState } from '@/lib/aiTestingPlatformApi'
 
 const route = useRoute()
 const router = useRouter()
@@ -450,15 +450,25 @@ async function executeBatchRunFromDrawer() {
   }
 }
 
-function openBatchReport() {
+async function openBatchReport() {
   const projectId = String(route.params.projectId || '').trim()
   const runId = batchRunRunId.value
   if (!projectId || !runId || !canGenerateBatchReport.value) return
-  const target = router.resolve({
-    path: `/projects/${projectId}/reports/allure`,
-    query: { runId }
-  })
-  window.open(target.href, '_blank', 'noopener,noreferrer')
+  try {
+    const reportResult = await generateRunAllureReport(runId)
+    const reportStatus = String(reportResult?.reportStatus || '').toUpperCase()
+    if (reportStatus !== 'READY') {
+      throw new Error(reportResult?.errorMessage || '生成 Allure 报告失败')
+    }
+    const target = router.resolve({
+      path: `/projects/${projectId}/reports/allure`,
+      query: { runId }
+    })
+    window.open(target.href, '_blank', 'noopener,noreferrer')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '生成 Allure 报告失败'
+    showToast(message, 'error')
+  }
 }
 
 function closeAiGenerateCase() {

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import mimetypes
 import uuid
 import zipfile
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import FileResponse, RedirectResponse
@@ -18,6 +20,7 @@ from app.models.run import Artifact, Job
 from app.schemas.common import ApiResponse, PageData
 from app.schemas.run import (
     CaseRunListItem,
+    RunAllureReportGenerateData,
     RunCancelResponseData,
     RunCreateRequest,
     RunDetailData,
@@ -36,6 +39,7 @@ from app.services.run import (
     list_runs,
     retry_run,
 )
+from app.services.runner_pytest_allure import generate_allure_report_for_run, resolve_run_allure_paths
 
 router = APIRouter(prefix="/runs")
 
@@ -69,11 +73,34 @@ def _find_allure_report_dir(*, artifact_path: Path | None, workspace_path: Path 
     return report_dir.resolve()
 
 
+def _zip_allure_report_dir(report_dir: Path) -> Path:
+    zip_path = report_dir.parent / "allure-report.zip"
+    with zipfile.ZipFile(zip_path, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for child in report_dir.rglob("*"):
+            if child.is_file():
+                archive.write(child, child.relative_to(report_dir.parent))
+    return zip_path
+
+
 def _safe_resolve_report_file(report_dir: Path, asset_path: str) -> Path:
     normalized = str(asset_path or "").strip("/")
     target = (report_dir / normalized).resolve() if normalized else (report_dir / "index.html").resolve()
     target.relative_to(report_dir)
     return target
+
+
+def _resolve_token(access_token: str | None, referer: str | None) -> str:
+    token = str(access_token or "").strip()
+    if token:
+        return token
+    ref = str(referer or "").strip()
+    if not ref:
+        return ""
+    parsed = urlparse(ref)
+    token_values = parse_qs(parsed.query).get("access_token") or []
+    if not token_values:
+        return ""
+    return str(token_values[0] or "").strip()
 
 
 def _to_run_detail(run, done: int, total: int) -> RunDetailData:
@@ -248,10 +275,32 @@ async def get_allure_report_(
     runId: uuid.UUID,
     asset_path: str = "",
     access_token: str | None = Query(default=None, alias="access_token"),
+    referer: str | None = Header(default=None, alias="Referer"),
+    authorization: str | None = Header(default=None, alias="Authorization"),
+    x_user_id: str | None = Header(default=None, alias="X-User-Id"),
+    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-Id"),
+    x_roles: str | None = Header(default=None, alias="X-Roles"),
     db: AsyncSession = Depends(get_db),
-    user: CurrentUser = Depends(get_current_user),
 ) -> FileResponse:
-    resolved_user = _resolve_user_with_optional_token(user, access_token)
+    user: CurrentUser | None = None
+    token = _resolve_token(access_token, referer)
+    if token:
+        payload = decode_access_token(token)
+        user = CurrentUser(id=payload.user_id, tenant_id=payload.tenant_id, roles=payload.roles)
+    elif authorization:
+        parts = authorization.split(" ", 1)
+        if len(parts) == 2 and parts[0].lower() == "bearer" and parts[1].strip():
+            payload = decode_access_token(parts[1].strip())
+            user = CurrentUser(id=payload.user_id, tenant_id=payload.tenant_id, roles=payload.roles)
+    elif x_user_id and x_tenant_id:
+        user = CurrentUser(
+            id=uuid.UUID(x_user_id),
+            tenant_id=uuid.UUID(x_tenant_id),
+            roles=frozenset(r.strip() for r in str(x_roles or "").split(",") if r.strip()),
+        )
+    if user is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    resolved_user = user
     run, _, _ = await get_run(db, user=resolved_user, run_id=runId)
     artifact_rows = (
         await db.execute(
@@ -284,6 +333,10 @@ async def get_allure_report_(
     workspace_path = Path(str(workspace_value)).expanduser() if workspace_value else None
     report_dir = _find_allure_report_dir(artifact_path=artifact_path, workspace_path=workspace_path)
     if report_dir is None:
+        _, run_report_dir = resolve_run_allure_paths(str(run.id))
+        if run_report_dir.exists():
+            report_dir = run_report_dir.resolve()
+    if report_dir is None:
         raise HTTPException(status_code=404, detail="Allure report not found")
     try:
         target = _safe_resolve_report_file(report_dir, asset_path)
@@ -293,6 +346,103 @@ async def get_allure_report_(
         raise HTTPException(status_code=404, detail="Allure report file not found")
     media_type = mimetypes.guess_type(str(target))[0]
     return FileResponse(path=target, media_type=media_type)
+
+
+@router.post("/{runId}/allure-report/generate", response_model=ApiResponse[RunAllureReportGenerateData])
+async def generate_allure_report_(
+    runId: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    request_id: str = Depends(get_request_id),
+) -> ApiResponse[RunAllureReportGenerateData]:
+    run, _, _ = await get_run(db, user=user, run_id=runId)
+    job = await db.scalar(
+        select(Job)
+        .where(Job.tenant_id == user.tenant_id, Job.run_id == run.id)
+        .order_by(Job.created_at.desc())
+        .limit(1)
+    )
+    timeout_sec = 600
+    if job is not None and isinstance(job.meta_json, dict):
+        suite_cfg = dict(job.meta_json.get("suiteConfig") or {})
+        timeout_value = suite_cfg.get("timeoutSec")
+        if isinstance(timeout_value, int | float):
+            timeout_sec = int(timeout_value)
+    output = await asyncio.to_thread(generate_allure_report_for_run, str(run.id), timeout_sec=max(timeout_sec, 1))
+    results_path, report_path = resolve_run_allure_paths(str(run.id))
+    run_summary = dict(run.summary_json or {})
+    execution_result = dict(run_summary.get("executionResult") or {})
+    if output.error_code:
+        execution_result["reportStatus"] = "FAILED"
+        execution_result["reportErrorCode"] = output.error_code
+        execution_result["reportMessage"] = (output.stderr or output.stdout or "").strip()[:2000] or output.error_code
+        run_summary["executionResult"] = execution_result
+        run.summary_json = run_summary
+        await db.flush()
+        await db.commit()
+        return ApiResponse(
+            data=RunAllureReportGenerateData(
+                runId=str(run.id),
+                reportStatus="FAILED",
+                resultsPath=str(results_path),
+                reportPath=str(report_path),
+                errorCode=output.error_code,
+                errorMessage=(output.stderr or output.stdout or "").strip()[:2000] or output.error_code,
+            ),
+            requestId=request_id,
+        )
+    if output.report_dir is None or not output.report_dir.exists():
+        raise HTTPException(status_code=404, detail="Allure report not found")
+    zip_path = _zip_allure_report_dir(output.report_dir)
+    report_meta = {"name": "allure-report.zip", "kind": "ALLURE_REPORT", "size": zip_path.stat().st_size}
+    existing_report_artifact = await db.scalar(
+        select(Artifact)
+        .where(
+            Artifact.tenant_id == user.tenant_id,
+            Artifact.run_id == run.id,
+            Artifact.type == ArtifactType.LOG_BUNDLE,
+            Artifact.case_run_id.is_(None),
+        )
+        .order_by(Artifact.created_at.desc())
+    )
+    if existing_report_artifact is not None and isinstance(existing_report_artifact.meta_json, dict):
+        kind = str(existing_report_artifact.meta_json.get("kind") or "").upper()
+        if kind == "ALLURE_REPORT":
+            existing_report_artifact.storage_url = str(zip_path)
+            existing_report_artifact.size = zip_path.stat().st_size
+            existing_report_artifact.meta_json = report_meta
+        else:
+            existing_report_artifact = None
+    if existing_report_artifact is None:
+        db.add(
+            Artifact(
+                tenant_id=user.tenant_id,
+                run_id=run.id,
+                case_run_id=None,
+                type=ArtifactType.LOG_BUNDLE,
+                storage_url=str(zip_path),
+                size=zip_path.stat().st_size,
+                meta_json=report_meta,
+            )
+        )
+    execution_result["reportStatus"] = "READY"
+    execution_result["reportErrorCode"] = None
+    execution_result["reportMessage"] = None
+    execution_result["reportPath"] = str(output.report_dir)
+    run_summary["executionResult"] = execution_result
+    run.summary_json = run_summary
+    await db.flush()
+    await db.commit()
+    return ApiResponse(
+        data=RunAllureReportGenerateData(
+            runId=str(run.id),
+            reportStatus="READY",
+            reportUrl=f"/api/runs/{run.id}/allure-report/",
+            resultsPath=str(results_path),
+            reportPath=str(report_path),
+        ),
+        requestId=request_id,
+    )
 
 
 @router.get("/{runId}/case-runs", response_model=ApiResponse[PageData[CaseRunListItem]])

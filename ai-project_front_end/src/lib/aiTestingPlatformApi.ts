@@ -132,6 +132,16 @@ export type CaseRunItem = {
   bindingSnapshot?: unknown
 }
 
+export type RunAllureReportGenerateData = {
+  runId: string
+  reportStatus: string
+  reportUrl?: string | null
+  reportPath?: string | null
+  resultsPath?: string | null
+  errorCode?: string | null
+  errorMessage?: string | null
+}
+
 const resolveApiBaseUrl = () => {
   const envBase = String(import.meta.env.VITE_API_BASE_URL || '').trim()
   if (!envBase) return ''
@@ -506,5 +516,18 @@ export async function fetchRunCaseRuns(runId: string) {
     }
   })
   return normalizeCaseRuns(data)
+}
+
+export async function generateRunAllureReport(runId: string) {
+  const id = String(runId || '').trim()
+  if (!id) {
+    throw new Error('runId 不能为空')
+  }
+  return requestJson<RunAllureReportGenerateData>(`/api/runs/${encodeURIComponent(id)}/allure-report/generate`, {
+    method: 'POST',
+    headers: {
+      Authorization: resolveAuthHeader()
+    }
+  })
 }
 
