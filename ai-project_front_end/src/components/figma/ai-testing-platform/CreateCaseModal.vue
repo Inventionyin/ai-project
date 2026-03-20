@@ -77,27 +77,37 @@ function handleSave() {
   const cleanApiMethod = apiMethod.value.trim()
   const cleanApiUrl = apiUrl.value.trim()
   const rawApiParams = apiParamsInput.value.trim()
+  if (!cleanFeature) {
+    window.alert('请输入功能模块')
+    return
+  }
   if (!cleanTitle) {
     window.alert('请输入用例标题')
     return
   }
-  if (!cleanContent) {
-    window.alert('请输入用例内容')
+  if (!cleanApiMethod) {
+    window.alert('请输入调用方式')
+    return
+  }
+  if (!cleanApiUrl) {
+    window.alert('请输入interfaceUrl')
+    return
+  }
+  if (!rawApiParams) {
+    window.alert('请输入接口参数')
     return
   }
   let parsedApiParams: Record<string, unknown> = {}
-  if (rawApiParams) {
-    try {
-      const parsed = JSON.parse(rawApiParams) as unknown
-      if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
-        window.alert('接口参数需为合法JSON对象')
-        return
-      }
-      parsedApiParams = parsed as Record<string, unknown>
-    } catch {
+  try {
+    const parsed = JSON.parse(rawApiParams) as unknown
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
       window.alert('接口参数需为合法JSON对象')
       return
     }
+    parsedApiParams = parsed as Record<string, unknown>
+  } catch {
+    window.alert('接口参数需为合法JSON对象')
+    return
   }
   emit('save', {
     title: cleanTitle,
@@ -151,6 +161,18 @@ watch(
         <div class="flex flex-col gap-[16px] pb-[4px]">
           <div class="flex flex-col gap-[6px]">
             <div class="text-[12px] font-medium leading-[16px] text-[#0A0A0A]">
+              功能模块 <span class="text-[#FB2C36]">*</span>
+            </div>
+            <input
+              v-model="feature"
+              class="h-[36px] w-full rounded-[10px] border border-black/10 bg-white px-[12px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
+              type="text"
+              placeholder="请输入用例所属模块"
+            />
+          </div>
+
+          <div class="flex flex-col gap-[6px]">
+            <div class="text-[12px] font-medium leading-[16px] text-[#0A0A0A]">
               标题 <span class="text-[#FB2C36]">*</span>
             </div>
             <input
@@ -158,6 +180,41 @@ watch(
               class="h-[36px] w-full rounded-[10px] border border-black/10 bg-white px-[12px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
               type="text"
               placeholder="请输入用例标题"
+            />
+          </div>
+
+          <div class="flex flex-col gap-[6px]">
+            <div class="text-[12px] font-medium leading-[16px] text-[#0A0A0A]">
+              调用方式 <span class="text-[#FB2C36]">*</span>
+            </div>
+            <input
+              v-model="apiMethod"
+              class="h-[36px] w-full rounded-[10px] border border-black/10 bg-white px-[12px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
+              type="text"
+              placeholder="请输入调用方式,例如：post、get"
+            />
+          </div>
+
+          <div class="flex flex-col gap-[6px]">
+            <div class="text-[12px] font-medium leading-[16px] text-[#0A0A0A]">
+              interfaceUrl <span class="text-[#FB2C36]">*</span>
+            </div>
+            <input
+              v-model="apiUrl"
+              class="h-[36px] w-full rounded-[10px] border border-black/10 bg-white px-[12px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
+              type="text"
+              placeholder="请输入接口url"
+            />
+          </div>
+
+          <div class="flex flex-col gap-[6px]">
+            <div class="text-[12px] font-medium leading-[16px] text-[#0A0A0A]">
+              接口参数 <span class="text-[#FB2C36]">*</span>
+            </div>
+            <textarea
+              v-model="apiParamsInput"
+              class="h-[88px] w-full resize-none rounded-[10px] border border-black/10 bg-white px-[12px] py-[8px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
+              placeholder="请输入接口参数，例如：{&quot;userId&quot;:&quot;123&quot;,&quot;page&quot;:1}"
             />
           </div>
 
@@ -204,6 +261,20 @@ watch(
               </select>
             </div>
 
+          </div>
+
+          <div class="flex flex-col gap-[6px]">
+            <div class="text-[12px] font-medium leading-[16px] text-[#0A0A0A]">
+              用例内容
+            </div>
+            <textarea
+              v-model="contentMd"
+              class="h-[88px] w-full resize-none rounded-[10px] border border-black/10 bg-white px-[12px] py-[8px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
+              placeholder="请输入用例步骤、预期结果等内容"
+            />
+          </div>
+
+          <div class="grid grid-cols-1 gap-x-[16px] gap-y-[16px] sm:grid-cols-2">
             <div class="flex flex-col gap-[6px]">
               <div class="relative h-[16px] w-full">
                 <img :src="modalOwnerIcon" alt="" class="absolute left-0 top-[2.5px] h-[11px] w-[11px]" />
@@ -230,56 +301,6 @@ watch(
               class="h-[36px] w-full rounded-[10px] border border-black/10 bg-white px-[12px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
               type="text"
               placeholder="多个标签用英文逗号分隔，如 smoke, order"
-            />
-          </div>
-
-          <div class="flex flex-col gap-[6px]">
-            <div class="text-[12px] font-medium leading-[16px] text-[#0A0A0A]">
-              用例内容 <span class="text-[#FB2C36]">*</span>
-            </div>
-            <textarea
-              v-model="contentMd"
-              class="h-[88px] w-full resize-none rounded-[10px] border border-black/10 bg-white px-[12px] py-[8px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
-              placeholder="请输入用例步骤、预期结果等内容"
-            />
-          </div>
-
-          <div class="grid grid-cols-1 gap-x-[16px] gap-y-[16px] sm:grid-cols-2">
-            <div class="flex flex-col gap-[6px]">
-              <div class="text-[12px] font-medium leading-[16px] text-[#0A0A0A]">功能模块</div>
-              <input
-                v-model="feature"
-                class="h-[36px] w-full rounded-[10px] border border-black/10 bg-white px-[12px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
-                type="text"
-                placeholder="请输入用例所属模块"
-              />
-            </div>
-            <div class="flex flex-col gap-[6px]">
-              <div class="text-[12px] font-medium leading-[16px] text-[#0A0A0A]">调用方式</div>
-              <input
-                v-model="apiMethod"
-                class="h-[36px] w-full rounded-[10px] border border-black/10 bg-white px-[12px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
-                type="text"
-                placeholder="请输入调用方式,例如：post、get"
-              />
-            </div>
-            <div class="flex flex-col gap-[6px] sm:col-span-2">
-              <div class="text-[12px] font-medium leading-[16px] text-[#0A0A0A]">interfaceUrl</div>
-              <input
-                v-model="apiUrl"
-                class="h-[36px] w-full rounded-[10px] border border-black/10 bg-white px-[12px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
-                type="text"
-                placeholder="请输入接口url"
-              />
-            </div>
-          </div>
-
-          <div class="flex flex-col gap-[6px]">
-            <div class="text-[12px] font-medium leading-[16px] text-[#0A0A0A]">接口参数</div>
-            <textarea
-              v-model="apiParamsInput"
-              class="h-[88px] w-full resize-none rounded-[10px] border border-black/10 bg-white px-[12px] py-[8px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
-              placeholder="请输入接口参数，例如：{&quot;userId&quot;:&quot;123&quot;,&quot;page&quot;:1}"
             />
           </div>
         </div>

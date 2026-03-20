@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 export type Row = {
@@ -8,10 +8,10 @@ export type Row = {
   type: 'API' | 'UI' | 'PERF' | 'MIX'
   priority: 'P0' | 'P1' | 'P2' | 'P3'
   status: '已评审' | '草稿' | '已弃用'
-  feature: string
-  story: string
-  callUrl: string
-  bindingConfig: string
+  module: string
+  interfaceUrl: string
+  method: string
+  apiParams: Record<string, unknown> | null
   owner: string
   lastRun: '通过' | '失败' | '-' | '跳过'
   updatedAt: string
@@ -26,10 +26,7 @@ const emit = defineEmits<{
   (e: 'delete', index: number): void
   (e: 'edit', index: number): void
   (e: 'update:selectedIds', value: string[]): void
-  (e: 'manage-bindings', payload: { id: string; title: string }): void
 }>()
-
-const openMenuIndex = ref<number | null>(null)
 
 const router = useRouter()
 const route = useRoute()
@@ -44,14 +41,6 @@ function openCaseDetail(id: string) {
     path: `/projects/${projectId.value}/assets/testcases/${id}`,
     query: { tab: 'basic' }
   })
-}
-
-function closeMenu() {
-  openMenuIndex.value = null
-}
-
-function toggleMenu(index: number) {
-  openMenuIndex.value = openMenuIndex.value === index ? null : index
 }
 
 const selectedSet = computed(() => new Set(props.selectedIds))
@@ -100,21 +89,24 @@ function lastRunClass(lastRun: Row['lastRun']) {
   return '#99A1AF'
 }
 
+function formatApiParams(apiParams: Row['apiParams']) {
+  if (!apiParams || typeof apiParams !== 'object' || Array.isArray(apiParams)) return '-'
+  const entries = Object.keys(apiParams)
+  if (!entries.length) return '-'
+  try {
+    return JSON.stringify(apiParams)
+  } catch {
+    return '-'
+  }
+}
+
 const rowHeight = '56.67px'
 </script>
 
 <template>
-  <button
-    v-if="openMenuIndex !== null"
-    type="button"
-    class="fixed inset-0 z-40"
-    aria-label="Close actions menu"
-    @click="closeMenu"
-  />
-
   <div class="w-full overflow-x-auto">
-    <div class="min-w-[1220px]">
-      <div class="grid grid-cols-[45px_minmax(160px,240px)_70px_70px_70px_120px_120px_180px_100px_80px_80px_110px_47px] bg-[rgba(236,236,240,0.3)] border-b border-black/10">
+    <div class="min-w-[1480px]">
+      <div class="grid grid-cols-[45px_160px_minmax(160px,260px)_70px_70px_70px_220px_90px_260px_90px_80px_110px_150px] bg-[rgba(236,236,240,0.3)] border-b border-black/10">
         <div class="flex h-[56.33px] items-center justify-center">
           <input
             type="checkbox"
@@ -125,25 +117,25 @@ const rowHeight = '56.67px'
             @change="toggleAllVisible"
           />
         </div>
+        <div class="flex h-[56.33px] items-center px-[12px] text-[12px] font-medium leading-[16px] text-[#717182] whitespace-nowrap">功能模块</div>
         <div class="flex h-[56.33px] items-center px-[12px] text-[12px] font-medium leading-[16px] text-[#717182] whitespace-nowrap">标题</div>
         <div class="flex h-[56.33px] items-center px-[12px] text-[12px] font-medium leading-[16px] text-[#717182] whitespace-nowrap">类型</div>
         <div class="flex h-[56.33px] items-center px-[12px] text-[12px] font-medium leading-[16px] text-[#717182] whitespace-nowrap">优先级</div>
         <div class="flex h-[56.33px] items-center px-[12px] text-[12px] font-medium leading-[16px] text-[#717182] whitespace-nowrap">状态</div>
-        <div class="flex h-[56.33px] items-center px-[12px] text-[12px] font-medium leading-[16px] text-[#717182] whitespace-nowrap">Feature</div>
-        <div class="flex h-[56.33px] items-center px-[12px] text-[12px] font-medium leading-[16px] text-[#717182] whitespace-nowrap">Story</div>
-        <div class="flex h-[56.33px] items-center px-[12px] text-[12px] font-medium leading-[16px] text-[#717182] whitespace-nowrap">调用 URL</div>
-        <div class="flex h-[56.33px] items-center px-[12px] text-[12px] font-medium leading-[16px] text-[#717182] whitespace-nowrap">绑定配置</div>
+        <div class="flex h-[56.33px] items-center px-[12px] text-[12px] font-medium leading-[16px] text-[#717182] whitespace-nowrap">interfaceUrl</div>
+        <div class="flex h-[56.33px] items-center px-[12px] text-[12px] font-medium leading-[16px] text-[#717182] whitespace-nowrap">调用方式</div>
+        <div class="flex h-[56.33px] items-center px-[12px] text-[12px] font-medium leading-[16px] text-[#717182] whitespace-nowrap">接口参数</div>
         <div class="flex h-[56.33px] items-center px-[12px] text-[12px] font-medium leading-[16px] text-[#717182] whitespace-nowrap">维护人</div>
         <div class="flex h-[56.33px] items-center px-[12px] text-[12px] font-medium leading-[16px] text-[#717182] whitespace-nowrap">最近运行</div>
         <div class="flex h-[56.33px] items-center px-[12px] text-[12px] font-medium leading-[16px] text-[#717182] whitespace-nowrap">更新时间</div>
-        <div class="flex h-[56.33px] items-center justify-center text-[12px] font-medium leading-[16px] text-[#717182] whitespace-nowrap">...</div>
+        <div class="flex h-[56.33px] items-center justify-center text-[12px] font-medium leading-[16px] text-[#717182] whitespace-nowrap">操作</div>
       </div>
 
       <div class="border-b border-black/10">
         <div
           v-for="(row, index) in rows"
           :key="row.id"
-          class="grid grid-cols-[45px_minmax(160px,240px)_70px_70px_70px_120px_120px_180px_100px_80px_80px_110px_47px] border-b border-black/10 last:border-b-0"
+          class="grid grid-cols-[45px_160px_minmax(160px,260px)_70px_70px_70px_220px_90px_260px_90px_80px_110px_150px] border-b border-black/10 last:border-b-0"
           :style="{ height: rowHeight }"
         >
           <div class="relative h-full">
@@ -190,31 +182,32 @@ const rowHeight = '56.67px'
 
           <div class="relative h-full">
             <div class="absolute left-[12px] right-[12px] top-1/2 -translate-y-1/2 truncate text-[12px] leading-[16px] text-[#717182]">
-              {{ row.feature || '-' }}
+              {{ row.module || '-' }}
             </div>
           </div>
 
           <div class="relative h-full">
-            <div class="absolute left-[12px] right-[12px] top-1/2 -translate-y-1/2 truncate text-[12px] leading-[16px] text-[#717182]">
-              {{ row.story || '-' }}
-            </div>
-          </div>
-
-          <div class="relative h-full">
-            <div class="absolute left-[12px] right-[12px] top-1/2 -translate-y-1/2 truncate text-[12px] leading-[16px] text-[#717182]">
-              {{ row.callUrl || '-' }}
-            </div>
-          </div>
-
-          <div class="relative h-full">
-            <button
-              type="button"
-              class="absolute left-[12px] right-[12px] top-1/2 -translate-y-1/2 truncate text-left text-[12px] leading-[16px] text-[#155DFC] hover:underline"
-              :title="row.bindingConfig || ''"
-              @click.stop="emit('manage-bindings', { id: row.id, title: row.title })"
+            <div
+              class="absolute left-[12px] right-[12px] top-1/2 -translate-y-1/2 truncate text-[12px] leading-[16px] text-[#155DFC]"
+              :title="row.interfaceUrl || ''"
             >
-              {{ row.bindingConfig || '-' }}
-            </button>
+              {{ row.interfaceUrl || '-' }}
+            </div>
+          </div>
+
+          <div class="relative h-full">
+            <div class="absolute left-[12px] top-1/2 -translate-y-1/2 text-[12px] font-medium leading-[16px] text-[#717182]">
+              {{ row.method || '-' }}
+            </div>
+          </div>
+
+          <div class="relative h-full">
+            <div
+              class="absolute left-[12px] right-[12px] top-1/2 -translate-y-1/2 truncate text-[12px] leading-[16px] text-[#717182]"
+              :title="formatApiParams(row.apiParams)"
+            >
+              {{ formatApiParams(row.apiParams) }}
+            </div>
           </div>
 
           <div class="relative h-full">
@@ -236,30 +229,18 @@ const rowHeight = '56.67px'
           </div>
 
           <div class="relative h-full">
-            <button
-              type="button"
-              class="absolute left-1/2 top-1/2 z-30 -translate-x-1/2 -translate-y-1/2 rounded-[6px] px-[6px] py-[4px] text-[16px] font-semibold leading-[16px] text-[#717182] hover:bg-black/5"
-              aria-label="Open row actions"
-              @click.stop="toggleMenu(index)"
-            >
-              ...
-            </button>
-
-            <div
-              v-if="openMenuIndex === index"
-              class="absolute right-[8px] top-1/2 z-50 -translate-y-1/2 overflow-hidden rounded-[10px] border border-black/10 bg-white shadow-[0px_10px_15px_-3px_rgba(0,0,0,0.1),0px_4px_6px_-4px_rgba(0,0,0,0.1)]"
-            >
+            <div class="absolute left-[12px] right-[12px] top-1/2 flex -translate-y-1/2 items-center gap-[12px]">
               <button
                 type="button"
-                class="block w-full px-[12px] py-[8px] text-left text-[14px] leading-[20px] text-[#0A0A0A] hover:bg-black/5"
-                @click.stop="emit('edit', index); closeMenu()"
+                class="text-[12px] font-medium leading-[16px] text-[#155DFC] hover:underline"
+                @click.stop="emit('edit', index)"
               >
                 编辑
               </button>
               <button
                 type="button"
-                class="block w-full px-[12px] py-[8px] text-left text-[14px] leading-[20px] text-[#FB2C36] hover:bg-black/5"
-                @click.stop="emit('delete', index); closeMenu()"
+                class="text-[12px] font-medium leading-[16px] text-[#FB2C36] hover:underline"
+                @click.stop="emit('delete', index)"
               >
                 删除
               </button>

@@ -262,6 +262,7 @@ async def list_(
                 feature=tc.feature,
                 apiMethod=tc.api_method,
                 apiUrl=tc.api_url,
+                apiParams=_extract_api_params(tc.ai_meta_json),
                 lastRun=latest_case_run.status if latest_case_run else None,
                 updatedAt=to_unix_ts(tc.updated_at),
             )

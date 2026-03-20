@@ -98,6 +98,15 @@ async def create_testcase(
 ) -> TestCase:
     project_id = uuid.UUID(payload.projectId)
     await _check_project_permission(db, user, project_id, [ProjectRole.OWNER, ProjectRole.ADMIN, ProjectRole.EDITOR])
+    feature = _normalize_optional_text(payload.feature)
+    api_url = _normalize_optional_text(payload.apiUrl)
+    api_method = _normalize_optional_text(payload.apiMethod.upper() if payload.apiMethod else None)
+    if feature is None:
+        raise HTTPException(status_code=400, detail="Feature is required")
+    if api_method is None:
+        raise HTTPException(status_code=400, detail="API method is required")
+    if api_url is None:
+        raise HTTPException(status_code=400, detail="API URL is required")
 
     owner_id = user.id
     if payload.ownerId:
@@ -117,9 +126,9 @@ async def create_testcase(
         status=payload.status,
         tags_json=payload.tags,
         content_md=payload.contentMd,
-        feature=_normalize_optional_text(payload.feature),
-        api_url=_normalize_optional_text(payload.apiUrl),
-        api_method=_normalize_optional_text(payload.apiMethod.upper() if payload.apiMethod else None),
+        feature=feature,
+        api_url=api_url,
+        api_method=api_method,
         ai_meta_json=_merge_api_params({}, payload.apiParams),
         created_by=user.id,
         owner_id=owner_id,

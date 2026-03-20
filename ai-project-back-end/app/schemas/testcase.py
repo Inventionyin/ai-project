@@ -23,11 +23,11 @@ class TestCaseCreateRequest(BaseSchema):
     priority: Priority
     status: TestCaseStatus
     tags: list[TagStr] = Field(default_factory=list, max_length=50)
-    contentMd: str = Field(min_length=1)
+    contentMd: str = Field(default="")
     ownerId: IdStr | None = None
-    feature: FeatureStr | None = None
-    apiMethod: ApiMethodStr | None = None
-    apiUrl: ApiUrlStr | None = None
+    feature: FeatureStr
+    apiMethod: ApiMethodStr
+    apiUrl: ApiUrlStr
     apiParams: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -87,7 +87,7 @@ class TestCaseDetail(BaseSchema):
     ownerId: IdStr | None = None
     ownerName: str | None = None
     version: TestCaseVersionStr
-    contentMd: str = Field(min_length=1)
+    contentMd: str
     feature: FeatureStr | None = None
     apiMethod: ApiMethodStr | None = None
     apiUrl: ApiUrlStr | None = None
@@ -117,6 +117,7 @@ class TestCaseListItem(BaseSchema):
     feature: FeatureStr | None = None
     apiMethod: ApiMethodStr | None = None
     apiUrl: ApiUrlStr | None = None
+    apiParams: dict[str, Any] = Field(default_factory=dict)
     lastRun: CaseRunStatus | None = None
     updatedAt: UnixTs
 

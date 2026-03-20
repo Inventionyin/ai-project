@@ -3,7 +3,6 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import btnAiGenerate from '@/assets/figma/ai-testing-platform/btn-ai-generate.svg'
 import btnPlus from '@/assets/figma/ai-testing-platform/btn-plus.svg'
-import suiteDetailRun from '@/assets/figma/ai-testing-platform/suite-detail-run.svg'
 import filterIcon from '@/assets/figma/ai-testing-platform/filter-icon.svg'
 import filterChevron from '@/assets/figma/ai-testing-platform/filter-chevron.svg'
 import filterSearch from '@/assets/figma/ai-testing-platform/filter-search.svg'
@@ -14,17 +13,12 @@ import CasesTable, { type Row } from '@/components/figma/ai-testing-platform/Cas
 import CreateCaseModal from '@/components/figma/ai-testing-platform/CreateCaseModal.vue'
 import EditCaseModal from '@/components/figma/ai-testing-platform/EditCaseModal.vue'
 import AiGenerateCaseModal from '@/components/figma/ai-testing-platform/AiGenerateCaseModal.vue'
-import BatchRunModal from '@/components/figma/ai-testing-platform/BatchRunModal.vue'
-import TestcaseBindingsModal from '@/components/figma/ai-testing-platform/TestcaseBindingsModal.vue'
-import type { BatchRunCaseRow } from '@/components/figma/ai-testing-platform/BatchRunCaseBindingTable.vue'
-import { fetchBindingsByTestcaseIds, fetchRunCaseRuns, runFromTestcases } from '@/lib/aiTestingPlatformApi'
 
 const route = useRoute()
 const isCreateCaseOpen = ref(false)
 const isAiGenerateOpen = ref(false)
 const isEditCaseOpen = ref(false)
 const editingCaseId = ref<string | null>(null)
-const isBatchRunOpen = ref(false)
 const isLoadingCases = ref(false)
 const searchQuery = ref('')
 const rows = ref<Row[]>([])
@@ -36,11 +30,6 @@ const currentUserId = ref('')
 const currentUserName = ref('我')
 const ownerOptions = ref<Array<{ id: string; username: string }>>([])
 const ownerOptionsProjectId = ref('')
-const bindingCountByCaseId = ref<Record<string, number>>({})
-const bindingCountRequestSeq = ref(0)
-const isBindingsModalOpen = ref(false)
-const bindingsModalCaseId = ref('')
-const bindingsModalCaseTitle = ref('')
 
 type ApiResponse<T> = {
   code?: number
@@ -71,6 +60,10 @@ type TestCaseListItem = {
   lastRun?: 'QUEUED' | 'RUNNING' | 'PASSED' | 'FAILED' | 'SKIPPED' | null
   updatedAt: number
   tags: string[]
+  feature?: string | null
+  apiMethod?: string | null
+  apiUrl?: string | null
+  apiParams?: Record<string, unknown>
   ownerId?: string | null
 }
 
@@ -182,18 +175,6 @@ const casesCount = computed(() => displayRows.value.length)
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
 const totalCasesLabel = computed(() => (total.value > 0 ? total.value : casesCount.value))
 
-const batchRunRows = computed<BatchRunCaseRow[]>(() => {
-  const selected = new Set(selectedCaseIds.value)
-  const rowsSelected = displayRows.value.filter((row) => selected.has(row.id))
-  return rowsSelected.map((row) => ({
-    id: row.id,
-    title: row.title,
-    bindingId: '',
-    method: 'POST',
-    priority: row.priority === 'P0' ? 'P0' : 'P1'
-  }))
-})
-
 const loadCurrentUser = async (authorization: string) => {
   const meResponse = await fetch(`${resolveApiBaseUrl()}/api/auth/me`, {
     method: 'GET',
@@ -277,19 +258,18 @@ const loadCases = async () => {
     total.value = payload.data.total
     rows.value = items.map((item) => ({
       id: item.id,
+      module: item.feature || item.tags?.[0] || '-',
       title: item.title,
       type: item.type,
       priority: item.priority,
       status: statusLabelMap[item.status],
-      feature: item.tags?.[0] || '-',
-      story: '-',
-      callUrl: '-',
-      bindingConfig: `${bindingCountByCaseId.value[item.id] ?? 0}个绑定`,
+      interfaceUrl: item.apiUrl || '-',
+      method: String(item.apiMethod || '').toUpperCase() || '-',
+      apiParams: item.apiParams || null,
       owner: resolveOwnerDisplayName(item.ownerId),
       lastRun: resolveLastRunLabel(item.lastRun),
       updatedAt: formatDateTime(item.updatedAt)
     }))
-    await loadBindingCounts(items.map((i) => i.id))
     selectedCaseIds.value = []
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : '获取用例列表失败，请稍后重试'
@@ -297,43 +277,6 @@ const loadCases = async () => {
   } finally {
     isLoadingCases.value = false
   }
-}
-
-async function loadBindingCounts(caseIds: string[]) {
-  const ids = Array.isArray(caseIds) ? caseIds.map((v) => String(v || '').trim()).filter(Boolean) : []
-  if (!ids.length) return
-  const seq = ++bindingCountRequestSeq.value
-  try {
-    const map = await fetchBindingsByTestcaseIds(ids)
-    if (seq !== bindingCountRequestSeq.value) return
-    bindingCountByCaseId.value = Object.keys(map).reduce<Record<string, number>>((acc, id) => {
-      const list = map[id]
-      acc[id] = Array.isArray(list) ? list.length : 0
-      return acc
-    }, {})
-    rows.value = rows.value.map((row) => ({
-      ...row,
-      bindingConfig: `${bindingCountByCaseId.value[row.id] ?? 0}个绑定`
-    }))
-  } catch {
-  }
-}
-
-function openBindingsModal(payload: { id: string; title: string }) {
-  bindingsModalCaseId.value = payload.id
-  bindingsModalCaseTitle.value = payload.title
-  isBindingsModalOpen.value = true
-}
-
-function closeBindingsModal() {
-  isBindingsModalOpen.value = false
-  bindingsModalCaseId.value = ''
-  bindingsModalCaseTitle.value = ''
-}
-
-function refreshBindingCounts() {
-  const ids = displayRows.value.map((r) => r.id)
-  void loadBindingCounts(ids)
 }
 
 const loadCaseDetail = async (id: string) => {
@@ -363,11 +306,6 @@ function clearSelection() {
   selectedCaseIds.value = []
 }
 
-function batchExecuteSelected() {
-  if (!selectedCount.value) return
-  isBatchRunOpen.value = true
-}
-
 function bulkTagSelected() {
   if (!selectedCount.value) return
   showToast('批量打标签已触发')
@@ -389,50 +327,6 @@ function closeAiGenerateCase() {
 
 function closeCreateCase() {
   isCreateCaseOpen.value = false
-}
-
-function closeBatchRun() {
-  isBatchRunOpen.value = false
-}
-
-function nextBatchRunStep() {
-  showToast('下一步')
-}
-
-async function executeBatchRun(payload: { formState: Parameters<typeof runFromTestcases>[0]; idempotencyKey: string }) {
-  closeBatchRun()
-  try {
-    const items = Array.isArray(payload.formState?.items) ? payload.formState.items : []
-    if (!items.length) {
-      showToast('未选择用例', 'error')
-      return
-    }
-    showToast(`开始执行 ${items.length} 条`)
-    const result = await runFromTestcases(payload.formState, payload.idempotencyKey)
-    const runId = typeof (result as { runId?: unknown })?.runId === 'string' ? (result as { runId: string }).runId : ''
-    showToast(runId ? `已开始执行：${runId}` : '已开始执行')
-    if (runId) {
-      void warmupRunCaseRuns(runId)
-    }
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : '开始执行失败，请稍后重试'
-    window.alert(errorMessage)
-  }
-}
-
-async function warmupRunCaseRuns(runId: string) {
-  for (let i = 0; i < 3; i += 1) {
-    try {
-      const caseRuns = await fetchRunCaseRuns(runId, true)
-      if (Array.isArray(caseRuns) && caseRuns.length > 0) {
-        showToast(`已生成 ${caseRuns.length} 条执行记录`)
-        return
-      }
-    } catch {
-      return
-    }
-    await new Promise((resolve) => window.setTimeout(resolve, 800))
-  }
 }
 
 function startAiGenerateCase() {
@@ -670,23 +564,6 @@ watch(() => route.params.projectId, () => {
         <div class="flex h-[32px] items-center gap-[8px]">
           <button
             type="button"
-            class="relative h-[32px] w-[126.51px] rounded-[10px] border border-[#7BF1A8] bg-[#F0FDF4]"
-            :class="selectedCount > 0 ? '' : 'opacity-30 pointer-events-none'"
-            @click="batchExecuteSelected"
-          >
-            <img :src="suiteDetailRun" alt="" class="absolute left-[12.67px] top-[9px] h-[14px] w-[14px]" />
-            <span class="absolute left-[32.67px] top-[6.33px] text-[14px] font-medium leading-[20px] text-[#00A63E]">
-              批量执行
-            </span>
-            <span
-              v-if="selectedCount > 0"
-              class="absolute right-[10px] top-[6px] flex h-[20px] min-w-[20px] items-center justify-center rounded-full bg-[#DCFCE7] px-[6px] text-[12px] font-medium leading-[16px] text-[#00A63E]"
-            >
-              {{ selectedCount }}
-            </span>
-          </button>
-          <button
-            type="button"
             class="relative h-[32px] w-[91.45px] rounded-[10px] border border-[#BEDBFF] bg-white"
             @click="openAiGenerateCase"
           >
@@ -823,7 +700,6 @@ watch(() => route.params.projectId, () => {
           :rows="displayRows"
           @delete="deleteCase"
           @edit="openEditCase"
-          @manage-bindings="openBindingsModal"
         />
       </div>
 
@@ -866,22 +742,5 @@ watch(() => route.params.projectId, () => {
     :is-open="isAiGenerateOpen"
     @close="closeAiGenerateCase"
     @start="startAiGenerateCase"
-  />
-  <BatchRunModal
-    :is-open="isBatchRunOpen"
-    :selected-count="selectedCount"
-    :project-id="String(route.params.projectId || '').trim()"
-    :rows="batchRunRows"
-    @close="closeBatchRun"
-    @next="nextBatchRunStep"
-    @execute="executeBatchRun"
-  />
-  <TestcaseBindingsModal
-    :is-open="isBindingsModalOpen"
-    :project-id="String(route.params.projectId || '').trim()"
-    :testcase-id="bindingsModalCaseId"
-    :testcase-title="bindingsModalCaseTitle"
-    @close="closeBindingsModal"
-    @changed="refreshBindingCounts"
   />
 </template>
