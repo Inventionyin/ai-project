@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import uuid
@@ -14,10 +15,13 @@ from app.api.deps import CurrentUser
 from app.models.environment import Environment
 from app.models.enums import CaseRunStatus, JobStatus, ProjectRole, RunStatus, TriggerType
 from app.models.project import Project, ProjectMember
-from app.models.run import CaseRun, Job, Run
+from app.models.run import Artifact, CaseRun, Job, Run
 from app.models.suite import Suite, SuiteItem
 from app.models.testcase import TestCase
 from app.models.testcase_binding import TestcaseBinding
+from app.schemas.worker import JobArtifactSpec, JobEnv, JobExecution, JobItem, JobPayload, JobSuiteConfig
+from app.services.environment import get_secret_keys
+from app.services.runner_dispatch import dispatch_job_runner
 
 
 def _is_admin(user: CurrentUser) -> bool:
@@ -74,6 +78,222 @@ async def _require_project_write(db: AsyncSession, *, user: CurrentUser, project
 def _stable_payload_sig(payload: dict[str, object]) -> str:
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(raw).hexdigest()
+
+
+_RUNNER_TYPE_DEFAULT = "DEFAULT"
+_RUNNER_TYPE_PYTEST_ALLURE = "PYTEST_ALLURE"
+_SUPPORTED_RUNNER_TYPES = {_RUNNER_TYPE_DEFAULT, _RUNNER_TYPE_PYTEST_ALLURE}
+
+
+def _resolve_runner_type(meta: dict[str, object] | None) -> str:
+    if not isinstance(meta, dict):
+        return _RUNNER_TYPE_DEFAULT
+    raw = str(meta.get("runnerType") or "").strip().upper()
+    if raw in _SUPPORTED_RUNNER_TYPES:
+        return raw
+    return _RUNNER_TYPE_DEFAULT
+
+
+def _extract_testcase_api_params(ai_meta_json: object) -> dict[str, object]:
+    if not isinstance(ai_meta_json, dict):
+        return {}
+    raw = ai_meta_json.get("apiParams")
+    if not isinstance(raw, dict):
+        return {}
+    return dict(raw)
+
+
+def _build_execution_spec(runner_type: str) -> JobExecution:
+    if runner_type != _RUNNER_TYPE_PYTEST_ALLURE:
+        return JobExecution(runnerType=_RUNNER_TYPE_DEFAULT, artifactSpec=[])
+    return JobExecution(
+        runnerType=_RUNNER_TYPE_PYTEST_ALLURE,
+        artifactSpec=[
+            JobArtifactSpec(key="allureResults", fileName="allure-results.zip", required=True),
+            JobArtifactSpec(key="allureReport", fileName="allure-report.zip", required=False, optional=True),
+            JobArtifactSpec(key="executionLog", fileName="execution.log", required=True),
+            JobArtifactSpec(key="failureScreenshot", fileName="failure-screenshot.png", required=False, optional=True),
+            JobArtifactSpec(key="requestResponseSnapshot", fileName="request-response.json", required=False, optional=True),
+        ],
+    )
+
+
+def _update_run_execution_summary(run: Run, *, case_runs: list[CaseRun], workspace: str | None = None) -> None:
+    passed = sum(1 for row in case_runs if row.status == CaseRunStatus.PASSED)
+    failed = sum(1 for row in case_runs if row.status == CaseRunStatus.FAILED)
+    skipped = sum(1 for row in case_runs if row.status == CaseRunStatus.SKIPPED)
+    total = len(case_runs)
+    run_summary = dict(run.summary_json or {})
+    execution_result: dict[str, object] = {
+        "total": total,
+        "passed": passed,
+        "failed": failed,
+        "skipped": skipped,
+    }
+    if workspace:
+        execution_result["workspace"] = workspace
+    run_summary["executionResult"] = execution_result
+    run.summary_json = run_summary
+
+
+async def _execute_inline_pytest_allure_job(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    run: Run,
+    job: Job,
+    env: Environment | None,
+    case_runs: list[CaseRun],
+    testcase_map: dict[uuid.UUID, dict[str, object]],
+    items_for_job: list[dict[str, object]],
+    runner_type: str,
+) -> None:
+    now = datetime.utcnow()
+    run.status = RunStatus.RUNNING
+    run.start_at = run.start_at or now
+    job.status = JobStatus.RUNNING
+    job.start_at = job.start_at or now
+    for case_run in case_runs:
+        if case_run.status == CaseRunStatus.QUEUED:
+            case_run.status = CaseRunStatus.RUNNING
+            case_run.start_at = case_run.start_at or now
+    await db.flush()
+
+    env_secrets = {k: "" for k in get_secret_keys(env)} if env is not None else {}
+    payload_items: list[JobItem] = []
+    for item in items_for_job:
+        testcase_id = uuid.UUID(str(item["testcaseId"]))
+        testcase_item = testcase_map[testcase_id]
+        testcase_type = testcase_item.get("type")
+        if testcase_type is None:
+            raise HTTPException(status_code=400, detail=f"testcase_type_missing:{testcase_id}")
+        payload_items.append(
+            JobItem(
+                caseRunId=str(item["caseRunId"]),
+                testcaseId=str(item["testcaseId"]),
+                type=testcase_type,
+                contentMd=str(testcase_item.get("content_md") or " "),
+                apiMethod=str(item.get("apiMethod") or "").strip().upper() or None,
+                apiUrl=str(item.get("apiUrl") or "").strip() or None,
+                params=dict(item.get("params") or {}),
+            )
+        )
+
+    suite_cfg = dict((job.meta_json or {}).get("suiteConfig") or {})
+    payload = JobPayload(
+        jobId=str(job.id),
+        runId=str(run.id),
+        env=JobEnv(
+            baseUrl=env.base_url if env is not None else "http://localhost",
+            variables={str(k): str(v) for k, v in dict(env.variables_json or {}).items()} if env is not None else {},
+            secrets=env_secrets,
+        ),
+        suiteConfig=JobSuiteConfig(
+            timeoutSec=int(suite_cfg.get("timeoutSec") or 600),
+            retryCount=int(suite_cfg.get("retryCount") or 1),
+            failFast=bool(suite_cfg.get("failFast") or False),
+        ),
+        execution=_build_execution_spec(runner_type),
+        items=payload_items,
+    )
+
+    case_run_map = {str(case_run.id): case_run for case_run in case_runs}
+    meta_json = dict(job.meta_json or {})
+    try:
+        dispatch_result = await asyncio.to_thread(dispatch_job_runner, payload)
+        if not dispatch_result.handled or dispatch_result.output is None:
+            raise RuntimeError(f"runner_not_supported:{runner_type}")
+        output = dispatch_result.output
+        existed_artifact_keys: dict[str, set[tuple[str, str]]] = {}
+        for result in output.results:
+            case_run = case_run_map.get(result.caseRunId)
+            if case_run is None:
+                continue
+            case_run.status = result.status
+            case_run.start_at = datetime.utcfromtimestamp(result.startAt)
+            case_run.end_at = datetime.utcfromtimestamp(result.endAt) if result.endAt else None
+            case_run.error_type = result.errorType
+            case_run.error_message = result.errorMessage
+            metrics_json = dict(result.metrics.model_dump() if result.metrics else {})
+            if result.logs:
+                metrics_json["logs"] = list(result.logs)
+            case_run.metrics_json = metrics_json
+            key_set = existed_artifact_keys.setdefault(result.caseRunId, set())
+            for artifact in result.artifacts:
+                artifact_key = (artifact.type.value, artifact.storageKey)
+                if artifact_key in key_set:
+                    continue
+                key_set.add(artifact_key)
+                artifact_size = artifact.meta.get("size")
+                size = int(artifact_size) if isinstance(artifact_size, int | float) else None
+                db.add(
+                    Artifact(
+                        tenant_id=user.tenant_id,
+                        run_id=run.id,
+                        case_run_id=case_run.id,
+                        type=artifact.type,
+                        storage_url=artifact.storageKey,
+                        size=size,
+                        meta_json=dict(artifact.meta or {}),
+                    )
+                )
+        job.status = output.job_status
+        job.end_at = datetime.utcnow()
+        meta_json["executor"] = "INLINE_PYTEST_ALLURE"
+        meta_json["workspace"] = str(output.workspace)
+        job.meta_json = meta_json
+        failed_count = sum(1 for item in case_runs if item.status == CaseRunStatus.FAILED)
+        if job.status == JobStatus.DONE:
+            run.status = RunStatus.FAILED if failed_count > 0 else RunStatus.PASSED
+        elif job.status == JobStatus.FAILED:
+            run.status = RunStatus.FAILED
+        elif job.status == JobStatus.CANCELED:
+            run.status = RunStatus.CANCELED
+        else:
+            run.status = RunStatus.RUNNING
+        if run.status in (RunStatus.PASSED, RunStatus.FAILED, RunStatus.CANCELED):
+            run.end_at = datetime.utcnow()
+        _update_run_execution_summary(run, case_runs=case_runs, workspace=str(output.workspace))
+    except Exception as exc:
+        now = datetime.utcnow()
+        error_message = str(exc).strip()[:2000] or "inline_execution_failed"
+        for case_run in case_runs:
+            if case_run.status in (CaseRunStatus.QUEUED, CaseRunStatus.RUNNING):
+                case_run.status = CaseRunStatus.FAILED
+                case_run.end_at = now
+                case_run.error_type = "RUNNER_ERROR"
+                case_run.error_message = error_message
+        job.status = JobStatus.FAILED
+        job.end_at = now
+        meta_json["executor"] = "INLINE_PYTEST_ALLURE"
+        meta_json["inlineError"] = error_message
+        job.meta_json = meta_json
+        run.status = RunStatus.FAILED
+        run.end_at = now
+        _update_run_execution_summary(run, case_runs=case_runs)
+    await db.flush()
+
+
+async def _resolve_http_run_env(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project: Project,
+    env_id: uuid.UUID | None,
+) -> Environment | None:
+    if env_id is not None:
+        env = await db.scalar(select(Environment).where(Environment.id == env_id, Environment.tenant_id == user.tenant_id))
+        if env is None:
+            raise HTTPException(status_code=404, detail="Environment not found")
+        if env.project_id != project.id:
+            raise HTTPException(status_code=400, detail="Environment not in this project")
+        return env
+    return await db.scalar(
+        select(Environment)
+        .where(Environment.tenant_id == user.tenant_id, Environment.project_id == project.id)
+        .order_by(Environment.created_at.asc())
+        .limit(1)
+    )
 
 
 async def _get_or_create_direct_suite(
@@ -140,6 +360,7 @@ async def create_run(
     notify_rule_id: str | None,
     idempotency_key: str | None,
 ) -> Run:
+    runner_type = _resolve_runner_type(meta)
     project = await _get_project(db, user=user, project_id=project_id)
     await _require_project_write(db, user=user, project=project)
 
@@ -193,6 +414,7 @@ async def create_run(
 
     run_summary = {
         "meta": dict(meta or {}),
+        "runnerType": runner_type,
         "notifyRuleId": notify_rule_id,
         "suiteSnapshot": {
             "suiteId": str(suite.id),
@@ -279,6 +501,7 @@ async def create_run(
             "envId": str(env.id),
             "triggerType": trigger_type.value,
             "meta": dict(meta or {}),
+            "runnerType": runner_type,
             "notifyRuleId": notify_rule_id,
             "suiteConfig": dict(suite.config_json or {}),
             "items": items_for_job,
@@ -303,6 +526,7 @@ async def create_run_from_testcases(
     notify_rule_id: str | None,
     idempotency_key: str | None,
 ) -> Run:
+    runner_type = _resolve_runner_type(meta)
     project = await _get_project(db, user=user, project_id=project_id)
     await _require_project_write(db, user=user, project=project)
     env = await db.scalar(select(Environment).where(Environment.id == env_id, Environment.tenant_id == user.tenant_id))
@@ -416,6 +640,7 @@ async def create_run_from_testcases(
 
     run_summary = {
         "meta": dict(meta or {}),
+        "runnerType": runner_type,
         "notifyRuleId": notify_rule_id,
         "executionSource": "TESTCASE_DIRECT",
         "stopOnFailure": stop_on_failure,
@@ -515,6 +740,7 @@ async def create_run_from_testcases(
             "envId": str(env.id),
             "triggerType": trigger_type.value,
             "meta": dict(meta or {}),
+            "runnerType": runner_type,
             "notifyRuleId": notify_rule_id,
             "executionSource": "TESTCASE_DIRECT",
             "stopOnFailure": stop_on_failure,
@@ -525,6 +751,240 @@ async def create_run_from_testcases(
     )
     db.add(job)
     await db.flush()
+    return run
+
+
+async def create_run_from_testcases_http(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+    env_id: uuid.UUID | None,
+    trigger_type: TriggerType,
+    meta: dict[str, object],
+    concurrency: int,
+    stop_on_failure: bool,
+    items: list[dict[str, object]],
+    notify_rule_id: str | None,
+    idempotency_key: str | None,
+) -> Run:
+    runner_type = _resolve_runner_type(meta)
+    project = await _get_project(db, user=user, project_id=project_id)
+    await _require_project_write(db, user=user, project=project)
+    env = await _resolve_http_run_env(db, user=user, project=project, env_id=env_id)
+    if not items:
+        raise HTTPException(status_code=400, detail="items_required")
+
+    dedupe_ids: set[str] = set()
+    testcase_ids: list[uuid.UUID] = []
+    normalized_items: list[dict[str, object]] = []
+    for row in items:
+        testcase_id = uuid.UUID(str(row["testcaseId"]))
+        testcase_key = str(testcase_id)
+        if testcase_key in dedupe_ids:
+            raise HTTPException(status_code=400, detail="duplicate_testcase_in_request")
+        dedupe_ids.add(testcase_key)
+        testcase_ids.append(testcase_id)
+        normalized_items.append(
+            {
+                "testcaseId": testcase_id,
+                "overrideParams": dict(row.get("overrideParams") or {}),
+            }
+        )
+
+    testcase_rows = (
+        await db.execute(
+            select(
+                TestCase.id,
+                TestCase.project_id,
+                TestCase.type,
+                TestCase.api_method,
+                TestCase.api_url,
+                TestCase.ai_meta_json,
+                TestCase.content_md,
+            ).where(TestCase.tenant_id == user.tenant_id, TestCase.id.in_(set(testcase_ids)))
+        )
+    ).all()
+    testcase_map = {
+        r[0]: {
+            "project_id": r[1],
+            "type": r[2],
+            "api_method": r[3],
+            "api_url": r[4],
+            "api_params": _extract_testcase_api_params(r[5]),
+            "content_md": r[6],
+        }
+        for r in testcase_rows
+    }
+    if len(testcase_map) != len(set(testcase_ids)):
+        raise HTTPException(status_code=404, detail="TestCase not found")
+    if any(v["project_id"] != project.id for v in testcase_map.values()):
+        raise HTTPException(status_code=400, detail="testcase_not_in_project")
+
+    suite = await _get_or_create_direct_suite(db, user=user, project=project)
+    suite_snapshot_items: list[dict[str, object]] = []
+    for order_no, row in enumerate(normalized_items, start=1):
+        testcase_id = row["testcaseId"]
+        testcase_item = testcase_map[testcase_id]
+        api_method = str(testcase_item["api_method"] or "").strip().upper()
+        api_url = str(testcase_item["api_url"] or "").strip()
+        if not api_method or not api_url:
+            raise HTTPException(status_code=400, detail=f"testcase_api_missing:{testcase_id}")
+        merged_params = dict(testcase_item["api_params"] or {})
+        merged_params.update(dict(row["overrideParams"] or {}))
+        suite_snapshot_items.append(
+            {
+                "orderNo": order_no,
+                "testcaseId": str(testcase_id),
+                "apiMethod": api_method,
+                "apiUrl": api_url,
+                "params": merged_params,
+            }
+        )
+
+    payload_for_sig: dict[str, object] = {
+        "projectId": str(project_id),
+        "envId": str(env.id) if env else None,
+        "triggerType": trigger_type.value,
+        "meta": meta or {},
+        "concurrency": concurrency,
+        "stopOnFailure": stop_on_failure,
+        "items": [
+            {
+                "testcaseId": str(item["testcaseId"]),
+                "overrideParams": dict(item["overrideParams"] or {}),
+            }
+            for item in normalized_items
+        ],
+        "notifyRuleId": notify_rule_id,
+    }
+    payload_sig = _stable_payload_sig(payload_for_sig)
+    if idempotency_key:
+        existing = await _get_existing_idempotent_run(
+            db,
+            user=user,
+            project_id=project.id,
+            idempotency_key=idempotency_key,
+            payload_sig=payload_sig,
+        )
+        if existing is not None:
+            return existing
+
+    run_summary = {
+        "meta": dict(meta or {}),
+        "runnerType": runner_type,
+        "notifyRuleId": notify_rule_id,
+        "executionSource": "TESTCASE_HTTP_DIRECT",
+        "stopOnFailure": stop_on_failure,
+        "concurrency": concurrency,
+        "suiteSnapshot": {
+            "suiteId": str(suite.id),
+            "name": suite.name,
+            "config": dict(suite.config_json or {}),
+            "items": suite_snapshot_items,
+        },
+    }
+    if env is not None:
+        run_summary["envId"] = str(env.id)
+    if idempotency_key:
+        run_summary["idempotency"] = {"key": idempotency_key, "sig": payload_sig}
+
+    run = Run(
+        tenant_id=user.tenant_id,
+        project_id=project.id,
+        suite_id=suite.id,
+        env_id=env.id if env else None,
+        trigger_type=trigger_type,
+        status=RunStatus.QUEUED,
+        start_at=datetime.utcnow(),
+        summary_json=run_summary,
+        idempotency_key=idempotency_key,
+        created_by=user.id,
+    )
+    db.add(run)
+    try:
+        await db.flush()
+    except IntegrityError:
+        if not idempotency_key:
+            raise
+        await db.rollback()
+        existing = await _get_existing_idempotent_run(
+            db,
+            user=user,
+            project_id=project.id,
+            idempotency_key=idempotency_key,
+            payload_sig=payload_sig,
+        )
+        if existing is None:
+            raise
+        return existing
+
+    case_runs: list[CaseRun] = []
+    for row in normalized_items:
+        case_run = CaseRun(
+            tenant_id=user.tenant_id,
+            run_id=run.id,
+            testcase_id=row["testcaseId"],
+            status=CaseRunStatus.QUEUED,
+        )
+        db.add(case_run)
+        case_runs.append(case_run)
+    await db.flush()
+
+    items_for_job: list[dict[str, object]] = []
+    for order_no, row in enumerate(normalized_items, start=1):
+        testcase_id = row["testcaseId"]
+        testcase_item = testcase_map[testcase_id]
+        api_method = str(testcase_item["api_method"] or "").strip().upper()
+        api_url = str(testcase_item["api_url"] or "").strip()
+        merged_params = dict(testcase_item["api_params"] or {})
+        merged_params.update(dict(row["overrideParams"] or {}))
+        case_run = case_runs[order_no - 1]
+        items_for_job.append(
+            {
+                "caseRunId": str(case_run.id),
+                "testcaseId": str(testcase_id),
+                "type": testcase_item["type"].value if testcase_item["type"] else None,
+                "apiMethod": api_method,
+                "apiUrl": api_url,
+                "params": merged_params,
+                "orderNo": order_no,
+            }
+        )
+
+    job = Job(
+        tenant_id=user.tenant_id,
+        run_id=run.id,
+        status=JobStatus.QUEUED,
+        meta_json={
+            "projectId": str(project.id),
+            "suiteId": str(suite.id),
+            "envId": str(env.id) if env else None,
+            "triggerType": trigger_type.value,
+            "meta": dict(meta or {}),
+            "runnerType": runner_type,
+            "notifyRuleId": notify_rule_id,
+            "executionSource": "TESTCASE_HTTP_DIRECT",
+            "stopOnFailure": stop_on_failure,
+            "concurrency": concurrency,
+            "suiteConfig": dict(suite.config_json or {}),
+            "items": items_for_job,
+        },
+    )
+    db.add(job)
+    await db.flush()
+    if runner_type == _RUNNER_TYPE_PYTEST_ALLURE:
+        await _execute_inline_pytest_allure_job(
+            db,
+            user=user,
+            run=run,
+            job=job,
+            env=env,
+            case_runs=case_runs,
+            testcase_map=testcase_map,
+            items_for_job=items_for_job,
+            runner_type=runner_type,
+        )
     return run
 
 
@@ -752,6 +1212,9 @@ async def retry_run(
     env = await db.scalar(select(Environment).where(Environment.id == env_id, Environment.tenant_id == user.tenant_id))
     if suite is None or env is None:
         raise HTTPException(status_code=404, detail="Suite or Environment not found")
+    run_summary = dict(run.summary_json or {}) if isinstance(run.summary_json, dict) else {}
+    summary_runner_type = str(run_summary.get("runnerType") or "").strip().upper()
+    runner_type = summary_runner_type if summary_runner_type in _SUPPORTED_RUNNER_TYPES else _RUNNER_TYPE_DEFAULT
 
     payload_for_sig: dict[str, object] = {
         "projectId": str(run.project_id),
@@ -775,6 +1238,7 @@ async def retry_run(
 
     retry_summary = {
         "meta": {"retryOf": str(run.id), "failedOnly": failed_only},
+        "runnerType": runner_type,
         "notifyRuleId": (run.summary_json or {}).get("notifyRuleId"),
         "suiteSnapshot": {
             "suiteId": str(suite.id),
@@ -866,6 +1330,7 @@ async def retry_run(
             "envId": str(env.id),
             "triggerType": TriggerType.MANUAL.value,
             "meta": {"retryOf": str(run.id), "failedOnly": failed_only},
+            "runnerType": runner_type,
             "notifyRuleId": (run.summary_json or {}).get("notifyRuleId"),
             "suiteConfig": dict(suite.config_json or {}),
             "items": items_for_job,

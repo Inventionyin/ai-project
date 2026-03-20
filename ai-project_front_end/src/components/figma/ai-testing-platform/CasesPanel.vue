@@ -14,7 +14,7 @@ import CreateCaseModal from '@/components/figma/ai-testing-platform/CreateCaseMo
 import EditCaseModal from '@/components/figma/ai-testing-platform/EditCaseModal.vue'
 import AiGenerateCaseModal from '@/components/figma/ai-testing-platform/AiGenerateCaseModal.vue'
 import BatchRunDrawer from '@/components/figma/ai-testing-platform/BatchRunDrawer.vue'
-import { buildRunPayload, fetchBindingsByTestcaseIds, fetchProjectEnvironments, fetchRunCaseRuns, runFromTestcases, type BatchRunFormItem, type BatchRunFormState } from '@/lib/aiTestingPlatformApi'
+import { buildRunPayloadDirect, fetchRunCaseRuns, runFromTestcasesHttp, type BatchRunDirectFormItem, type BatchRunDirectFormState } from '@/lib/aiTestingPlatformApi'
 
 const route = useRoute()
 const router = useRouter()
@@ -407,48 +407,28 @@ async function executeBatchRunFromDrawer() {
   batchRunRunId.value = ''
   clearBatchRunPolling()
   try {
-    const [bindingsMap, environments] = await Promise.all([
-      fetchBindingsByTestcaseIds(selectedRows.value.map((row) => row.id)),
-      fetchProjectEnvironments(projectId)
-    ])
-    const envId = String(environments?.[0]?.id || '').trim()
-    if (!envId) {
-      throw new Error('当前项目缺少可用执行环境')
-    }
-    const items: BatchRunFormItem[] = []
-    const missingBindingTitles: string[] = []
+    const items: BatchRunDirectFormItem[] = []
     for (const row of selectedRows.value) {
-      const bindingId = String(bindingsMap[row.id]?.[0]?.id || '').trim()
-      if (!bindingId) {
-        missingBindingTitles.push(row.title)
-        continue
-      }
-      const item: BatchRunFormItem = { testcaseId: row.id, bindingId }
+      const item: BatchRunDirectFormItem = { testcaseId: row.id }
       if (row.apiParams && typeof row.apiParams === 'object' && !Array.isArray(row.apiParams)) {
         item.overrideParams = row.apiParams
       }
       items.push(item)
     }
-    if (missingBindingTitles.length) {
-      throw new Error(`有 ${missingBindingTitles.length} 条用例缺少绑定配置，请先完成绑定后再执行`)
-    }
-    const state: BatchRunFormState = {
+    const state: BatchRunDirectFormState = {
       projectId,
-      envId,
       triggerType: 'MANUAL',
-      meta: { source: 'cases_panel_drawer' },
+      meta: { source: 'cases_panel_drawer', runnerType: 'PYTEST_ALLURE' },
       concurrency: 5,
       stopOnFailure: false,
       items
     }
-    buildRunPayload(state)
-    const response = await runFromTestcases(state, `ik_cases_drawer_${Date.now()}`)
+    buildRunPayloadDirect(state)
+    const response = await runFromTestcasesHttp(state, `ik_cases_drawer_${Date.now()}`)
     const runId = extractRunId(response)
     batchRunRunId.value = runId
     if (!runId) {
-      batchRunDrawerState.value = 'completed'
-      showToast('批量执行已发起')
-      return
+      throw new Error('批量执行未返回 runId')
     }
     scheduleBatchRunStatusPoll(runId)
     showToast('批量执行已发起')

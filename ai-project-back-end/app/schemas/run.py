@@ -33,6 +33,22 @@ class RunFromTestcasesRequest(BaseSchema):
     notifyRuleId: IdStr | None = None
 
 
+class RunFromTestcasesHttpItem(BaseSchema):
+    testcaseId: IdStr
+    overrideParams: dict[str, object] = Field(default_factory=dict)
+
+
+class RunFromTestcasesHttpRequest(BaseSchema):
+    projectId: IdStr
+    envId: IdStr | None = None
+    triggerType: TriggerType
+    meta: dict[str, object] = Field(default_factory=dict)
+    concurrency: int = Field(default=10, ge=1, le=100)
+    stopOnFailure: bool = False
+    items: list[RunFromTestcasesHttpItem] = Field(min_length=1, max_length=10_000)
+    notifyRuleId: IdStr | None = None
+
+
 class RunProgress(BaseSchema):
     done: int = Field(ge=0)
     total: int = Field(ge=0)
@@ -43,7 +59,7 @@ class RunDetailData(BaseSchema):
     status: RunStatus
     progress: RunProgress
     suiteId: IdStr
-    envId: IdStr
+    envId: IdStr | None = None
     startAt: UnixTs
 
 

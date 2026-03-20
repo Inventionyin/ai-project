@@ -16,11 +16,23 @@ from app.models.enums import CaseRunStatus, JobStatus, RunStatus, WorkerStatus
 from app.models.run import Artifact, CaseRun, Job, Run
 from app.models.testcase import TestCase
 from app.models.worker import Worker
-from app.schemas.worker import JobEnv, JobItem, JobPayload, JobSuiteConfig, WorkerPollData, WorkerRegisterRequest
+from app.schemas.worker import (
+    JobArtifactSpec,
+    JobEnv,
+    JobExecution,
+    JobItem,
+    JobPayload,
+    JobSuiteConfig,
+    WorkerPollData,
+    WorkerRegisterRequest,
+)
 from app.services.environment import get_secret_keys
 
 _WORKER_CAPABILITIES = {"API", "UI", "PERF"}
 _TERMINAL_CASE_STATUS = {CaseRunStatus.PASSED, CaseRunStatus.FAILED, CaseRunStatus.SKIPPED}
+_RUNNER_TYPE_DEFAULT = "DEFAULT"
+_RUNNER_TYPE_PYTEST_ALLURE = "PYTEST_ALLURE"
+_RUNNER_TYPES = {_RUNNER_TYPE_DEFAULT, _RUNNER_TYPE_PYTEST_ALLURE}
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +78,28 @@ def _required_caps_for_job(job: Job) -> set[str]:
         if raw_type in _WORKER_CAPABILITIES:
             required.add(raw_type)
     return required
+
+
+def _resolve_runner_type(meta: dict[str, object]) -> str:
+    runner_type = str(meta.get("runnerType") or "").strip().upper()
+    if runner_type in _RUNNER_TYPES:
+        return runner_type
+    return _RUNNER_TYPE_DEFAULT
+
+
+def _build_execution_spec(meta: dict[str, object]) -> JobExecution:
+    runner_type = _resolve_runner_type(meta)
+    if runner_type != _RUNNER_TYPE_PYTEST_ALLURE:
+        return JobExecution(runnerType=_RUNNER_TYPE_DEFAULT, artifactSpec=[])
+    return JobExecution(
+        runnerType=_RUNNER_TYPE_PYTEST_ALLURE,
+        artifactSpec=[
+            JobArtifactSpec(key="allureResults", fileName="allure-results.zip", required=True),
+            JobArtifactSpec(key="executionLog", fileName="execution.log", required=True),
+            JobArtifactSpec(key="failureScreenshot", fileName="failure-screenshot.png", optional=True),
+            JobArtifactSpec(key="requestResponseSnapshot", fileName="request-response.json", optional=True),
+        ],
+    )
 
 
 async def get_current_worker(
@@ -227,12 +261,12 @@ async def poll_job(
             env_id = uuid.UUID(str(meta.get("envId")))
         except ValueError:
             env_id = run.env_id
-    if env_id is None:
-        raise HTTPException(status_code=500, detail="Run environment missing")
-    env = await db.scalar(select(Environment).where(Environment.id == env_id, Environment.tenant_id == worker.tenant_id))
-    if env is None:
-        raise HTTPException(status_code=404, detail="Environment not found")
-    env_secrets = {k: "" for k in get_secret_keys(env)}
+    env: Environment | None = None
+    if env_id is not None:
+        env = await db.scalar(select(Environment).where(Environment.id == env_id, Environment.tenant_id == worker.tenant_id))
+        if env is None:
+            raise HTTPException(status_code=404, detail="Environment not found")
+    env_secrets = {k: "" for k in get_secret_keys(env)} if env is not None else {}
 
     suite_cfg = dict(meta.get("suiteConfig") or {})
     suite_config = JobSuiteConfig(
@@ -252,6 +286,8 @@ async def poll_job(
                 testcaseId=str(testcase_id),
                 type=row["type"],
                 contentMd=testcase_content_map.get(testcase_id) or " ",
+                apiMethod=str(row.get("apiMethod") or "").strip().upper() or None,
+                apiUrl=str(row.get("apiUrl") or "").strip() or None,
                 params=dict(row.get("params") or {}),
             )
         )
@@ -262,11 +298,12 @@ async def poll_job(
             jobId=str(selected_job.id),
             runId=str(run.id),
             env=JobEnv(
-                baseUrl=env.base_url,
-                variables={str(k): str(v) for k, v in dict(env.variables_json or {}).items()},
+                baseUrl=env.base_url if env is not None else "http://localhost",
+                variables={str(k): str(v) for k, v in dict(env.variables_json or {}).items()} if env is not None else {},
                 secrets=env_secrets,
             ),
             suiteConfig=suite_config,
+            execution=_build_execution_spec(meta),
             items=payload_items,
         ),
         sleepMs=2000,

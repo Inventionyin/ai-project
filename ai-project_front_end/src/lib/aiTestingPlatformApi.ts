@@ -88,16 +88,47 @@ export type BatchRunFormState = {
   projectId: string
   envId: string
   triggerType: string
-  meta: Record<string, unknown> & { source: string }
+  meta: Record<string, unknown> & { source: string; runnerType?: string }
   concurrency: number
   stopOnFailure: boolean
   items: BatchRunFormItem[]
 }
 
-export type CaseRunItem = {
+export type BatchRunDirectFormItem = {
+  testcaseId: string
+  overrideParams?: unknown
+}
+
+export type BatchRunDirectFormState = {
+  projectId: string
+  envId?: string
+  triggerType: string
+  meta: Record<string, unknown> & { source: string; runnerType?: string }
+  concurrency: number
+  stopOnFailure: boolean
+  items: BatchRunDirectFormItem[]
+}
+
+export type RunDetailData = {
   id: string
+  status: string
+  progress?: {
+    done?: number
+    total?: number
+  }
+  suiteId?: string
+  envId?: string
+  startAt?: number
+}
+
+export type CaseRunItem = {
+  caseRunId: string
   testcaseId?: string
   status?: string
+  startAt?: number | null
+  endAt?: number | null
+  errorType?: string | null
+  errorMessage?: string | null
   bindingSnapshot?: unknown
 }
 
@@ -348,6 +379,7 @@ export function buildRunPayload(state: BatchRunFormState) {
   const envId = String(state.envId || '').trim()
   const triggerType = String(state.triggerType || '').trim()
   const source = String(state.meta?.source || '').trim()
+  const runnerType = String(state.meta?.runnerType || '').trim().toUpperCase()
   const concurrency = Number.isFinite(state.concurrency) ? Math.min(100, Math.max(1, Math.floor(state.concurrency))) : 1
   const stopOnFailure = Boolean(state.stopOnFailure)
   const items = Array.isArray(state.items) ? state.items : []
@@ -377,7 +409,7 @@ export function buildRunPayload(state: BatchRunFormState) {
     projectId,
     envId,
     triggerType,
-    meta: { source },
+    meta: runnerType ? { source, runnerType } : { source },
     concurrency,
     stopOnFailure,
     items: normalizedItems
@@ -393,20 +425,81 @@ export async function runFromTestcases(payload: BatchRunFormState, idempotencyKe
   const ik = String(idempotencyKey || '').trim()
   if (ik) headers['Idempotency-Key'] = ik
 
-  return requestJson<{ runId: string } | Record<string, unknown>>('/api/runs/from-testcases', {
+  return requestJson<RunDetailData>('/api/runs/from-testcases', {
     method: 'POST',
     headers,
     body: JSON.stringify(body)
   })
 }
 
-export async function fetchRunCaseRuns(runId: string, withBindingSnapshot = false) {
+export function buildRunPayloadDirect(state: BatchRunDirectFormState) {
+  const projectId = String(state.projectId || '').trim()
+  const envId = String(state.envId || '').trim()
+  const triggerType = String(state.triggerType || '').trim()
+  const source = String(state.meta?.source || '').trim()
+  const runnerType = String(state.meta?.runnerType || '').trim().toUpperCase()
+  const concurrency = Number.isFinite(state.concurrency) ? Math.min(100, Math.max(1, Math.floor(state.concurrency))) : 1
+  const stopOnFailure = Boolean(state.stopOnFailure)
+  const items = Array.isArray(state.items) ? state.items : []
+  const normalizedItems = items
+    .map((item) => ({
+      testcaseId: String(item?.testcaseId || '').trim(),
+      overrideParams: item?.overrideParams
+    }))
+    .filter((item) => item.testcaseId)
+    .map((item) => (item.overrideParams === undefined ? { testcaseId: item.testcaseId } : item))
+
+  if (!projectId) throw new Error('projectId 不能为空')
+  if (!triggerType) throw new Error('triggerType 不能为空')
+  if (!source) throw new Error('meta.source 不能为空')
+  if (!normalizedItems.length) throw new Error('items 不能为空')
+
+  const dedupe = new Set<string>()
+  for (const item of normalizedItems) {
+    if (dedupe.has(item.testcaseId)) throw new Error('请求中存在重复的 testcaseId')
+    dedupe.add(item.testcaseId)
+  }
+
+  const body = {
+    projectId,
+    triggerType,
+    meta: runnerType ? { source, runnerType } : { source },
+    concurrency,
+    stopOnFailure,
+    items: normalizedItems
+  } as {
+    projectId: string
+    envId?: string
+    triggerType: string
+    meta: { source: string; runnerType?: string }
+    concurrency: number
+    stopOnFailure: boolean
+    items: Array<{ testcaseId: string; overrideParams?: unknown }>
+  }
+  if (envId) body.envId = envId
+  return body
+}
+
+export async function runFromTestcasesHttp(payload: BatchRunDirectFormState, idempotencyKey?: string) {
+  const body = buildRunPayloadDirect(payload)
+  const headers: Record<string, string> = {
+    Authorization: resolveAuthHeader(),
+    'Content-Type': 'application/json'
+  }
+  const ik = String(idempotencyKey || '').trim()
+  if (ik) headers['Idempotency-Key'] = ik
+
+  return requestJson<RunDetailData>('/api/runs/from-testcases-http', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body)
+  })
+}
+
+export async function fetchRunCaseRuns(runId: string) {
   const id = String(runId || '').trim()
   if (!id) return []
-  const query = new URLSearchParams()
-  if (withBindingSnapshot) query.set('bindingSnapshot', 'true')
-  const suffix = query.toString()
-  const data = await requestJson<CaseRunItem[] | { items?: CaseRunItem[] }>(`/api/runs/${encodeURIComponent(id)}/case-runs${suffix ? `?${suffix}` : ''}`, {
+  const data = await requestJson<CaseRunItem[] | { items?: CaseRunItem[] }>(`/api/runs/${encodeURIComponent(id)}/case-runs`, {
     method: 'GET',
     headers: {
       Authorization: resolveAuthHeader()

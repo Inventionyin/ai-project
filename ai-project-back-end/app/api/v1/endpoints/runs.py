@@ -14,17 +14,27 @@ from app.schemas.run import (
     RunCancelResponseData,
     RunCreateRequest,
     RunDetailData,
+    RunFromTestcasesHttpRequest,
     RunFromTestcasesRequest,
     RunProgress,
     RunRetryRequest,
 )
-from app.services.run import cancel_run, create_run, create_run_from_testcases, get_run, list_case_runs, list_runs, retry_run
+from app.services.run import (
+    cancel_run,
+    create_run,
+    create_run_from_testcases,
+    create_run_from_testcases_http,
+    get_run,
+    list_case_runs,
+    list_runs,
+    retry_run,
+)
 
 router = APIRouter(prefix="/runs")
 
 
 def _to_run_detail(run, done: int, total: int) -> RunDetailData:
-    if run.suite_id is None or run.env_id is None:
+    if run.suite_id is None:
         raise HTTPException(status_code=500, detail="Run data invalid")
     start_at = run.start_at or run.created_at
     return RunDetailData(
@@ -32,7 +42,7 @@ def _to_run_detail(run, done: int, total: int) -> RunDetailData:
         status=run.status,
         progress=RunProgress(done=done, total=total),
         suiteId=str(run.suite_id),
-        envId=str(run.env_id),
+        envId=str(run.env_id) if run.env_id else None,
         startAt=to_unix_ts(start_at),
     )
 
@@ -119,6 +129,42 @@ async def create_from_testcases_(
             user=user,
             project_id=uuid.UUID(payload.projectId),
             env_id=uuid.UUID(payload.envId),
+            trigger_type=payload.triggerType,
+            meta=dict(payload.meta or {}),
+            concurrency=payload.concurrency,
+            stop_on_failure=payload.stopOnFailure,
+            items=[item.model_dump() for item in payload.items],
+            notify_rule_id=payload.notifyRuleId,
+            idempotency_key=idem,
+        )
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    run, done, total = await get_run(db, user=user, run_id=run.id)
+    return ApiResponse(data=_to_run_detail(run, done, total), requestId=request_id)
+
+
+@router.post("/from-testcases-http", response_model=ApiResponse[RunDetailData])
+async def create_from_testcases_http_(
+    payload: RunFromTestcasesHttpRequest,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    request_id: str = Depends(get_request_id),
+) -> ApiResponse[RunDetailData]:
+    idem = (idempotency_key or "").strip() or None
+    if idem is not None:
+        idem = idem[:128]
+    env_uuid: uuid.UUID | None = None
+    if payload.envId:
+        env_uuid = uuid.UUID(payload.envId)
+    try:
+        run = await create_run_from_testcases_http(
+            db,
+            user=user,
+            project_id=uuid.UUID(payload.projectId),
+            env_id=env_uuid,
             trigger_type=payload.triggerType,
             meta=dict(payload.meta or {}),
             concurrency=payload.concurrency,
