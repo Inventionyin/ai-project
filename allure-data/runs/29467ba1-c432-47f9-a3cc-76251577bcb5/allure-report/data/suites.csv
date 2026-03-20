@@ -1,0 +1,3 @@
+"DESCRIPTION","DURATION IN MS","NAME","PARENT SUITE","START TIME","STATUS","STOP TIME","SUB SUITE","SUITE","TEST CLASS","TEST METHOD"
+"","248","Case 228f1f28-d5b3-4d47-8b4f-872e1b793523","tests","2026-03-20","failed","2026-03-20","","test_case_0002_228f1f28_d5b3_4d47_8b4f_872e1b793523","",""
+"","252","Case 74ae1955-a9f1-4bcc-872a-533b5fc1e306","tests","2026-03-20","passed","2026-03-20","","test_case_0001_74ae1955_a9f1_4bcc_872a_533b5fc1e306","",""

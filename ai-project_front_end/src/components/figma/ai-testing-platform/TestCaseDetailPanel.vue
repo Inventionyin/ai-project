@@ -6,7 +6,6 @@ import suiteDetailRun from '@/assets/figma/ai-testing-platform/suite-detail-run.
 import suiteDetailSave from '@/assets/figma/ai-testing-platform/suite-detail-save.svg'
 import chevronDownSmall from '@/assets/figma/ai-testing-platform/chevron-down-small.svg'
 import modalTagsIcon from '@/assets/figma/ai-testing-platform/modal-tags-icon.svg'
-import modalOwnerIcon from '@/assets/figma/ai-testing-platform/modal-owner-icon.svg'
 import btnAiGenerate from '@/assets/figma/ai-testing-platform/btn-ai-generate.svg'
 
 type CaseType = 'API' | 'UI' | 'PERF' | 'MIX'
@@ -32,6 +31,12 @@ type TestCaseDetail = {
   ownerId?: string | null
   ownerName?: string | null
   contentMd: string
+  feature?: string | null
+  apiMethod?: string | null
+  apiUrl?: string | null
+  apiParams?: Record<string, unknown>
+  apiHeaders?: Record<string, string>
+  expectedResult?: string | null
 }
 
 const router = useRouter()
@@ -78,13 +83,18 @@ const statusCodeMap: Record<CaseStatus, CaseStatusCode> = {
 }
 
 const form = reactive({
+  feature: '',
   title: '',
+  apiMethod: '',
+  apiUrl: '',
+  apiParamsInput: '',
+  apiHeadersInput: '',
+  expectedResult: '',
   type: 'API' as CaseType,
   priority: 'P0' as CasePriority,
   status: '草稿' as CaseStatus,
   tags: '',
   owner: '',
-  requirement: '',
   contentMd: ''
 })
 
@@ -125,11 +135,85 @@ function parseTags(value: string) {
     .filter(Boolean)
 }
 
+function parseJsonObject(value: string, field: string): Record<string, unknown> {
+  const text = value.trim()
+  if (!text) {
+    throw new Error(`${field}不能为空`)
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    throw new Error(`${field}需为合法JSON对象`)
+  }
+  if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
+    throw new Error(`${field}需为合法JSON对象`)
+  }
+  return parsed as Record<string, unknown>
+}
+
+function parseHeaderObject(value: string): Record<string, string> {
+  const text = value.trim()
+  if (!text) {
+    return {}
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    throw new Error('Header需为合法JSON对象')
+  }
+  if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
+    throw new Error('Header需为合法JSON对象')
+  }
+  const headers: Record<string, string> = {}
+  for (const [key, item] of Object.entries(parsed as Record<string, unknown>)) {
+    const headerKey = String(key || '').trim()
+    if (!headerKey) {
+      throw new Error('Header键不能为空')
+    }
+    if (typeof item !== 'string') {
+      throw new Error('Header值必须为字符串')
+    }
+    headers[headerKey] = item
+  }
+  return headers
+}
+
 async function saveCase() {
+  const feature = form.feature.trim()
   const title = form.title.trim()
+  const apiMethod = form.apiMethod.trim()
+  const apiUrl = form.apiUrl.trim()
+  const expectedResult = form.expectedResult.trim()
   const contentMd = form.contentMd.trim()
+  let apiParams: Record<string, unknown> = {}
+  let apiHeaders: Record<string, string> = {}
+  try {
+    apiParams = parseJsonObject(form.apiParamsInput, '接口参数')
+    apiHeaders = parseHeaderObject(form.apiHeadersInput)
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '接口参数校验失败', 'error')
+    return
+  }
+  if (!feature) {
+    showToast('功能模块不能为空', 'error')
+    return
+  }
   if (!title) {
     showToast('标题不能为空', 'error')
+    return
+  }
+  if (!apiMethod) {
+    showToast('调用方式不能为空', 'error')
+    return
+  }
+  if (!apiUrl) {
+    showToast('interfaceUrl不能为空', 'error')
+    return
+  }
+  if (!expectedResult) {
+    showToast('预期结果不能为空', 'error')
     return
   }
   if (!contentMd) {
@@ -156,7 +240,13 @@ async function saveCase() {
         status: statusCodeMap[form.status],
         tags: parseTags(form.tags),
         contentMd,
-        ownerId: currentDetail.value?.ownerId || null
+        ownerId: currentDetail.value?.ownerId || null,
+        feature,
+        apiMethod,
+        apiUrl,
+        apiParams,
+        apiHeaders,
+        expectedResult
       })
     })
     const payload = await response.json() as ApiResponse<TestCaseDetail>
@@ -166,6 +256,12 @@ async function saveCase() {
     const detail = payload.data
     currentDetail.value = detail
     form.title = detail.title
+    form.feature = detail.feature || ''
+    form.apiMethod = detail.apiMethod || ''
+    form.apiUrl = detail.apiUrl || ''
+    form.apiParamsInput = JSON.stringify(detail.apiParams || {}, null, 2)
+    form.apiHeadersInput = Object.keys(detail.apiHeaders || {}).length ? JSON.stringify(detail.apiHeaders, null, 2) : ''
+    form.expectedResult = detail.expectedResult || ''
     form.type = detail.type
     form.priority = detail.priority
     form.status = statusLabelMap[detail.status]
@@ -198,6 +294,12 @@ async function loadCaseDetail() {
     const detail = payload.data
     currentDetail.value = detail
     form.title = detail.title
+    form.feature = detail.feature || ''
+    form.apiMethod = detail.apiMethod || ''
+    form.apiUrl = detail.apiUrl || ''
+    form.apiParamsInput = JSON.stringify(detail.apiParams || {}, null, 2)
+    form.apiHeadersInput = Object.keys(detail.apiHeaders || {}).length ? JSON.stringify(detail.apiHeaders, null, 2) : ''
+    form.expectedResult = detail.expectedResult || ''
     form.type = detail.type
     form.priority = detail.priority
     form.status = statusLabelMap[detail.status]
@@ -327,6 +429,16 @@ watch(() => route.query.tab, () => {
         <form class="w-full">
           <div class="grid grid-cols-1 gap-[16px] md:grid-cols-2">
             <div class="flex flex-col gap-[6px]">
+              <label for="case-feature" class="text-[14px] font-medium leading-[20px] text-[#0A0A0A]">功能模块 <span class="text-[#FB2C36]">*</span></label>
+              <input
+                id="case-feature"
+                v-model="form.feature"
+                type="text"
+                class="h-[36px] w-full rounded-[10px] border-[0.6667px] border-black/10 bg-white px-[12px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
+              />
+            </div>
+
+            <div class="flex flex-col gap-[6px]">
               <label for="case-title" class="text-[14px] font-medium leading-[20px] text-[#0A0A0A]">标题 <span class="text-[#FB2C36]">*</span></label>
               <input
                 id="case-title"
@@ -398,29 +510,63 @@ watch(() => route.query.tab, () => {
                 class="h-[36px] w-full rounded-[10px] border-[0.6667px] border-black/10 bg-white px-[12px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
               />
             </div>
-
-            <div class="flex flex-col gap-[6px]">
-              <div class="flex items-center gap-[6px]">
-                <img :src="modalOwnerIcon" alt="" class="h-[13px] w-[13px]" />
-                <label for="case-owner" class="text-[14px] font-medium leading-[20px] text-[#0A0A0A]">维护人</label>
-              </div>
-              <input
-                id="case-owner"
-                v-model="form.owner"
-                type="text"
-                class="h-[36px] w-full rounded-[10px] border-[0.6667px] border-black/10 bg-white px-[12px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
-              />
-            </div>
           </div>
 
           <div class="mt-[16px] flex flex-col gap-[6px]">
-            <label for="case-requirement" class="text-[14px] font-medium leading-[20px] text-[#0A0A0A]">关联需求（可选）</label>
+            <label for="case-api-method" class="text-[14px] font-medium leading-[20px] text-[#0A0A0A]">调用方式 <span class="text-[#FB2C36]">*</span></label>
             <input
-              id="case-requirement"
-              v-model="form.requirement"
+              id="case-api-method"
+              v-model="form.apiMethod"
               type="text"
-              placeholder="需求 ID 或 URL，如 STORY-123"
-              class="h-[36px] w-full rounded-[10px] border-[0.6667px] border-black/10 bg-white px-[12px] text-[14px] leading-[20px] text-[#0A0A0A] placeholder:text-black/40 outline-none"
+              class="h-[36px] w-full rounded-[10px] border-[0.6667px] border-black/10 bg-white px-[12px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
+            />
+          </div>
+
+          <div class="mt-[16px] flex flex-col gap-[6px]">
+            <label for="case-api-url" class="text-[14px] font-medium leading-[20px] text-[#0A0A0A]">interfaceUrl <span class="text-[#FB2C36]">*</span></label>
+            <input
+              id="case-api-url"
+              v-model="form.apiUrl"
+              type="text"
+              class="h-[36px] w-full rounded-[10px] border-[0.6667px] border-black/10 bg-white px-[12px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
+            />
+          </div>
+
+          <div class="mt-[16px] flex flex-col gap-[6px]">
+            <label for="case-api-params" class="text-[14px] font-medium leading-[20px] text-[#0A0A0A]">接口参数 <span class="text-[#FB2C36]">*</span></label>
+            <textarea
+              id="case-api-params"
+              v-model="form.apiParamsInput"
+              class="h-[128px] w-full resize-y rounded-[10px] border-[0.6667px] border-black/10 bg-white p-[12px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
+            />
+          </div>
+
+          <div class="mt-[16px] flex flex-col gap-[6px]">
+            <label for="case-api-headers" class="text-[14px] font-medium leading-[20px] text-[#0A0A0A]">Header</label>
+            <textarea
+              id="case-api-headers"
+              v-model="form.apiHeadersInput"
+              class="h-[128px] w-full resize-y rounded-[10px] border-[0.6667px] border-black/10 bg-white p-[12px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
+            />
+          </div>
+
+          <div class="mt-[16px] flex flex-col gap-[6px]">
+            <label for="case-expected-result" class="text-[14px] font-medium leading-[20px] text-[#0A0A0A]">预期结果 <span class="text-[#FB2C36]">*</span></label>
+            <textarea
+              id="case-expected-result"
+              v-model="form.expectedResult"
+              class="h-[128px] w-full resize-y rounded-[10px] border-[0.6667px] border-black/10 bg-white p-[12px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
+            />
+          </div>
+
+          <div class="mt-[16px] flex flex-col gap-[6px]">
+            <label for="case-owner" class="text-[14px] font-medium leading-[20px] text-[#0A0A0A]">维护人</label>
+            <input
+              id="case-owner"
+              v-model="form.owner"
+              type="text"
+              class="h-[36px] w-full rounded-[10px] border-[0.6667px] border-black/10 bg-white px-[12px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
+              readonly
             />
           </div>
         </form>

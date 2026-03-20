@@ -279,29 +279,44 @@ async def update_testcase(
     if uuid.UUID(payload.projectId) != testcase.project_id:
         raise HTTPException(status_code=400, detail="projectId mismatch")
 
+    feature = _normalize_optional_text(payload.feature)
+    api_method = _normalize_optional_text(payload.apiMethod.upper() if payload.apiMethod else None)
+    api_url = _normalize_optional_text(payload.apiUrl)
+    expected_result = _normalize_expected_result(payload.expectedResult)
+    if feature is None:
+        raise HTTPException(status_code=400, detail="Feature is required")
+    if api_method is None:
+        raise HTTPException(status_code=400, detail="API method is required")
+    if api_url is None:
+        raise HTTPException(status_code=400, detail="API URL is required")
+    if expected_result is None:
+        raise HTTPException(status_code=400, detail="expectedResult is required")
+
     testcase.title = payload.title
     testcase.type = payload.type
     testcase.priority = payload.priority
     testcase.status = payload.status
     testcase.tags_json = payload.tags
     testcase.content_md = payload.contentMd
-    if payload.feature is not None:
-        testcase.feature = _normalize_optional_text(payload.feature)
-    if payload.apiUrl is not None:
-        testcase.api_url = _normalize_optional_text(payload.apiUrl)
-    if payload.apiMethod is not None:
-        testcase.api_method = _normalize_optional_text(payload.apiMethod.upper())
-    if payload.apiParams is not None:
-        testcase.ai_meta_json = _merge_api_meta(testcase.ai_meta_json, api_params=payload.apiParams)
-    if payload.apiHeaders is not None:
-        testcase.ai_meta_json = _merge_api_meta(testcase.ai_meta_json, api_headers=payload.apiHeaders)
-    if payload.expectedResult is not None:
-        expected_result = _normalize_expected_result(payload.expectedResult)
-        if expected_result is None:
-            raise HTTPException(status_code=400, detail="expectedResult cannot be empty")
-        testcase.ai_meta_json = _merge_api_meta(testcase.ai_meta_json, expected_result=expected_result)
-    if payload.ownerId is not None:
-        testcase.owner_id = uuid.UUID(payload.ownerId)
+    testcase.feature = feature
+    testcase.api_url = api_url
+    testcase.api_method = api_method
+    testcase.ai_meta_json = _merge_api_meta(
+        testcase.ai_meta_json,
+        api_params=payload.apiParams,
+        api_headers=payload.apiHeaders,
+        expected_result=expected_result,
+    )
+    if payload.ownerId:
+        owner_id = uuid.UUID(payload.ownerId)
+        owner_user = await db.scalar(
+            select(User).where(User.id == owner_id, User.tenant_id == user.tenant_id)
+        )
+        if not owner_user:
+            raise HTTPException(status_code=400, detail="Owner not found")
+        testcase.owner_id = owner_id
+    else:
+        testcase.owner_id = None
 
     testcase.version += 1
     version = TestCaseVersion(

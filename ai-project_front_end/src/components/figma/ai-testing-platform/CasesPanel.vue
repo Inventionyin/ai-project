@@ -112,11 +112,18 @@ type CreateCasePayload = {
 }
 
 type EditCasePayload = {
+  feature: string
   title: string
+  apiMethod: string
+  apiUrl: string
+  apiParams: Record<string, unknown>
+  apiHeaders: Record<string, string>
+  expectedResult: string
   type: TestCaseListItem['type']
   priority: TestCaseListItem['priority']
   status: TestCaseListItem['status']
   tags: string[]
+  contentMd: string
   ownerId: string
 }
 
@@ -575,15 +582,39 @@ async function deleteCase(index: number) {
 async function saveEditCase(payload: EditCasePayload) {
   if (!editingCaseId.value || !editingCaseDetail.value) return
   const title = payload.title.trim()
+  const feature = payload.feature.trim()
+  const apiMethod = payload.apiMethod.trim()
+  const apiUrl = payload.apiUrl.trim()
+  const expectedResult = payload.expectedResult.trim()
+  const contentMd = payload.contentMd.trim()
   if (!title) {
     window.alert('请输入用例标题')
     return
   }
+  if (!feature) {
+    window.alert('请输入功能模块')
+    return
+  }
+  if (!apiMethod) {
+    window.alert('请输入调用方式')
+    return
+  }
+  if (!apiUrl) {
+    window.alert('请输入interfaceUrl')
+    return
+  }
+  if (!expectedResult) {
+    window.alert('请输入预期结果')
+    return
+  }
+  if (!contentMd) {
+    window.alert('请输入用例内容')
+    return
+  }
   try {
     const authorization = resolveAuthHeader()
-    const query = new URLSearchParams({ id: editingCaseId.value })
     const ownerId = payload.ownerId.trim()
-    const response = await fetch(`${resolveApiBaseUrl()}/api/testcases?${query.toString()}`, {
+    const response = await fetch(`${resolveApiBaseUrl()}/api/testcases/${editingCaseId.value}`, {
       method: 'PUT',
       headers: {
         Authorization: authorization,
@@ -596,8 +627,14 @@ async function saveEditCase(payload: EditCasePayload) {
         priority: payload.priority,
         status: payload.status,
         tags: payload.tags,
-        contentMd: editingCaseDetail.value.contentMd,
-        ownerId: ownerId || null
+        contentMd,
+        ownerId: ownerId || null,
+        feature,
+        apiMethod,
+        apiUrl,
+        apiParams: payload.apiParams || {},
+        apiHeaders: payload.apiHeaders || {},
+        expectedResult
       })
     })
     const result = await response.json() as ApiResponse<TestCaseDetail>
@@ -614,20 +651,34 @@ async function saveEditCase(payload: EditCasePayload) {
 const editingInitialData = computed(() => {
   if (!editingCaseDetail.value) {
     return {
+      feature: '',
       title: '',
+      apiMethod: '',
+      apiUrl: '',
+      apiParams: {} as Record<string, unknown>,
+      apiHeaders: {} as Record<string, string>,
+      expectedResult: '',
       type: 'API' as const,
       priority: 'P0' as const,
       status: 'DRAFT' as const,
       tags: [] as string[],
+      contentMd: '',
       ownerId: ''
     }
   }
   return {
+    feature: editingCaseDetail.value.feature || '',
     title: editingCaseDetail.value.title,
+    apiMethod: editingCaseDetail.value.apiMethod || '',
+    apiUrl: editingCaseDetail.value.apiUrl || '',
+    apiParams: editingCaseDetail.value.apiParams || {},
+    apiHeaders: editingCaseDetail.value.apiHeaders || {},
+    expectedResult: editingCaseDetail.value.expectedResult || '',
     type: editingCaseDetail.value.type,
     priority: editingCaseDetail.value.priority,
     status: editingCaseDetail.value.status,
     tags: editingCaseDetail.value.tags || [],
+    contentMd: editingCaseDetail.value.contentMd || '',
     ownerId: editingCaseDetail.value.ownerId || ''
   }
 })

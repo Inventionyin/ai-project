@@ -60,12 +60,12 @@ class TestCasePutRequest(BaseSchema):
     tags: list[TagStr] = Field(default_factory=list, max_length=50)
     contentMd: str = Field(min_length=1)
     ownerId: IdStr | None = None
-    feature: FeatureStr | None = None
-    apiMethod: ApiMethodStr | None = None
-    apiUrl: ApiUrlStr | None = None
-    apiParams: dict[str, Any] | None = None
-    apiHeaders: dict[str, str] | None = None
-    expectedResult: ExpectedResultStr | None = None
+    feature: FeatureStr
+    apiMethod: ApiMethodStr
+    apiUrl: ApiUrlStr
+    apiParams: dict[str, Any] = Field(default_factory=dict)
+    apiHeaders: dict[str, str] = Field(default_factory=dict)
+    expectedResult: ExpectedResultStr
 
 
 class TestCaseRestoreRequest(BaseSchema):

@@ -387,17 +387,6 @@ async def update(
         requestId=request_id,
     )
 
-@router.put("", response_model=ApiResponse[TestCaseDetail])
-async def update_by_query(
-    id: uuid.UUID,
-    payload: TestCasePutRequest,
-    db: AsyncSession = Depends(get_db),
-    user: CurrentUser = Depends(get_current_user),
-    request_id: str = Depends(get_request_id),
-) -> ApiResponse[TestCaseDetail]:
-    return await update(id, payload, db, user, request_id)
-
-
 @router.delete("/{id}", response_model=ApiResponse[dict])
 async def delete(
     id: uuid.UUID,
