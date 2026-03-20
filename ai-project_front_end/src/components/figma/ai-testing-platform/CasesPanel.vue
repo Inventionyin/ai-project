@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import btnAiGenerate from '@/assets/figma/ai-testing-platform/btn-ai-generate.svg'
 import btnPlus from '@/assets/figma/ai-testing-platform/btn-plus.svg'
 import filterIcon from '@/assets/figma/ai-testing-platform/filter-icon.svg'
@@ -13,8 +13,11 @@ import CasesTable, { type Row } from '@/components/figma/ai-testing-platform/Cas
 import CreateCaseModal from '@/components/figma/ai-testing-platform/CreateCaseModal.vue'
 import EditCaseModal from '@/components/figma/ai-testing-platform/EditCaseModal.vue'
 import AiGenerateCaseModal from '@/components/figma/ai-testing-platform/AiGenerateCaseModal.vue'
+import BatchRunDrawer from '@/components/figma/ai-testing-platform/BatchRunDrawer.vue'
+import { buildRunPayload, fetchBindingsByTestcaseIds, fetchProjectEnvironments, fetchRunCaseRuns, runFromTestcases, type BatchRunFormItem, type BatchRunFormState } from '@/lib/aiTestingPlatformApi'
 
 const route = useRoute()
+const router = useRouter()
 const isCreateCaseOpen = ref(false)
 const isAiGenerateOpen = ref(false)
 const isEditCaseOpen = ref(false)
@@ -30,6 +33,10 @@ const currentUserId = ref('')
 const currentUserName = ref('我')
 const ownerOptions = ref<Array<{ id: string; username: string }>>([])
 const ownerOptionsProjectId = ref('')
+const isBatchRunDrawerOpen = ref(false)
+const batchRunDrawerState = ref<'closed' | 'preview' | 'executing' | 'completed'>('closed')
+const batchRunRunId = ref('')
+let batchRunPollingTimer = 0
 
 type ApiResponse<T> = {
   code?: number
@@ -174,6 +181,12 @@ const selectedCount = computed(() => selectedCaseIds.value.length)
 const casesCount = computed(() => displayRows.value.length)
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
 const totalCasesLabel = computed(() => (total.value > 0 ? total.value : casesCount.value))
+const selectedRows = computed(() => {
+  if (!selectedCaseIds.value.length) return []
+  const selectedSet = new Set(selectedCaseIds.value)
+  return rows.value.filter((row) => selectedSet.has(row.id))
+})
+const canGenerateBatchReport = computed(() => batchRunDrawerState.value === 'completed' && Boolean(batchRunRunId.value))
 
 const loadCurrentUser = async (authorization: string) => {
   const meResponse = await fetch(`${resolveApiBaseUrl()}/api/auth/me`, {
@@ -319,6 +332,141 @@ function bulkAddToSuiteSelected() {
 function bulkDeprecateSelected() {
   if (!selectedCount.value) return
   showToast('批量弃用已触发')
+}
+
+function clearBatchRunPolling() {
+  window.clearTimeout(batchRunPollingTimer)
+  batchRunPollingTimer = 0
+}
+
+function openBatchRunDrawer() {
+  if (!selectedCount.value) return
+  batchRunRunId.value = ''
+  batchRunDrawerState.value = 'preview'
+  isBatchRunDrawerOpen.value = true
+}
+
+function closeBatchRunDrawer() {
+  isBatchRunDrawerOpen.value = false
+  clearBatchRunPolling()
+  batchRunRunId.value = ''
+  batchRunDrawerState.value = 'closed'
+}
+
+function extractRunId(payload: unknown) {
+  if (!payload || typeof payload !== 'object') return ''
+  const data = payload as { runId?: unknown; id?: unknown }
+  if (typeof data.runId === 'string' && data.runId.trim()) return data.runId.trim()
+  if (typeof data.id === 'string' && data.id.trim()) return data.id.trim()
+  return ''
+}
+
+function scheduleBatchRunStatusPoll(runId: string) {
+  clearBatchRunPolling()
+  const poll = async () => {
+    if (!isBatchRunDrawerOpen.value || batchRunRunId.value !== runId) return
+    try {
+      const caseRuns = await fetchRunCaseRuns(runId)
+      if (!caseRuns.length) {
+        batchRunPollingTimer = window.setTimeout(() => {
+          void poll()
+        }, 2000)
+        return
+      }
+      const terminalStatuses = new Set(['PASSED', 'FAILED', 'SKIPPED', 'CANCELED', 'CANCELLED'])
+      const isCompleted = caseRuns.every((item) => terminalStatuses.has(String(item.status || '').toUpperCase()))
+      if (isCompleted) {
+        batchRunDrawerState.value = 'completed'
+        showToast('批量执行已完成')
+        clearBatchRunPolling()
+        return
+      }
+      batchRunPollingTimer = window.setTimeout(() => {
+        void poll()
+      }, 2000)
+    } catch {
+      batchRunPollingTimer = window.setTimeout(() => {
+        void poll()
+      }, 2000)
+    }
+  }
+  void poll()
+}
+
+async function executeBatchRunFromDrawer() {
+  const projectId = String(route.params.projectId || '').trim()
+  if (!projectId) {
+    showToast('缺少项目 ID', 'error')
+    return
+  }
+  if (!selectedRows.value.length) {
+    showToast('请先勾选需要执行的用例', 'error')
+    return
+  }
+  batchRunDrawerState.value = 'executing'
+  batchRunRunId.value = ''
+  clearBatchRunPolling()
+  try {
+    const [bindingsMap, environments] = await Promise.all([
+      fetchBindingsByTestcaseIds(selectedRows.value.map((row) => row.id)),
+      fetchProjectEnvironments(projectId)
+    ])
+    const envId = String(environments?.[0]?.id || '').trim()
+    if (!envId) {
+      throw new Error('当前项目缺少可用执行环境')
+    }
+    const items: BatchRunFormItem[] = []
+    const missingBindingTitles: string[] = []
+    for (const row of selectedRows.value) {
+      const bindingId = String(bindingsMap[row.id]?.[0]?.id || '').trim()
+      if (!bindingId) {
+        missingBindingTitles.push(row.title)
+        continue
+      }
+      const item: BatchRunFormItem = { testcaseId: row.id, bindingId }
+      if (row.apiParams && typeof row.apiParams === 'object' && !Array.isArray(row.apiParams)) {
+        item.overrideParams = row.apiParams
+      }
+      items.push(item)
+    }
+    if (missingBindingTitles.length) {
+      throw new Error(`有 ${missingBindingTitles.length} 条用例缺少绑定配置，请先完成绑定后再执行`)
+    }
+    const state: BatchRunFormState = {
+      projectId,
+      envId,
+      triggerType: 'MANUAL',
+      meta: { source: 'cases_panel_drawer' },
+      concurrency: 5,
+      stopOnFailure: false,
+      items
+    }
+    buildRunPayload(state)
+    const response = await runFromTestcases(state, `ik_cases_drawer_${Date.now()}`)
+    const runId = extractRunId(response)
+    batchRunRunId.value = runId
+    if (!runId) {
+      batchRunDrawerState.value = 'completed'
+      showToast('批量执行已发起')
+      return
+    }
+    scheduleBatchRunStatusPoll(runId)
+    showToast('批量执行已发起')
+  } catch (error) {
+    batchRunDrawerState.value = 'preview'
+    const message = error instanceof Error ? error.message : '批量执行失败'
+    showToast(message, 'error')
+  }
+}
+
+function openBatchReport() {
+  const projectId = String(route.params.projectId || '').trim()
+  const runId = batchRunRunId.value
+  if (!projectId || !runId || !canGenerateBatchReport.value) return
+  void router.push({
+    path: `/projects/${projectId}/reports`,
+    query: { runId }
+  })
 }
 
 function closeAiGenerateCase() {
@@ -525,6 +673,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('click', onWindowClick)
+  clearBatchRunPolling()
 })
 
 let searchTimer = 0
@@ -562,6 +711,14 @@ watch(() => route.params.projectId, () => {
         </div>
 
         <div class="flex h-[32px] items-center gap-[8px]">
+          <button
+            type="button"
+            class="h-[32px] rounded-[10px] border border-[#BEDBFF] bg-white px-[14px] text-[14px] font-medium leading-[20px] text-[#155DFC] disabled:cursor-not-allowed disabled:border-black/10 disabled:text-[#A1A1AA]"
+            :disabled="selectedCount === 0"
+            @click="openBatchRunDrawer"
+          >
+            批量执行
+          </button>
           <button
             type="button"
             class="relative h-[32px] w-[91.45px] rounded-[10px] border border-[#BEDBFF] bg-white"
@@ -742,5 +899,15 @@ watch(() => route.params.projectId, () => {
     :is-open="isAiGenerateOpen"
     @close="closeAiGenerateCase"
     @start="startAiGenerateCase"
+  />
+  <BatchRunDrawer
+    :is-open="isBatchRunDrawerOpen"
+    :rows="selectedRows"
+    :state="batchRunDrawerState === 'closed' ? 'preview' : batchRunDrawerState"
+    :can-generate-report="canGenerateBatchReport"
+    :run-id="batchRunRunId"
+    @close="closeBatchRunDrawer"
+    @execute="executeBatchRunFromDrawer"
+    @generate-report="openBatchReport"
   />
 </template>
