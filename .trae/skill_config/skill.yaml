@@ -1,0 +1,23 @@
+name: api-test-case-generator-skill
+version: 1.0.0
+description: 基于接口文档自动生成API测试用例CSV文件
+author: "your-name"
+dependencies:
+  rules:
+    - path: ./rules/api-test-csv-generator.md
+    - path: ./rules/generate-api-case.md
+trigger:
+  keywords: ["生成接口测试用例", "API测试CSV", "接口文档转测试用例"]
+  parameters:
+    - name: module_name
+      type: string
+      required: true
+      description: "生成测试用例的模块名称（如：登录认证、用户管理）"
+    - name: language
+      type: string
+      default: auto
+      description: "接口文档对应的语言框架（如：Java Spring Boot、Python FastAPI）"
+output:
+  file_format: csv
+  output_path: ./test_cases/all_api_test_cases.csv
+  append_mode: true
