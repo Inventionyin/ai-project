@@ -229,10 +229,12 @@ async def _execute_inline_pytest_allure_job(
         testcase_type = testcase_item.get("type")
         if testcase_type is None:
             raise HTTPException(status_code=400, detail=f"testcase_type_missing:{testcase_id}")
+        test_case_id = str(item.get("testCaseId") or "").strip() or None
         payload_items.append(
             JobItem(
                 caseRunId=str(item["caseRunId"]),
                 testcaseId=str(item["testcaseId"]),
+                testCaseId=test_case_id,
                 type=testcase_type,
                 contentMd=str(testcase_item.get("content_md") or " "),
                 apiMethod=str(item.get("apiMethod") or "").strip().upper() or None,

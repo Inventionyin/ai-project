@@ -93,6 +93,7 @@ const ownerOptions = computed(() => {
   }
   return [{ id: ownerId.value, username: ownerId.value }, ...props.ownerOptions]
 })
+const isGetMethod = computed(() => apiMethod.value.trim().toUpperCase() === 'GET')
 
 watch(
   () => props.initialData,
@@ -156,10 +157,6 @@ function handleSave() {
     window.alert('请输入interfaceUrl')
     return
   }
-  if (!rawApiParams) {
-    window.alert('请输入接口参数')
-    return
-  }
   if (!cleanExpectedResult) {
     window.alert('请输入预期结果')
     return
@@ -169,15 +166,20 @@ function handleSave() {
     return
   }
   let parsedApiParams: Record<string, unknown> = {}
-  try {
-    const parsed = JSON.parse(rawApiParams) as unknown
-    if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
+  if (rawApiParams) {
+    try {
+      const parsed = JSON.parse(rawApiParams) as unknown
+      if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
+        window.alert('接口参数需为合法JSON对象')
+        return
+      }
+      parsedApiParams = parsed as Record<string, unknown>
+    } catch {
       window.alert('接口参数需为合法JSON对象')
       return
     }
-    parsedApiParams = parsed as Record<string, unknown>
-  } catch {
-    window.alert('接口参数需为合法JSON对象')
+  } else if (!isGetMethod.value) {
+    window.alert('请输入接口参数')
     return
   }
   let parsedApiHeaders: Record<string, string> = {}
@@ -318,12 +320,12 @@ function handleSave() {
 
         <div class="flex flex-col gap-[6px]">
           <div class="text-[12px] font-medium leading-[16px] text-[#0A0A0A]">
-            接口参数 <span class="text-[#FB2C36]">*</span>
+            接口参数 <span v-if="!isGetMethod" class="text-[#FB2C36]">*</span>
           </div>
           <textarea
             v-model="apiParamsInput"
             class="h-[88px] w-full resize-none rounded-[10px] border border-black/10 bg-white px-[12px] py-[8px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
-            placeholder="请输入接口参数，例如：{&quot;userId&quot;:&quot;123&quot;,&quot;page&quot;:1}"
+            placeholder="可选（GET可不填）；如需传参请输入 JSON 对象，例如：{&quot;userId&quot;:&quot;123&quot;,&quot;page&quot;:1}"
           />
         </div>
 

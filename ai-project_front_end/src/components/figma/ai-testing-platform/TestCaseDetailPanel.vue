@@ -106,6 +106,8 @@ const form = reactive({
   contentMd: ''
 })
 
+const isGetMethod = computed(() => form.apiMethod.trim().toUpperCase() === 'GET')
+
 const meta = computed(() => ({
   version: caseVersion.value,
   status: form.status
@@ -143,9 +145,10 @@ function parseTags(value: string) {
     .filter(Boolean)
 }
 
-function parseJsonObject(value: string, field: string): Record<string, unknown> {
+function parseJsonObject(value: string, field: string, allowEmpty = false): Record<string, unknown> {
   const text = value.trim()
   if (!text) {
+    if (allowEmpty) return {}
     throw new Error(`${field}不能为空`)
   }
   let parsed: unknown
@@ -211,7 +214,7 @@ async function saveCase() {
   let apiParams: Record<string, unknown> = {}
   let apiHeaders: Record<string, string> = {}
   try {
-    apiParams = parseJsonObject(form.apiParamsInput, '接口参数')
+    apiParams = parseJsonObject(form.apiParamsInput, '接口参数', isGetMethod.value)
     apiHeaders = parseHeaderObject(form.apiHeadersInput)
   } catch (error) {
     showToast(error instanceof Error ? error.message : '接口参数校验失败', 'error')
@@ -587,7 +590,7 @@ watch(() => route.query.tab, () => {
           </div>
 
           <div class="mt-[16px] flex flex-col gap-[6px]">
-            <label for="case-api-params" class="text-[14px] font-medium leading-[20px] text-[#0A0A0A]">接口参数 <span class="text-[#FB2C36]">*</span></label>
+            <label for="case-api-params" class="text-[14px] font-medium leading-[20px] text-[#0A0A0A]">接口参数 <span v-if="!isGetMethod" class="text-[#FB2C36]">*</span></label>
             <textarea
               id="case-api-params"
               v-model="form.apiParamsInput"

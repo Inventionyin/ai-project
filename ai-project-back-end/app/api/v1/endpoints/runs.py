@@ -207,23 +207,33 @@ async def list_allure_reports_(
         & (Run.tenant_id == user.tenant_id)
         & (Run.project_id == project_uuid)
         & (Artifact.type == ArtifactType.LOG_BUNDLE)
-        & (Artifact.case_run_id.is_(None))
         & (func.upper(Artifact.meta_json["kind"].astext) == "ALLURE_REPORT")
     )
 
-    count_stmt = select(func.count()).select_from(
-        select(Artifact.id)
+    ranked = (
+        select(
+            Artifact.id.label("artifact_id"),
+            Artifact.run_id.label("run_id"),
+            Artifact.created_at.label("created_at"),
+            func.row_number()
+            .over(
+                partition_by=Artifact.run_id,
+                order_by=(Artifact.created_at.desc(), Artifact.id.desc()),
+            )
+            .label("rn"),
+        )
         .join(Run, Run.id == Artifact.run_id)
         .where(where_clause)
         .subquery()
     )
-    total = int((await db.execute(count_stmt)).scalar_one() or 0)
+
+    total = int((await db.execute(select(func.count()).select_from(ranked).where(ranked.c.rn == 1))).scalar_one() or 0)
 
     stmt = (
         select(Artifact)
-        .join(Run, Run.id == Artifact.run_id)
-        .where(where_clause)
-        .order_by(Artifact.created_at.desc())
+        .join(ranked, Artifact.id == ranked.c.artifact_id)
+        .where(ranked.c.rn == 1)
+        .order_by(ranked.c.created_at.desc())
         .offset((page - 1) * pageSize)
         .limit(pageSize)
     )

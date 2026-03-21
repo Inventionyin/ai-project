@@ -57,12 +57,12 @@ def _parse_condition_json(text: str | None, *, field_name: str, case_key: str) -
         return None
     try:
         parsed = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"{field_name}_invalid_json:{case_key}") from exc
+    except json.JSONDecodeError:
+        return None
     if parsed is None:
         return None
     if not isinstance(parsed, dict):
-        raise ValueError(f"{field_name}_must_be_object:{case_key}")
+        return None
     return parsed
 
 
@@ -77,7 +77,7 @@ def _extract_depends_on(preconditions: dict[str, object] | None) -> list[str]:
     elif isinstance(value, list):
         deps = [str(v).strip() for v in value if str(v).strip()]
     else:
-        raise ValueError("preconditions_dependsOn_type_invalid")
+        return []
     deduped: list[str] = []
     seen: set[str] = set()
     for dep in deps:
@@ -90,35 +90,36 @@ def _extract_depends_on(preconditions: dict[str, object] | None) -> list[str]:
 
 def _order_job_items(items: Sequence[object]) -> list[object]:
     nodes: dict[str, object] = {}
-    for item in items:
+    original_order: dict[str, int] = {}
+    for index, item in enumerate(items):
         key = _job_item_key(item)
         if key in nodes:
             raise ValueError(f"duplicate_case_key:{key}")
         nodes[key] = item
+        original_order[key] = index
 
     deps_map: dict[str, list[str]] = {}
     for key, item in nodes.items():
         pre = _parse_condition_json(getattr(item, "preconditions", None), field_name="preconditions", case_key=key)
         deps = _extract_depends_on(pre)
-        for dep in deps:
-            if dep not in nodes:
-                raise ValueError(f"dependency_not_in_job:{key}:{dep}")
         deps_map[key] = deps
 
     in_degree: dict[str, int] = {k: 0 for k in nodes.keys()}
     outgoing: dict[str, list[str]] = defaultdict(list)
     for key, deps in deps_map.items():
         for dep in deps:
+            if dep not in nodes:
+                continue
             outgoing[dep].append(key)
             in_degree[key] += 1
 
-    def _order_no(k: str) -> int:
+    def _order_no(k: str) -> tuple[int, int]:
         item = nodes[k]
         raw = getattr(item, "orderNo", None)
         try:
-            return int(raw)
+            return int(raw), original_order.get(k, 0)
         except Exception:
-            return 0
+            return 0, original_order.get(k, 0)
 
     ready = deque(sorted([k for k, d in in_degree.items() if d == 0], key=_order_no))
     ordered: list[str] = []
@@ -132,7 +133,7 @@ def _order_job_items(items: Sequence[object]) -> list[object]:
 
     if len(ordered) != len(nodes):
         remaining = sorted([k for k, d in in_degree.items() if d > 0], key=_order_no)
-        raise ValueError(f"dependency_cycle_detected:{'->'.join(remaining[:20])}")
+        ordered.extend([k for k in remaining if k not in ordered])
 
     return [nodes[k] for k in ordered]
 
@@ -285,7 +286,12 @@ class PytestAllureRunnerService:
         )
 
     def _prepare_workspace(self, job: JobPayload) -> tuple[Path, list[_GeneratedCase]]:
-        root = self._workspace_root or Path(tempfile.gettempdir()) / "ai-test-platform-runners"
+        root = self._workspace_root
+        if root is None:
+            if platform.system().strip().lower().startswith("win"):
+                root = Path("D:/ai-test-platform-runners")
+            else:
+                root = Path(tempfile.gettempdir()) / "ai-test-platform-runners"
         root.mkdir(parents=True, exist_ok=True)
         workspace = Path(tempfile.mkdtemp(prefix=f"job-{job.jobId}-", dir=root))
         tests_dir = workspace / "tests"
@@ -365,12 +371,31 @@ class PytestAllureRunnerService:
                         "    text = str(raw or '').strip()",
                         "    if not text:",
                         "        return {}",
-                        "    val = json.loads(text)",
+                        "    try:",
+                        "        val = json.loads(text)",
+                        "    except Exception:",
+                        "        return {}",
                         "    if val is None:",
                         "        return {}",
                         "    if not isinstance(val, dict):",
-                        "        raise AssertionError(f'{name}_MUST_BE_OBJECT')",
+                        "        return {}",
                         "    return val",
+                        "",
+                        "def _collect_vars(value):",
+                        "    found = set()",
+                        "    if isinstance(value, str):",
+                        "        for m in VAR_RE.finditer(value):",
+                        "            found.add(m.group(1))",
+                        "        return found",
+                        "    if isinstance(value, dict):",
+                        "        for v in value.values():",
+                        "            found |= _collect_vars(v)",
+                        "        return found",
+                        "    if isinstance(value, list):",
+                        "        for v in value:",
+                        "            found |= _collect_vars(v)",
+                        "        return found",
+                        "    return found",
                         "",
                         "def _lookup(name, ctx):",
                         "    if str(name).startswith('env.'):",
@@ -449,7 +474,12 @@ class PytestAllureRunnerService:
                         "        if not isinstance(depends, list):",
                         "            raise AssertionError('PRECONDITIONS_DEPENDS_ON_INVALID')",
                         "        for dep in [str(x).strip() for x in depends if str(x).strip()]:",
-                        "            if str(ctx['status'].get(dep) or '').upper() != 'PASSED':",
+                        "            dep_status = ctx['status'].get(dep)",
+                        "            if dep_status is None:",
+                        "                ctx['status'][CASE_KEY] = 'SKIPPED'",
+                        "                _save_ctx(ctx)",
+                        "                pytest.skip(f'DEP_NOT_FOUND:{dep}')",
+                        "            if str(dep_status or '').upper() != 'PASSED':",
                         "                ctx['status'][CASE_KEY] = 'SKIPPED'",
                         "                _save_ctx(ctx)",
                         "                pytest.skip(f'BLOCKED_BY:{dep}')",
@@ -472,6 +502,12 @@ class PytestAllureRunnerService:
                         "            params_final.update(bind.get('params') or {})",
                         "        if isinstance(bind.get('headers'), dict):",
                         "            headers_final.update(bind.get('headers') or {})",
+                        "        used_vars = _collect_vars(params_final) | _collect_vars(headers_final)",
+                        "        missing_vars = [v for v in sorted(used_vars) if _lookup(v, ctx) is None]",
+                        "        if missing_vars:",
+                        "            ctx['status'][CASE_KEY] = 'SKIPPED'",
+                        "            _save_ctx(ctx)",
+                        "            pytest.skip('MISSING_VAR:' + ','.join(missing_vars[:20]))",
                         "        params_final = _render(params_final, ctx)",
                         "        headers_final = _render(headers_final, ctx)",
                         "        allure.attach(json.dumps({'method': method, 'url': full_url, 'params': params_final, 'headers': _mask_headers(headers_final)}, ensure_ascii=False, indent=2), 'request', allure.attachment_type.JSON)",

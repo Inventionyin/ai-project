@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from fastapi import Depends, Header, HTTPException
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -33,6 +33,8 @@ _TERMINAL_CASE_STATUS = {CaseRunStatus.PASSED, CaseRunStatus.FAILED, CaseRunStat
 _RUNNER_TYPE_DEFAULT = "DEFAULT"
 _RUNNER_TYPE_PYTEST_ALLURE = "PYTEST_ALLURE"
 _RUNNER_TYPES = {_RUNNER_TYPE_DEFAULT, _RUNNER_TYPE_PYTEST_ALLURE}
+_RUN_LEVEL_ARTIFACT_KINDS = {"EXECUTION_LOG", "ALLURE_RESULTS", "ALLURE_REPORT"}
+_RUN_LEVEL_ARTIFACT_KEY = "__run__"
 
 
 @dataclass(frozen=True, slots=True)
@@ -378,13 +380,16 @@ async def report_job_result(
             select(Artifact.case_run_id, Artifact.type, Artifact.storage_url).where(
                 Artifact.tenant_id == worker.tenant_id,
                 Artifact.run_id == run_id,
-                Artifact.case_run_id.in_(set(case_run_uuid_map.values())),
+                or_(
+                    Artifact.case_run_id.is_(None),
+                    Artifact.case_run_id.in_(set(case_run_uuid_map.values())),
+                ),
             )
         )
     ).all()
     existing_artifact_keys: dict[str, set[tuple[str, str]]] = {}
     for case_run_id, artifact_type, storage_url in existing_rows:
-        key = str(case_run_id)
+        key = _RUN_LEVEL_ARTIFACT_KEY if case_run_id is None else str(case_run_id)
         if key not in existing_artifact_keys:
             existing_artifact_keys[key] = set()
         existing_artifact_keys[key].add((artifact_type.value, storage_url))
@@ -416,6 +421,12 @@ async def report_job_result(
 
         existing_key_set = existing_artifact_keys.setdefault(result.caseRunId, set())
         for artifact in result.artifacts:
+            kind = ""
+            if isinstance(artifact.meta, dict):
+                kind = str(artifact.meta.get("kind") or "").upper()
+            is_run_level = kind in _RUN_LEVEL_ARTIFACT_KINDS
+            artifact_scope_key = _RUN_LEVEL_ARTIFACT_KEY if is_run_level else result.caseRunId
+            existing_key_set = existing_artifact_keys.setdefault(artifact_scope_key, set())
             artifact_key = (artifact.type.value, artifact.storageKey)
             if artifact_key in existing_key_set:
                 continue
@@ -426,7 +437,7 @@ async def report_job_result(
                 Artifact(
                     tenant_id=worker.tenant_id,
                     run_id=run_id,
-                    case_run_id=case_run.id,
+                    case_run_id=None if is_run_level else case_run.id,
                     type=artifact.type,
                     storage_url=artifact.storageKey,
                     size=size,
