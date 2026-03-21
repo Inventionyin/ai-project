@@ -864,6 +864,7 @@ async def create_run_from_testcases_http(
             select(
                 TestCase.id,
                 TestCase.project_id,
+                TestCase.test_case_id,
                 TestCase.type,
                 TestCase.api_method,
                 TestCase.api_url,
@@ -875,16 +876,17 @@ async def create_run_from_testcases_http(
     testcase_map = {
         r[0]: {
             "project_id": r[1],
-            "type": r[2],
-            "api_method": r[3],
-            "api_url": r[4],
-            "api_params": _extract_testcase_api_params(r[5]),
-            "api_headers": _extract_testcase_api_headers(r[5]),
-            "expected_result": _extract_testcase_expected_result(r[5]),
-            "expected_status_code": _extract_testcase_expected_status_code(r[5]),
-            "preconditions": _extract_testcase_preconditions(r[5]),
-            "postconditions": _extract_testcase_postconditions(r[5]),
-            "content_md": r[6],
+            "test_case_id": r[2],
+            "type": r[3],
+            "api_method": r[4],
+            "api_url": r[5],
+            "api_params": _extract_testcase_api_params(r[6]),
+            "api_headers": _extract_testcase_api_headers(r[6]),
+            "expected_result": _extract_testcase_expected_result(r[6]),
+            "expected_status_code": _extract_testcase_expected_status_code(r[6]),
+            "preconditions": _extract_testcase_preconditions(r[6]),
+            "postconditions": _extract_testcase_postconditions(r[6]),
+            "content_md": r[7],
         }
         for r in testcase_rows
     }
@@ -909,6 +911,7 @@ async def create_run_from_testcases_http(
             {
                 "orderNo": order_no,
                 "testcaseId": str(testcase_id),
+                "testCaseId": testcase_item["test_case_id"],
                 "apiMethod": api_method,
                 "apiUrl": api_url,
                 "params": merged_params,
@@ -1023,6 +1026,7 @@ async def create_run_from_testcases_http(
             {
                 "caseRunId": str(case_run.id),
                 "testcaseId": str(testcase_id),
+                "testCaseId": testcase_item["test_case_id"],
                 "type": testcase_item["type"].value if testcase_item["type"] else None,
                 "apiMethod": api_method,
                 "apiUrl": api_url,

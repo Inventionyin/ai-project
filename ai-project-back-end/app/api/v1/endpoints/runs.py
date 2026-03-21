@@ -265,6 +265,30 @@ async def delete_allure_report_(
     )
 
 
+@router.post("/{runId}/allure-report/delete", response_model=ApiResponse[RunAllureReportDeleteData])
+async def delete_allure_report_via_post_(
+    runId: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    request_id: str = Depends(get_request_id),
+) -> ApiResponse[RunAllureReportDeleteData]:
+    try:
+        deleted_artifacts, deleted_files, deleted_dirs = await delete_run_allure_report(db, user=user, run_id=runId)
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    return ApiResponse(
+        data=RunAllureReportDeleteData(
+            runId=str(runId),
+            deletedArtifacts=int(deleted_artifacts),
+            deletedFiles=int(deleted_files),
+            deletedDirs=int(deleted_dirs),
+        ),
+        requestId=request_id,
+    )
+
+
 @router.post("/from-testcases", response_model=ApiResponse[RunDetailData])
 async def create_from_testcases_(
     payload: RunFromTestcasesRequest,

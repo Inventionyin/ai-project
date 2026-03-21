@@ -58,7 +58,7 @@ function selectRunId(nextRunId: string) {
 }
 
 function clearRunId() {
-  const query = { ...route.query } as Record<string, unknown>
+  const query = { ...route.query } as any
   delete query.runId
   router.replace({
     path: route.path,

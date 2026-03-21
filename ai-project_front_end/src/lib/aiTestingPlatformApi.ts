@@ -182,7 +182,13 @@ async function requestJson<T>(path: string, init: RequestInit) {
   }
   if (!res.ok || payload.code !== 0) {
     const codeText = typeof payload.code === 'number' ? `（${payload.code}）` : ''
-    throw new Error(payload.message ? `${payload.message}${codeText}` : `请求失败${codeText}`)
+    const err = new Error(payload.message ? `${payload.message}${codeText}` : `请求失败${codeText}`)
+    ;(err as { apiCode?: number; requestId?: string; httpStatus?: number }).apiCode =
+      typeof payload.code === 'number' ? payload.code : undefined
+    ;(err as { apiCode?: number; requestId?: string; httpStatus?: number }).requestId =
+      typeof payload.requestId === 'string' ? payload.requestId : undefined
+    ;(err as { apiCode?: number; requestId?: string; httpStatus?: number }).httpStatus = res.status
+    throw err
   }
   return payload.data as T
 }
@@ -554,12 +560,25 @@ export async function fetchProjectAllureReports(projectId: string, page = 1, pag
 export async function deleteRunAllureReport(runId: string) {
   const id = String(runId || '').trim()
   if (!id) throw new Error('runId 不能为空')
-  return requestJson<RunAllureReportDeleteData>(`/api/runs/${encodeURIComponent(id)}/allure-report`, {
-    method: 'DELETE',
-    headers: {
-      Authorization: resolveAuthHeader()
+  try {
+    return await requestJson<RunAllureReportDeleteData>(`/api/runs/${encodeURIComponent(id)}/allure-report`, {
+      method: 'DELETE',
+      headers: {
+        Authorization: resolveAuthHeader()
+      }
+    })
+  } catch (error) {
+    const apiCode = (error as { apiCode?: number } | null)?.apiCode
+    if (apiCode === 40501) {
+      return requestJson<RunAllureReportDeleteData>(`/api/runs/${encodeURIComponent(id)}/allure-report/delete`, {
+        method: 'POST',
+        headers: {
+          Authorization: resolveAuthHeader()
+        }
+      })
     }
-  })
+    throw error
+  }
 }
 
 export async function generateRunAllureReport(runId: string) {

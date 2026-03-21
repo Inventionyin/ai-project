@@ -56,6 +56,7 @@ class JobSuiteConfig(BaseSchema):
 class JobItem(BaseSchema):
     caseRunId: IdStr
     testcaseId: IdStr
+    testCaseId: str | None = None
     type: TestCaseType
     contentMd: str = Field(min_length=1)
     apiMethod: str | None = None

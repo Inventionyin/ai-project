@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import platform
+import re
 import subprocess
 import tempfile
 import time
 import zipfile
+from collections import defaultdict, deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
@@ -34,6 +36,105 @@ def _mask_sensitive_headers(headers: dict[str, str]) -> dict[str, str]:
         else:
             masked[str(key)] = str(value)
     return masked
+
+
+def _job_item_key(item: object) -> str:
+    test_case_id = getattr(item, "testCaseId", None)
+    if isinstance(test_case_id, str) and test_case_id.strip():
+        return test_case_id.strip()
+    testcase_id = getattr(item, "testcaseId", None)
+    if isinstance(testcase_id, str) and testcase_id.strip():
+        return testcase_id.strip()
+    case_run_id = getattr(item, "caseRunId", None)
+    if isinstance(case_run_id, str) and case_run_id.strip():
+        return case_run_id.strip()
+    raise ValueError("job_item_key_empty")
+
+
+def _parse_condition_json(text: str | None, *, field_name: str, case_key: str) -> dict[str, object] | None:
+    raw = str(text or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{field_name}_invalid_json:{case_key}") from exc
+    if parsed is None:
+        return None
+    if not isinstance(parsed, dict):
+        raise ValueError(f"{field_name}_must_be_object:{case_key}")
+    return parsed
+
+
+def _extract_depends_on(preconditions: dict[str, object] | None) -> list[str]:
+    if not preconditions:
+        return []
+    value = preconditions.get("dependsOn")
+    if value is None:
+        return []
+    if isinstance(value, str):
+        deps = [value.strip()] if value.strip() else []
+    elif isinstance(value, list):
+        deps = [str(v).strip() for v in value if str(v).strip()]
+    else:
+        raise ValueError("preconditions_dependsOn_type_invalid")
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for dep in deps:
+        if dep in seen:
+            continue
+        seen.add(dep)
+        deduped.append(dep)
+    return deduped
+
+
+def _order_job_items(items: Sequence[object]) -> list[object]:
+    nodes: dict[str, object] = {}
+    for item in items:
+        key = _job_item_key(item)
+        if key in nodes:
+            raise ValueError(f"duplicate_case_key:{key}")
+        nodes[key] = item
+
+    deps_map: dict[str, list[str]] = {}
+    for key, item in nodes.items():
+        pre = _parse_condition_json(getattr(item, "preconditions", None), field_name="preconditions", case_key=key)
+        deps = _extract_depends_on(pre)
+        for dep in deps:
+            if dep not in nodes:
+                raise ValueError(f"dependency_not_in_job:{key}:{dep}")
+        deps_map[key] = deps
+
+    in_degree: dict[str, int] = {k: 0 for k in nodes.keys()}
+    outgoing: dict[str, list[str]] = defaultdict(list)
+    for key, deps in deps_map.items():
+        for dep in deps:
+            outgoing[dep].append(key)
+            in_degree[key] += 1
+
+    def _order_no(k: str) -> int:
+        item = nodes[k]
+        raw = getattr(item, "orderNo", None)
+        try:
+            return int(raw)
+        except Exception:
+            return 0
+
+    ready = deque(sorted([k for k, d in in_degree.items() if d == 0], key=_order_no))
+    ordered: list[str] = []
+    while ready:
+        k = ready.popleft()
+        ordered.append(k)
+        for nxt in sorted(outgoing.get(k, []), key=_order_no):
+            in_degree[nxt] -= 1
+            if in_degree[nxt] == 0:
+                ready.append(nxt)
+
+    if len(ordered) != len(nodes):
+        remaining = sorted([k for k, d in in_degree.items() if d > 0], key=_order_no)
+        raise ValueError(f"dependency_cycle_detected:{'->'.join(remaining[:20])}")
+
+    return [nodes[k] for k in ordered]
 
 
 @dataclass(frozen=True, slots=True)
@@ -189,6 +290,7 @@ class PytestAllureRunnerService:
         workspace = Path(tempfile.mkdtemp(prefix=f"job-{job.jobId}-", dir=root))
         tests_dir = workspace / "tests"
         tests_dir.mkdir(parents=True, exist_ok=True)
+        ordered_items = _order_job_items(job.items)
         params_path = workspace / "job-params.json"
         params_path.write_text(
             json.dumps(
@@ -196,7 +298,7 @@ class PytestAllureRunnerService:
                     "jobId": job.jobId,
                     "runId": job.runId,
                     "env": job.env.model_dump(mode="json"),
-                    "items": [item.model_dump(mode="json") for item in job.items],
+                    "items": [item.model_dump(mode="json") for item in ordered_items],
                 },
                 ensure_ascii=False,
                 indent=2,
@@ -204,7 +306,7 @@ class PytestAllureRunnerService:
             encoding="utf-8",
         )
         generated_cases: list[_GeneratedCase] = []
-        for index, item in enumerate(job.items, start=1):
+        for index, item in enumerate(ordered_items, start=1):
             test_file = tests_dir / f"test_case_{index:04d}_{item.caseRunId.replace('-', '_')}.py"
             method = str(item.apiMethod or "GET").strip().upper() or "GET"
             api_url = str(item.apiUrl or "").strip()
@@ -214,45 +316,222 @@ class PytestAllureRunnerService:
                 "\n".join(
                     [
                         "import json",
+                        "import re",
+                        "from pathlib import Path",
                         "from urllib.parse import urljoin",
                         "import allure",
+                        "import pytest",
                         "import requests",
+                        "",
+                        f"CASE_KEY = {json.dumps(_job_item_key(item), ensure_ascii=False)}",
+                        f"PRECONDITIONS_RAW = {json.dumps(str(item.preconditions or '').strip(), ensure_ascii=False)}",
+                        f"POSTCONDITIONS_RAW = {json.dumps(str(item.postconditions or '').strip(), ensure_ascii=False)}",
+                        f"ENV_VARS = {json.dumps(dict(job.env.variables or {}), ensure_ascii=False)}",
+                        "CTX_PATH = Path(__file__).resolve().parent.parent / 'context.json'",
+                        "VAR_RE = re.compile(r'\\$\\{([A-Za-z_][A-Za-z0-9_\\.-]*)\\}')",
+                        "SENSITIVE_HEADER_KEYS = {'authorization','proxy-authorization','cookie','set-cookie','x-api-key','x-auth-token'}",
+                        "",
+                        "def _mask_headers(headers):",
+                        "    masked = {}",
+                        "    for k, v in dict(headers or {}).items():",
+                        "        kk = str(k).strip()",
+                        "        if kk.lower() in SENSITIVE_HEADER_KEYS:",
+                        "            masked[kk] = '******'",
+                        "        else:",
+                        "            masked[kk] = '' if v is None else str(v)",
+                        "    return masked",
+                        "",
+                        "def _load_ctx():",
+                        "    if not CTX_PATH.exists():",
+                        "        return {'vars': {}, 'status': {}}",
+                        "    try:",
+                        "        data = json.loads(CTX_PATH.read_text(encoding='utf-8') or '{}')",
+                        "    except Exception:",
+                        "        data = {}",
+                        "    if not isinstance(data, dict):",
+                        "        data = {}",
+                        "    data.setdefault('vars', {})",
+                        "    data.setdefault('status', {})",
+                        "    if not isinstance(data['vars'], dict):",
+                        "        data['vars'] = {}",
+                        "    if not isinstance(data['status'], dict):",
+                        "        data['status'] = {}",
+                        "    return data",
+                        "",
+                        "def _save_ctx(ctx):",
+                        "    CTX_PATH.write_text(json.dumps(ctx, ensure_ascii=False, indent=2), encoding='utf-8')",
+                        "",
+                        "def _parse_obj(raw, name):",
+                        "    text = str(raw or '').strip()",
+                        "    if not text:",
+                        "        return {}",
+                        "    val = json.loads(text)",
+                        "    if val is None:",
+                        "        return {}",
+                        "    if not isinstance(val, dict):",
+                        "        raise AssertionError(f'{name}_MUST_BE_OBJECT')",
+                        "    return val",
+                        "",
+                        "def _lookup(name, ctx):",
+                        "    if str(name).startswith('env.'):",
+                        "        return ENV_VARS.get(str(name)[4:])",
+                        "    return ctx['vars'].get(str(name))",
+                        "",
+                        "def _render(value, ctx):",
+                        "    if isinstance(value, str):",
+                        "        m = VAR_RE.fullmatch(value)",
+                        "        if m:",
+                        "            return _lookup(m.group(1), ctx)",
+                        "        def _repl(mm):",
+                        "            v = _lookup(mm.group(1), ctx)",
+                        "            return '' if v is None else str(v)",
+                        "        return VAR_RE.sub(_repl, value)",
+                        "    if isinstance(value, dict):",
+                        "        return {k: _render(v, ctx) for k, v in value.items()}",
+                        "    if isinstance(value, list):",
+                        "        return [_render(v, ctx) for v in value]",
+                        "    return value",
+                        "",
+                        "def _json_get(obj, path):",
+                        "    p = str(path or '').strip()",
+                        "    if p in ('$', ''):",
+                        "        return obj",
+                        "    if not p.startswith('$.'):",
+                        "        raise AssertionError('JSON_PATH_INVALID')",
+                        "    cur = obj",
+                        "    for part in p[2:].split('.'):",
+                        "        if not part:",
+                        "            continue",
+                        "        key = part",
+                        "        idx = None",
+                        "        if '[' in part and part.endswith(']'):",
+                        "            key, idx_s = part[:-1].split('[', 1)",
+                        "            idx = int(idx_s)",
+                        "        if key:",
+                        "            if not isinstance(cur, dict) or key not in cur:",
+                        "                return None",
+                        "            cur = cur.get(key)",
+                        "        if idx is not None:",
+                        "            if not isinstance(cur, list) or idx < 0 or idx >= len(cur):",
+                        "                return None",
+                        "            cur = cur[idx]",
+                        "    return cur",
+                        "",
+                        "def _assert_op(left, op, right):",
+                        "    o = str(op or '').strip().lower()",
+                        "    if o in ('==', 'eq'):",
+                        "        assert left == right, f'ASSERT_EQ_FAIL:{left}!={right}'",
+                        "    elif o in ('!=', 'ne'):",
+                        "        assert left != right, f'ASSERT_NE_FAIL:{left}=={right}'",
+                        "    elif o == 'contains':",
+                        "        assert right in left, 'ASSERT_CONTAINS_FAIL'",
+                        "    else:",
+                        "        raise AssertionError(f'ASSERT_OP_UNSUPPORTED:{op}')",
                         "",
                         f"@allure.title('Case {item.caseRunId}')",
                         f"def test_case_{index:04d}():",
+                        "    ctx = _load_ctx()",
+                        "    pre = _parse_obj(PRECONDITIONS_RAW, 'PRECONDITIONS')",
+                        "    post = _parse_obj(POSTCONDITIONS_RAW, 'POSTCONDITIONS')",
                         f"    method = {json.dumps(method, ensure_ascii=False)}",
                         f"    api_url = {json.dumps(api_url, ensure_ascii=False)}",
                         f"    base_url = {json.dumps(str(job.env.baseUrl or ''), ensure_ascii=False)}",
                         f"    params = {json.dumps(dict(item.params or {}), ensure_ascii=False)}",
                         f"    headers = {json.dumps(headers, ensure_ascii=False)}",
-                        f"    masked_headers = {json.dumps(masked_headers, ensure_ascii=False)}",
                         f"    expected_result = {json.dumps(str(item.expectedResult or '').strip(), ensure_ascii=False)}",
                         f"    expected_status_code = {json.dumps(int(item.expectedStatusCode) if item.expectedStatusCode is not None else None, ensure_ascii=False)}",
-                        "    assert api_url",
-                        "    full_url = api_url if api_url.startswith(('http://', 'https://')) else urljoin(base_url.rstrip('/') + '/', api_url.lstrip('/'))",
-                        "    allure.attach(json.dumps({'method': method, 'url': full_url, 'params': params, 'headers': masked_headers}, ensure_ascii=False, indent=2), 'request', allure.attachment_type.JSON)",
                         "    try:",
-                        "        if method in ('GET', 'DELETE', 'HEAD', 'OPTIONS'):",
-                        "            response = requests.request(method=method, url=full_url, params=params, headers=headers, timeout=30)",
+                        "        assert api_url",
+                        "        full_url = api_url if api_url.startswith(('http://', 'https://')) else urljoin(base_url.rstrip('/') + '/', api_url.lstrip('/'))",
+                        "        depends = pre.get('dependsOn') or []",
+                        "        if isinstance(depends, str):",
+                        "            depends = [depends]",
+                        "        if not isinstance(depends, list):",
+                        "            raise AssertionError('PRECONDITIONS_DEPENDS_ON_INVALID')",
+                        "        for dep in [str(x).strip() for x in depends if str(x).strip()]:",
+                        "            if str(ctx['status'].get(dep) or '').upper() != 'PASSED':",
+                        "                ctx['status'][CASE_KEY] = 'SKIPPED'",
+                        "                _save_ctx(ctx)",
+                        "                pytest.skip(f'BLOCKED_BY:{dep}')",
+                        "        requires = pre.get('requires') or []",
+                        "        if isinstance(requires, str):",
+                        "            requires = [requires]",
+                        "        if not isinstance(requires, list):",
+                        "            raise AssertionError('PRECONDITIONS_REQUIRES_INVALID')",
+                        "        for name in [str(x).strip() for x in requires if str(x).strip()]:",
+                        "            if _lookup(name, ctx) is None:",
+                        "                ctx['status'][CASE_KEY] = 'SKIPPED'",
+                        "                _save_ctx(ctx)",
+                        "                pytest.skip(f'MISSING_VAR:{name}')",
+                        "        bind = pre.get('bind') or {}",
+                        "        if bind and not isinstance(bind, dict):",
+                        "            raise AssertionError('PRECONDITIONS_BIND_INVALID')",
+                        "        params_final = dict(params or {})",
+                        "        headers_final = dict(headers or {})",
+                        "        if isinstance(bind.get('params'), dict):",
+                        "            params_final.update(bind.get('params') or {})",
+                        "        if isinstance(bind.get('headers'), dict):",
+                        "            headers_final.update(bind.get('headers') or {})",
+                        "        params_final = _render(params_final, ctx)",
+                        "        headers_final = _render(headers_final, ctx)",
+                        "        allure.attach(json.dumps({'method': method, 'url': full_url, 'params': params_final, 'headers': _mask_headers(headers_final)}, ensure_ascii=False, indent=2), 'request', allure.attachment_type.JSON)",
+                        "        try:",
+                        "            if method in ('GET', 'DELETE', 'HEAD', 'OPTIONS'):",
+                        "                response = requests.request(method=method, url=full_url, params=params_final, headers=headers_final, timeout=30)",
+                        "            else:",
+                        "                response = requests.request(method=method, url=full_url, json=params_final, headers=headers_final, timeout=30)",
+                        "        except requests.exceptions.Timeout as exc:",
+                        "            allure.attach(str(exc), 'request_error', allure.attachment_type.TEXT)",
+                        "            raise AssertionError('REQUEST_TIMEOUT') from exc",
+                        "        except requests.exceptions.ConnectionError as exc:",
+                        "            allure.attach(str(exc), 'request_error', allure.attachment_type.TEXT)",
+                        "            raise AssertionError('REQUEST_CONNECTION_ERROR') from exc",
+                        "        except requests.exceptions.RequestException as exc:",
+                        "            allure.attach(str(exc), 'request_error', allure.attachment_type.TEXT)",
+                        "            raise AssertionError('REQUEST_ERROR') from exc",
+                        "        allure.attach(str(response.status_code), 'response_status', allure.attachment_type.TEXT)",
+                        "        allure.attach(response.text[:20000], 'response_body', allure.attachment_type.TEXT)",
+                        "        if expected_status_code is not None:",
+                        "            assert int(response.status_code) == int(expected_status_code), f'HTTP_ASSERT_FAIL:{response.status_code}'",
                         "        else:",
-                        "            response = requests.request(method=method, url=full_url, json=params, headers=headers, timeout=30)",
-                        "    except requests.exceptions.Timeout as exc:",
-                        "        allure.attach(str(exc), 'request_error', allure.attachment_type.TEXT)",
-                        "        raise AssertionError('REQUEST_TIMEOUT') from exc",
-                        "    except requests.exceptions.ConnectionError as exc:",
-                        "        allure.attach(str(exc), 'request_error', allure.attachment_type.TEXT)",
-                        "        raise AssertionError('REQUEST_CONNECTION_ERROR') from exc",
-                        "    except requests.exceptions.RequestException as exc:",
-                        "        allure.attach(str(exc), 'request_error', allure.attachment_type.TEXT)",
-                        "        raise AssertionError('REQUEST_ERROR') from exc",
-                        "    allure.attach(str(response.status_code), 'response_status', allure.attachment_type.TEXT)",
-                        "    allure.attach(response.text[:20000], 'response_body', allure.attachment_type.TEXT)",
-                        "    if expected_status_code is not None:",
-                        "        assert int(response.status_code) == int(expected_status_code), f'HTTP_ASSERT_FAIL:{response.status_code}'",
-                        "    else:",
-                        "        assert 200 <= int(response.status_code) < 400, f'HTTP_ASSERT_FAIL:{response.status_code}'",
-                        "    if expected_result:",
-                        "        assert expected_result in response.text, 'EXPECTED_RESULT_NOT_FOUND'",
+                        "            assert 200 <= int(response.status_code) < 400, f'HTTP_ASSERT_FAIL:{response.status_code}'",
+                        "        if expected_result:",
+                        "            assert expected_result in response.text, 'EXPECTED_RESULT_NOT_FOUND'",
+                        "        try:",
+                        "            response_json = response.json()",
+                        "        except Exception:",
+                        "            response_json = None",
+                        "        asserts = post.get('asserts') or []",
+                        "        if isinstance(asserts, dict):",
+                        "            asserts = [asserts]",
+                        "        if asserts and not isinstance(asserts, list):",
+                        "            raise AssertionError('POSTCONDITIONS_ASSERTS_INVALID')",
+                        "        for a in asserts:",
+                        "            if not isinstance(a, dict):",
+                        "                raise AssertionError('POSTCONDITIONS_ASSERT_ITEM_INVALID')",
+                        "            left = _json_get(response_json, a.get('json')) if a.get('json') else None",
+                        "            right = _render(a.get('value'), ctx)",
+                        "            _assert_op(left, a.get('op'), right)",
+                        "        exports = post.get('exports') or {}",
+                        "        if exports and not isinstance(exports, dict):",
+                        "            raise AssertionError('POSTCONDITIONS_EXPORTS_INVALID')",
+                        "        for name, rule in exports.items():",
+                        "            if not str(name).strip():",
+                        "                continue",
+                        "            if isinstance(rule, str):",
+                        "                rule = {'json': rule}",
+                        "            if not isinstance(rule, dict):",
+                        "                raise AssertionError('POSTCONDITIONS_EXPORT_ITEM_INVALID')",
+                        "            if rule.get('json'):",
+                        "                ctx['vars'][str(name)] = _json_get(response_json, rule.get('json'))",
+                        "        ctx['status'][CASE_KEY] = 'PASSED'",
+                        "        _save_ctx(ctx)",
+                        "    except pytest.skip.Exception:",
+                        "        raise",
+                        "    except Exception:",
+                        "        ctx['status'][CASE_KEY] = 'FAILED'",
+                        "        _save_ctx(ctx)",
+                        "        raise",
                     ]
                 ),
                 encoding="utf-8",
@@ -406,7 +685,11 @@ class PytestAllureRunnerService:
     ) -> list[CaseRunResult]:
         results: list[CaseRunResult] = []
         for item in case_outputs:
-            status = CaseRunStatus.PASSED if item.return_code == 0 else CaseRunStatus.FAILED
+            combined = f"{item.stdout}\n{item.stderr}".lower()
+            if item.return_code == 0 and re.search(r"\b1\s+skipped\b", combined):
+                status = CaseRunStatus.SKIPPED
+            else:
+                status = CaseRunStatus.PASSED if item.return_code == 0 else CaseRunStatus.FAILED
             duration_ms = max((item.end_ts - item.start_ts) * 1000, 0)
             error_message = item.error_message or (item.stderr or "").strip()
             error_message = error_message[:2000] if error_message else None
