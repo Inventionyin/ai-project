@@ -19,6 +19,7 @@ class TestCase(Base, TimestampMixin):
     tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
     project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False, index=True)
 
+    test_case_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     title: Mapped[str] = mapped_column(String(100), nullable=False)
     type: Mapped[TestCaseType] = mapped_column(Enum(TestCaseType, name="testcase_type"), nullable=False)
     priority: Mapped[Priority] = mapped_column(Enum(Priority, name="priority"), nullable=False)

@@ -289,6 +289,11 @@ async def poll_job(
                 apiMethod=str(row.get("apiMethod") or "").strip().upper() or None,
                 apiUrl=str(row.get("apiUrl") or "").strip() or None,
                 params=dict(row.get("params") or {}),
+                headers={str(k): str(v) for k, v in dict(row.get("headers") or {}).items()},
+                expectedResult=str(row.get("expectedResult") or "").strip() or None,
+                expectedStatusCode=row.get("expectedStatusCode") if isinstance(row.get("expectedStatusCode"), int) else None,
+                preconditions=str(row.get("preconditions") or "").strip() or None,
+                postconditions=str(row.get("postconditions") or "").strip() or None,
             )
         )
 

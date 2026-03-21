@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 
 from app.models.enums import CaseRunStatus, Priority, TestCaseStatus, TestCaseType
 from app.schemas.common import BaseSchema, PageData
@@ -11,6 +11,10 @@ from app.schemas.types import IdStr, TitleStr, UnixTs
 TestCaseVersionStr = Annotated[str, Field(min_length=1, max_length=32, pattern=r"^(?:v?1(?:\.\d+)?)$")]
 
 TagStr = Annotated[str, Field(min_length=1, max_length=64)]
+TestCaseIdStr = Annotated[str, Field(min_length=1, max_length=64)]
+ExpectedStatusCodeInt = Annotated[int, Field(ge=100, le=599)]
+PreconditionsStr = Annotated[str, Field(min_length=1, max_length=5000)]
+PostconditionsStr = Annotated[str, Field(min_length=1, max_length=5000)]
 FeatureStr = Annotated[str, Field(min_length=1, max_length=128)]
 ApiMethodStr = Annotated[str, Field(min_length=1, max_length=16)]
 ApiUrlStr = Annotated[str, Field(min_length=1, max_length=1024)]
@@ -19,6 +23,10 @@ ExpectedResultStr = Annotated[str, Field(min_length=1, max_length=5000)]
 
 class TestCaseCreateRequest(BaseSchema):
     projectId: IdStr
+    testCaseId: TestCaseIdStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("testCaseId", "test_case_id", "test_caseId"),
+    )
     title: TitleStr
     type: TestCaseType
     priority: Priority
@@ -26,6 +34,12 @@ class TestCaseCreateRequest(BaseSchema):
     tags: list[TagStr] = Field(default_factory=list, max_length=50)
     contentMd: str = Field(default="")
     ownerId: IdStr | None = None
+    expectedStatusCode: ExpectedStatusCodeInt | None = Field(
+        default=None,
+        validation_alias=AliasChoices("expectedStatusCode", "expected_status_code"),
+    )
+    preconditions: PreconditionsStr | None = None
+    postconditions: PostconditionsStr | None = None
     feature: FeatureStr
     apiMethod: ApiMethodStr
     apiUrl: ApiUrlStr
@@ -36,6 +50,16 @@ class TestCaseCreateRequest(BaseSchema):
 
 class TestCaseUpdateRequest(BaseSchema):
     version: TestCaseVersionStr
+    testCaseId: TestCaseIdStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("testCaseId", "test_case_id", "test_caseId"),
+    )
+    expectedStatusCode: ExpectedStatusCodeInt | None = Field(
+        default=None,
+        validation_alias=AliasChoices("expectedStatusCode", "expected_status_code"),
+    )
+    preconditions: PreconditionsStr | None = None
+    postconditions: PostconditionsStr | None = None
     title: TitleStr | None = None
     type: TestCaseType | None = None
     priority: Priority | None = None
@@ -53,6 +77,10 @@ class TestCaseUpdateRequest(BaseSchema):
 
 class TestCasePutRequest(BaseSchema):
     projectId: IdStr
+    testCaseId: TestCaseIdStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("testCaseId", "test_case_id", "test_caseId"),
+    )
     title: TitleStr
     type: TestCaseType
     priority: Priority
@@ -60,6 +88,12 @@ class TestCasePutRequest(BaseSchema):
     tags: list[TagStr] = Field(default_factory=list, max_length=50)
     contentMd: str = Field(min_length=1)
     ownerId: IdStr | None = None
+    expectedStatusCode: ExpectedStatusCodeInt | None = Field(
+        default=None,
+        validation_alias=AliasChoices("expectedStatusCode", "expected_status_code"),
+    )
+    preconditions: PreconditionsStr | None = None
+    postconditions: PostconditionsStr | None = None
     feature: FeatureStr
     apiMethod: ApiMethodStr
     apiUrl: ApiUrlStr
@@ -86,6 +120,10 @@ class TestCaseListQuery(BaseSchema):
 class TestCaseDetail(BaseSchema):
     id: IdStr
     projectId: IdStr
+    testCaseId: TestCaseIdStr | None = None
+    expectedStatusCode: ExpectedStatusCodeInt | None = None
+    preconditions: str | None = None
+    postconditions: str | None = None
     title: TitleStr
     type: TestCaseType
     priority: Priority
@@ -115,6 +153,10 @@ class TestCaseVersionSchema(BaseSchema):
 class TestCaseListItem(BaseSchema):
     id: IdStr
     projectId: IdStr
+    testCaseId: TestCaseIdStr | None = None
+    expectedStatusCode: ExpectedStatusCodeInt | None = None
+    preconditions: str | None = None
+    postconditions: str | None = None
     title: TitleStr
     type: TestCaseType
     priority: Priority

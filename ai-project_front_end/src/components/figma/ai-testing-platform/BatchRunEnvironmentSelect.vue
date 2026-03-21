@@ -2,7 +2,7 @@
 export type BatchRunEnvironmentOption = {
   id: string
   name: string
-  host?: string | null
+  baseUrl?: string | null
 }
 
 const props = defineProps<{
@@ -51,7 +51,7 @@ function labelClass(id: string) {
             </span>
           </div>
           <div class="text-[10px] font-medium leading-[15px] text-[#717182]" style="font-family: Consolas">
-            {{ item.host || item.id.slice(0, 8) }}
+            {{ item.baseUrl || item.id.slice(0, 8) }}
           </div>
         </button>
       </div>

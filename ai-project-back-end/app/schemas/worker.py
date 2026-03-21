@@ -63,6 +63,9 @@ class JobItem(BaseSchema):
     params: dict[str, object] = Field(default_factory=dict)
     headers: dict[str, str] = Field(default_factory=dict)
     expectedResult: str | None = None
+    expectedStatusCode: int | None = Field(default=None, ge=100, le=599)
+    preconditions: str | None = Field(default=None, max_length=5000)
+    postconditions: str | None = Field(default=None, max_length=5000)
 
 
 class JobArtifactSpec(BaseSchema):

@@ -76,6 +76,43 @@ def _extract_expected_result(ai_meta_json: dict | None) -> str | None:
     return normalized or None
 
 
+def _extract_expected_status_code(ai_meta_json: dict | None) -> int | None:
+    if not isinstance(ai_meta_json, dict):
+        return None
+    value = ai_meta_json.get("expectedStatusCode")
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    try:
+        parsed = int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    return parsed
+
+
+def _extract_preconditions(ai_meta_json: dict | None) -> str | None:
+    if not isinstance(ai_meta_json, dict):
+        return None
+    value = ai_meta_json.get("preconditions")
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    return normalized or None
+
+
+def _extract_postconditions(ai_meta_json: dict | None) -> str | None:
+    if not isinstance(ai_meta_json, dict):
+        return None
+    value = ai_meta_json.get("postconditions")
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    return normalized or None
+
+
 @router.post("/ai-import/jobs", response_model=ApiResponse[AiImportCreateJobData])
 async def create_ai_import_job_(
     payload: AiImportCreateJobRequest,
@@ -215,6 +252,10 @@ async def create(
         data=TestCaseDetail(
             id=str(testcase.id),
             projectId=str(testcase.project_id),
+            testCaseId=testcase.test_case_id,
+            expectedStatusCode=_extract_expected_status_code(testcase.ai_meta_json),
+            preconditions=_extract_preconditions(testcase.ai_meta_json),
+            postconditions=_extract_postconditions(testcase.ai_meta_json),
             title=testcase.title,
             type=testcase.type,
             priority=testcase.priority,
@@ -275,6 +316,10 @@ async def list_(
             TestCaseListItem(
                 id=str(tc.id),
                 projectId=str(tc.project_id),
+                testCaseId=tc.test_case_id,
+                expectedStatusCode=_extract_expected_status_code(tc.ai_meta_json),
+                preconditions=_extract_preconditions(tc.ai_meta_json),
+                postconditions=_extract_postconditions(tc.ai_meta_json),
                 title=tc.title,
                 type=tc.type,
                 priority=tc.priority,
@@ -330,6 +375,10 @@ async def get(
         data=TestCaseDetail(
             id=str(testcase.id),
             projectId=str(testcase.project_id),
+            testCaseId=testcase.test_case_id,
+            expectedStatusCode=_extract_expected_status_code(testcase.ai_meta_json),
+            preconditions=_extract_preconditions(testcase.ai_meta_json),
+            postconditions=_extract_postconditions(testcase.ai_meta_json),
             title=testcase.title,
             type=testcase.type,
             priority=testcase.priority,
@@ -369,6 +418,10 @@ async def update(
         data=TestCaseDetail(
             id=str(testcase.id),
             projectId=str(testcase.project_id),
+            testCaseId=testcase.test_case_id,
+            expectedStatusCode=_extract_expected_status_code(testcase.ai_meta_json),
+            preconditions=_extract_preconditions(testcase.ai_meta_json),
+            postconditions=_extract_postconditions(testcase.ai_meta_json),
             title=testcase.title,
             type=testcase.type,
             priority=testcase.priority,
@@ -450,6 +503,10 @@ async def restore(
         data=TestCaseDetail(
             id=str(testcase.id),
             projectId=str(testcase.project_id),
+            testCaseId=testcase.test_case_id,
+            expectedStatusCode=_extract_expected_status_code(testcase.ai_meta_json),
+            preconditions=_extract_preconditions(testcase.ai_meta_json),
+            postconditions=_extract_postconditions(testcase.ai_meta_json),
             title=testcase.title,
             type=testcase.type,
             priority=testcase.priority,

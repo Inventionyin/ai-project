@@ -14,7 +14,7 @@ import CreateCaseModal from '@/components/figma/ai-testing-platform/CreateCaseMo
 import EditCaseModal from '@/components/figma/ai-testing-platform/EditCaseModal.vue'
 import AiGenerateCaseModal from '@/components/figma/ai-testing-platform/AiGenerateCaseModal.vue'
 import BatchRunDrawer from '@/components/figma/ai-testing-platform/BatchRunDrawer.vue'
-import { buildRunPayloadDirect, fetchRunCaseRuns, generateRunAllureReport, runFromTestcasesHttp, type BatchRunDirectFormItem, type BatchRunDirectFormState } from '@/lib/aiTestingPlatformApi'
+import { buildRunPayloadDirect, fetchProjectEnvironments, fetchRunCaseRuns, generateRunAllureReport, runFromTestcasesHttp, type BatchRunDirectFormItem, type BatchRunDirectFormState } from '@/lib/aiTestingPlatformApi'
 
 const route = useRoute()
 const router = useRouter()
@@ -36,6 +36,9 @@ const ownerOptionsProjectId = ref('')
 const isBatchRunDrawerOpen = ref(false)
 const batchRunDrawerState = ref<'closed' | 'preview' | 'executing' | 'completed'>('closed')
 const batchRunRunId = ref('')
+const batchRunEnvId = ref('')
+const batchRunEnvironments = ref<Array<{ id: string; name: string; baseUrl: string }>>([])
+const isLoadingBatchRunEnvironments = ref(false)
 let batchRunPollingTimer = 0
 
 type ApiResponse<T> = {
@@ -59,6 +62,10 @@ type CurrentUserData = {
 
 type TestCaseListItem = {
   id: string
+  testCaseId?: string | null
+  expectedStatusCode?: number | null
+  preconditions?: string | null
+  postconditions?: string | null
   title: string
   version: string
   type: Row['type']
@@ -79,6 +86,10 @@ type TestCaseListItem = {
 type TestCaseDetail = {
   id: string
   projectId: string
+  testCaseId?: string | null
+  expectedStatusCode?: number | null
+  preconditions?: string | null
+  postconditions?: string | null
   title: string
   version: string
   type: TestCaseListItem['type']
@@ -96,6 +107,10 @@ type TestCaseDetail = {
 }
 
 type CreateCasePayload = {
+  testCaseId: string
+  expectedStatusCode: number | null
+  preconditions: string
+  postconditions: string
   title: string
   type: TestCaseListItem['type']
   priority: TestCaseListItem['priority']
@@ -112,6 +127,10 @@ type CreateCasePayload = {
 }
 
 type EditCasePayload = {
+  testCaseId: string
+  expectedStatusCode: number | null
+  preconditions: string
+  postconditions: string
   feature: string
   title: string
   apiMethod: string
@@ -288,6 +307,7 @@ const loadCases = async () => {
     total.value = payload.data.total
     rows.value = items.map((item) => ({
       id: item.id,
+      testCaseId: item.testCaseId || '-',
       module: item.feature || item.tags?.[0] || '-',
       title: item.title,
       type: item.type,
@@ -362,6 +382,7 @@ function openBatchRunDrawer() {
   batchRunRunId.value = ''
   batchRunDrawerState.value = 'preview'
   isBatchRunDrawerOpen.value = true
+  void loadBatchRunEnvironments()
 }
 
 function closeBatchRunDrawer() {
@@ -369,6 +390,38 @@ function closeBatchRunDrawer() {
   clearBatchRunPolling()
   batchRunRunId.value = ''
   batchRunDrawerState.value = 'closed'
+}
+
+async function loadBatchRunEnvironments() {
+  const projectId = String(route.params.projectId || '').trim()
+  if (!projectId) return
+  isLoadingBatchRunEnvironments.value = true
+  try {
+    const envs = await fetchProjectEnvironments(projectId)
+    const options = Array.isArray(envs)
+      ? envs
+          .map((env) => {
+            if (!env || typeof env !== 'object') return null
+            const data = env as { id?: unknown; name?: unknown; baseUrl?: unknown }
+            const id = String(data.id || '').trim()
+            const name = String(data.name || '').trim()
+            const baseUrl = String(data.baseUrl || '').trim()
+            if (!id || !name || !baseUrl) return null
+            return { id, name, baseUrl }
+          })
+          .filter((v): v is { id: string; name: string; baseUrl: string } => Boolean(v))
+      : []
+    batchRunEnvironments.value = options
+    if (!batchRunEnvId.value || !options.some((opt) => opt.id === batchRunEnvId.value)) {
+      batchRunEnvId.value = options[0]?.id || ''
+    }
+  } catch (error) {
+    batchRunEnvironments.value = []
+    batchRunEnvId.value = ''
+    showToast(error instanceof Error ? error.message : '加载执行环境失败', 'error')
+  } finally {
+    isLoadingBatchRunEnvironments.value = false
+  }
 }
 
 function extractRunId(payload: unknown) {
@@ -421,6 +474,11 @@ async function executeBatchRunFromDrawer() {
     showToast('请先勾选需要执行的用例', 'error')
     return
   }
+  const envId = String(batchRunEnvId.value || '').trim()
+  if (!envId) {
+    showToast(isLoadingBatchRunEnvironments.value ? '执行环境加载中，请稍后重试' : '请选择执行环境', 'error')
+    return
+  }
   batchRunDrawerState.value = 'executing'
   batchRunRunId.value = ''
   clearBatchRunPolling()
@@ -435,6 +493,7 @@ async function executeBatchRunFromDrawer() {
     }
     const state: BatchRunDirectFormState = {
       projectId,
+      envId,
       triggerType: 'MANUAL',
       meta: { source: 'cases_panel_drawer', runnerType: 'PYTEST_ALLURE' },
       concurrency: 5,
@@ -502,6 +561,10 @@ async function saveCreateCase(payload: CreateCasePayload) {
       },
       body: JSON.stringify({
         projectId,
+        testCaseId: payload.testCaseId.trim() || null,
+        expectedStatusCode: payload.expectedStatusCode ?? null,
+        preconditions: payload.preconditions.trim() || null,
+        postconditions: payload.postconditions.trim() || null,
         title: payload.title,
         type: payload.type,
         priority: payload.priority,
@@ -622,6 +685,10 @@ async function saveEditCase(payload: EditCasePayload) {
       },
       body: JSON.stringify({
         projectId: editingCaseDetail.value.projectId,
+        testCaseId: payload.testCaseId.trim() || null,
+        expectedStatusCode: payload.expectedStatusCode ?? null,
+        preconditions: payload.preconditions.trim() || null,
+        postconditions: payload.postconditions.trim() || null,
         title,
         type: payload.type,
         priority: payload.priority,
@@ -651,6 +718,10 @@ async function saveEditCase(payload: EditCasePayload) {
 const editingInitialData = computed(() => {
   if (!editingCaseDetail.value) {
     return {
+      testCaseId: '',
+      expectedStatusCode: null,
+      preconditions: '',
+      postconditions: '',
       feature: '',
       title: '',
       apiMethod: '',
@@ -667,6 +738,10 @@ const editingInitialData = computed(() => {
     }
   }
   return {
+    testCaseId: editingCaseDetail.value.testCaseId || '',
+    expectedStatusCode: editingCaseDetail.value.expectedStatusCode ?? null,
+    preconditions: editingCaseDetail.value.preconditions || '',
+    postconditions: editingCaseDetail.value.postconditions || '',
     feature: editingCaseDetail.value.feature || '',
     title: editingCaseDetail.value.title,
     apiMethod: editingCaseDetail.value.apiMethod || '',
@@ -958,10 +1033,13 @@ watch(() => route.params.projectId, () => {
   <BatchRunDrawer
     :is-open="isBatchRunDrawerOpen"
     :rows="selectedRows"
+    :env-id="batchRunEnvId"
+    :environments="batchRunEnvironments"
     :state="batchRunDrawerState === 'closed' ? 'preview' : batchRunDrawerState"
     :can-generate-report="canGenerateBatchReport"
     :run-id="batchRunRunId"
     @close="closeBatchRunDrawer"
+    @update:env-id="batchRunEnvId = $event"
     @execute="executeBatchRunFromDrawer"
     @generate-report="openBatchReport"
   />

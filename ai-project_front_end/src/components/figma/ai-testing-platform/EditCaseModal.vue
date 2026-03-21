@@ -9,6 +9,10 @@ type CasePriority = 'P0' | 'P1' | 'P2' | 'P3'
 type CaseStatus = 'DRAFT' | 'REVIEWED' | 'DEPRECATED'
 
 type EditCaseInitialData = {
+  testCaseId: string
+  expectedStatusCode: number | null
+  preconditions: string
+  postconditions: string
   feature: string
   title: string
   apiMethod: string
@@ -33,6 +37,10 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'close'): void
   (e: 'save', payload: {
+    testCaseId: string
+    expectedStatusCode: number | null
+    preconditions: string
+    postconditions: string
     feature: string
     title: string
     apiMethod: string
@@ -75,6 +83,10 @@ const status = ref<CaseStatus>('DRAFT')
 const tagsInput = ref('')
 const contentMd = ref('')
 const ownerId = ref('')
+const testCaseId = ref('')
+const expectedStatusCodeInput = ref('')
+const preconditions = ref('')
+const postconditions = ref('')
 const ownerOptions = computed(() => {
   if (!ownerId.value || props.ownerOptions.some((item) => item.id === ownerId.value)) {
     return props.ownerOptions
@@ -85,6 +97,10 @@ const ownerOptions = computed(() => {
 watch(
   () => props.initialData,
   (next) => {
+    testCaseId.value = next.testCaseId || ''
+    expectedStatusCodeInput.value = next.expectedStatusCode == null ? '' : String(next.expectedStatusCode)
+    preconditions.value = next.preconditions || ''
+    postconditions.value = next.postconditions || ''
     feature.value = next.feature || ''
     title.value = next.title
     apiMethod.value = next.apiMethod || ''
@@ -103,6 +119,7 @@ watch(
 )
 
 function handleSave() {
+  const cleanTestCaseId = testCaseId.value.trim()
   const cleanFeature = feature.value.trim()
   const cleanTitle = title.value.trim()
   const cleanApiMethod = apiMethod.value.trim()
@@ -111,6 +128,18 @@ function handleSave() {
   const rawApiHeaders = apiHeadersInput.value.trim()
   const cleanExpectedResult = expectedResultInput.value.trim()
   const cleanContentMd = contentMd.value.trim()
+  const rawExpectedStatusCode = expectedStatusCodeInput.value.trim()
+  let expectedStatusCode: number | null = null
+  if (rawExpectedStatusCode) {
+    const parsed = Number.parseInt(rawExpectedStatusCode, 10)
+    if (!Number.isFinite(parsed) || parsed < 100 || parsed > 599) {
+      window.alert('期望状态码需为 100-599 的整数')
+      return
+    }
+    expectedStatusCode = parsed
+  }
+  const cleanPreconditions = preconditions.value.trim()
+  const cleanPostconditions = postconditions.value.trim()
   if (!cleanFeature) {
     window.alert('请输入功能模块')
     return
@@ -179,6 +208,10 @@ function handleSave() {
     }
   }
   emit('save', {
+    testCaseId: cleanTestCaseId,
+    expectedStatusCode,
+    preconditions: cleanPreconditions,
+    postconditions: cleanPostconditions,
     feature: cleanFeature,
     title: cleanTitle,
     apiMethod: cleanApiMethod,
@@ -211,6 +244,18 @@ function handleSave() {
       </div>
 
       <div class="mt-[20px] flex flex-col gap-[16px] pb-[4px]">
+        <div class="flex flex-col gap-[6px]">
+          <div class="text-[12px] font-medium leading-[16px] text-[#0A0A0A]">
+            测试用例ID
+          </div>
+          <input
+            v-model="testCaseId"
+            class="h-[36px] w-full rounded-[10px] border border-black/10 bg-white px-[12px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
+            type="text"
+            placeholder="请输入业务编号，例如：TC001001"
+          />
+        </div>
+
         <div class="flex flex-col gap-[6px]">
           <div class="text-[12px] font-medium leading-[16px] text-[#0A0A0A]">
             功能模块 <span class="text-[#FB2C36]">*</span>
@@ -261,6 +306,18 @@ function handleSave() {
 
         <div class="flex flex-col gap-[6px]">
           <div class="text-[12px] font-medium leading-[16px] text-[#0A0A0A]">
+            期望状态码
+          </div>
+          <input
+            v-model="expectedStatusCodeInput"
+            class="h-[36px] w-full rounded-[10px] border border-black/10 bg-white px-[12px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
+            type="text"
+            placeholder="例如：200"
+          />
+        </div>
+
+        <div class="flex flex-col gap-[6px]">
+          <div class="text-[12px] font-medium leading-[16px] text-[#0A0A0A]">
             接口参数 <span class="text-[#FB2C36]">*</span>
           </div>
           <textarea
@@ -289,6 +346,28 @@ function handleSave() {
             v-model="expectedResultInput"
             class="h-[88px] w-full resize-none rounded-[10px] border border-black/10 bg-white px-[12px] py-[8px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
             placeholder="请输入预期结果，用于自动化断言校验，例如：code=0"
+          />
+        </div>
+
+        <div class="flex flex-col gap-[6px]">
+          <div class="text-[12px] font-medium leading-[16px] text-[#0A0A0A]">
+            前置条件
+          </div>
+          <textarea
+            v-model="preconditions"
+            class="h-[88px] w-full resize-none rounded-[10px] border border-black/10 bg-white px-[12px] py-[8px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
+            placeholder="请输入前置条件"
+          />
+        </div>
+
+        <div class="flex flex-col gap-[6px]">
+          <div class="text-[12px] font-medium leading-[16px] text-[#0A0A0A]">
+            后置条件
+          </div>
+          <textarea
+            v-model="postconditions"
+            class="h-[88px] w-full resize-none rounded-[10px] border border-black/10 bg-white px-[12px] py-[8px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
+            placeholder="请输入后置条件"
           />
         </div>
 

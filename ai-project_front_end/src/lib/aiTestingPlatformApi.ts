@@ -23,7 +23,7 @@ export type ApiTarget = {
 export type ProjectEnvironment = {
   id: string
   name: string
-  host?: string | null
+  baseUrl: string
 }
 
 export type CollectionListItem = {

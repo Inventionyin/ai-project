@@ -22,6 +22,10 @@ type ApiResponse<T> = {
 type TestCaseDetail = {
   id: string
   projectId: string
+  testCaseId?: string | null
+  expectedStatusCode?: number | null
+  preconditions?: string | null
+  postconditions?: string | null
   title: string
   version: string
   type: CaseType
@@ -83,6 +87,10 @@ const statusCodeMap: Record<CaseStatus, CaseStatusCode> = {
 }
 
 const form = reactive({
+  testCaseId: '',
+  expectedStatusCodeInput: '',
+  preconditions: '',
+  postconditions: '',
   feature: '',
   title: '',
   apiMethod: '',
@@ -187,6 +195,19 @@ async function saveCase() {
   const apiUrl = form.apiUrl.trim()
   const expectedResult = form.expectedResult.trim()
   const contentMd = form.contentMd.trim()
+  const rawExpectedStatusCode = form.expectedStatusCodeInput.trim()
+  let expectedStatusCode: number | null = null
+  if (rawExpectedStatusCode) {
+    const parsed = Number.parseInt(rawExpectedStatusCode, 10)
+    if (!Number.isFinite(parsed) || parsed < 100 || parsed > 599) {
+      showToast('期望状态码需为 100-599 的整数', 'error')
+      return
+    }
+    expectedStatusCode = parsed
+  }
+  const testCaseId = form.testCaseId.trim()
+  const preconditions = form.preconditions.trim()
+  const postconditions = form.postconditions.trim()
   let apiParams: Record<string, unknown> = {}
   let apiHeaders: Record<string, string> = {}
   try {
@@ -234,6 +255,10 @@ async function saveCase() {
       },
       body: JSON.stringify({
         projectId: currentDetail.value?.projectId || projectId.value,
+        testCaseId: testCaseId || null,
+        expectedStatusCode,
+        preconditions: preconditions || null,
+        postconditions: postconditions || null,
         title,
         type: form.type,
         priority: form.priority,
@@ -255,6 +280,10 @@ async function saveCase() {
     }
     const detail = payload.data
     currentDetail.value = detail
+    form.testCaseId = detail.testCaseId || ''
+    form.expectedStatusCodeInput = detail.expectedStatusCode == null ? '' : String(detail.expectedStatusCode)
+    form.preconditions = detail.preconditions || ''
+    form.postconditions = detail.postconditions || ''
     form.title = detail.title
     form.feature = detail.feature || ''
     form.apiMethod = detail.apiMethod || ''
@@ -293,6 +322,10 @@ async function loadCaseDetail() {
     }
     const detail = payload.data
     currentDetail.value = detail
+    form.testCaseId = detail.testCaseId || ''
+    form.expectedStatusCodeInput = detail.expectedStatusCode == null ? '' : String(detail.expectedStatusCode)
+    form.preconditions = detail.preconditions || ''
+    form.postconditions = detail.postconditions || ''
     form.title = detail.title
     form.feature = detail.feature || ''
     form.apiMethod = detail.apiMethod || ''
@@ -429,6 +462,27 @@ watch(() => route.query.tab, () => {
         <form class="w-full">
           <div class="grid grid-cols-1 gap-[16px] md:grid-cols-2">
             <div class="flex flex-col gap-[6px]">
+              <label for="case-test-case-id" class="text-[14px] font-medium leading-[20px] text-[#0A0A0A]">测试用例ID</label>
+              <input
+                id="case-test-case-id"
+                v-model="form.testCaseId"
+                type="text"
+                class="h-[36px] w-full rounded-[10px] border-[0.6667px] border-black/10 bg-white px-[12px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
+              />
+            </div>
+
+            <div class="flex flex-col gap-[6px]">
+              <label for="case-expected-status-code" class="text-[14px] font-medium leading-[20px] text-[#0A0A0A]">期望状态码</label>
+              <input
+                id="case-expected-status-code"
+                v-model="form.expectedStatusCodeInput"
+                type="text"
+                class="h-[36px] w-full rounded-[10px] border-[0.6667px] border-black/10 bg-white px-[12px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
+                placeholder="例如：200"
+              />
+            </div>
+
+            <div class="flex flex-col gap-[6px]">
               <label for="case-feature" class="text-[14px] font-medium leading-[20px] text-[#0A0A0A]">功能模块 <span class="text-[#FB2C36]">*</span></label>
               <input
                 id="case-feature"
@@ -555,6 +609,24 @@ watch(() => route.query.tab, () => {
             <textarea
               id="case-expected-result"
               v-model="form.expectedResult"
+              class="h-[128px] w-full resize-y rounded-[10px] border-[0.6667px] border-black/10 bg-white p-[12px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
+            />
+          </div>
+
+          <div class="mt-[16px] flex flex-col gap-[6px]">
+            <label for="case-preconditions" class="text-[14px] font-medium leading-[20px] text-[#0A0A0A]">前置条件</label>
+            <textarea
+              id="case-preconditions"
+              v-model="form.preconditions"
+              class="h-[128px] w-full resize-y rounded-[10px] border-[0.6667px] border-black/10 bg-white p-[12px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
+            />
+          </div>
+
+          <div class="mt-[16px] flex flex-col gap-[6px]">
+            <label for="case-postconditions" class="text-[14px] font-medium leading-[20px] text-[#0A0A0A]">后置条件</label>
+            <textarea
+              id="case-postconditions"
+              v-model="form.postconditions"
               class="h-[128px] w-full resize-y rounded-[10px] border-[0.6667px] border-black/10 bg-white p-[12px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
             />
           </div>

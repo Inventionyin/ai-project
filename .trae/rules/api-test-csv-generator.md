@@ -1,6 +1,10 @@
 ---
 alwaysApply: false
 ---
+***
+
+## alwaysApply: false
+
 ````
 # API接口测试用例CSV生成规则
 
@@ -26,6 +30,7 @@ alwaysApply: false
 
 | 列名 | 描述 | 示例 |
 |------|------|------|
+| test_case_id | 测试用例ID | TC001 |
 | feature | 功能模块| 登录认证 |
 | title | 测试用例名称 | 用户登录_正常流程 |
 | apiMethod | 请求方法 | POST |

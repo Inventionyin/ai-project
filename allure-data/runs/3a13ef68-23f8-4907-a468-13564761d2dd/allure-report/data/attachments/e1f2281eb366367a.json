@@ -1,0 +1,11 @@
+{
+  "method": "POST",
+  "url": "http://127.0.0.1:8000/api/auth/login",
+  "params": {
+    "password": "ab123456",
+    "username": "xuxu"
+  },
+  "headers": {
+    "Content-Type": "application/json"
+  }
+}

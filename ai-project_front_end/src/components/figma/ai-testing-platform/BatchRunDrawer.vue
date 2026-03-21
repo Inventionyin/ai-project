@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { Row } from '@/components/figma/ai-testing-platform/CasesTable.vue'
+import BatchRunEnvironmentSelect, { type BatchRunEnvironmentOption } from '@/components/figma/ai-testing-platform/BatchRunEnvironmentSelect.vue'
 
 const props = defineProps<{
   isOpen: boolean
   rows: Row[]
+  envId: string
+  environments: BatchRunEnvironmentOption[]
   state: 'preview' | 'executing' | 'completed'
   canGenerateReport: boolean
   runId: string
@@ -12,6 +15,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'close'): void
+  (e: 'update:envId', value: string): void
   (e: 'execute'): void
   (e: 'generate-report'): void
 }>()
@@ -51,6 +55,13 @@ function formatExpectedResult(expectedResult: Row['expectedResult']) {
         </div>
 
         <div class="min-h-0 flex-1 overflow-auto px-[20px] py-[16px]">
+          <div class="mb-[16px]">
+            <BatchRunEnvironmentSelect
+              :value="envId"
+              :options="environments"
+              @update:value="emit('update:envId', $event)"
+            />
+          </div>
           <div class="w-full overflow-x-auto rounded-[12px] border border-black/10">
             <div class="min-w-[1320px]">
               <div class="grid grid-cols-[160px_minmax(200px,1fr)_100px_260px_300px_300px] border-b border-black/10 bg-[rgba(236,236,240,0.3)]">

@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 
 export type Row = {
   id: string
+  testCaseId: string
   title: string
   type: 'API' | 'UI' | 'PERF' | 'MIX'
   priority: 'P0' | 'P1' | 'P2' | 'P3'
@@ -106,8 +107,8 @@ const rowHeight = '56.67px'
 
 <template>
   <div class="w-full overflow-x-auto">
-    <div class="min-w-[1480px]">
-      <div class="grid grid-cols-[45px_160px_minmax(160px,260px)_70px_70px_70px_220px_90px_260px_90px_80px_110px_150px] bg-[rgba(236,236,240,0.3)] border-x border-b border-black/10 divide-x divide-black/10">
+    <div class="min-w-[1620px]">
+      <div class="grid grid-cols-[45px_140px_160px_minmax(160px,260px)_70px_70px_70px_220px_90px_260px_90px_80px_110px_150px] bg-[rgba(236,236,240,0.3)] border-x border-b border-black/10 divide-x divide-black/10">
         <div class="flex h-[56.33px] items-center justify-center">
           <input
             type="checkbox"
@@ -118,6 +119,7 @@ const rowHeight = '56.67px'
             @change="toggleAllVisible"
           />
         </div>
+        <div class="flex h-[56.33px] items-center px-[12px] text-[12px] font-medium leading-[16px] text-[#717182] whitespace-nowrap">测试用例ID</div>
         <div class="flex h-[56.33px] items-center px-[12px] text-[12px] font-medium leading-[16px] text-[#717182] whitespace-nowrap">功能模块</div>
         <div class="flex h-[56.33px] items-center px-[12px] text-[12px] font-medium leading-[16px] text-[#717182] whitespace-nowrap">标题</div>
         <div class="flex h-[56.33px] items-center px-[12px] text-[12px] font-medium leading-[16px] text-[#717182] whitespace-nowrap">类型</div>
@@ -136,7 +138,7 @@ const rowHeight = '56.67px'
         <div
           v-for="(row, index) in rows"
           :key="row.id"
-          class="grid grid-cols-[45px_160px_minmax(160px,260px)_70px_70px_70px_220px_90px_260px_90px_80px_110px_150px] border-x border-b border-black/10 divide-x divide-black/10 last:border-b-0"
+          class="grid grid-cols-[45px_140px_160px_minmax(160px,260px)_70px_70px_70px_220px_90px_260px_90px_80px_110px_150px] border-x border-b border-black/10 divide-x divide-black/10 last:border-b-0"
           :style="{ height: rowHeight }"
         >
           <div class="relative h-full">
@@ -147,6 +149,12 @@ const rowHeight = '56.67px'
               aria-label="Select row"
               @change="toggleRowSelection(row.id)"
             />
+          </div>
+
+          <div class="relative h-full">
+            <div class="absolute left-[12px] right-[12px] top-1/2 -translate-y-1/2 truncate text-[12px] leading-[16px] text-[#717182]">
+              {{ row.testCaseId || '-' }}
+            </div>
           </div>
 
           <div class="relative h-full">

@@ -53,6 +53,23 @@ def _normalize_optional_text(value: str | None) -> str | None:
     return cleaned or None
 
 
+def _normalize_test_case_id(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    return cleaned or None
+
+
+def _normalize_expected_status_code(value: int | None) -> int | None:
+    if value is None:
+        return None
+    try:
+        normalized = int(value)
+    except (TypeError, ValueError):
+        return None
+    return normalized
+
+
 def _normalize_expected_result(value: str | None) -> str | None:
     if value is None:
         return None
@@ -82,6 +99,9 @@ def _merge_api_meta(
     *,
     api_params: dict | None = None,
     api_headers: dict[str, str] | None = None,
+    expected_status_code: int | None = None,
+    preconditions: str | None = None,
+    postconditions: str | None = None,
     expected_result: str | None = None,
 ) -> dict:
     base = meta_json.copy() if isinstance(meta_json, dict) else {}
@@ -89,6 +109,18 @@ def _merge_api_meta(
         base["apiParams"] = api_params
     if api_headers is not None:
         base["apiHeaders"] = _normalize_api_headers(api_headers)
+    if expected_status_code is None:
+        base.pop("expectedStatusCode", None)
+    else:
+        base["expectedStatusCode"] = _normalize_expected_status_code(expected_status_code)
+    if preconditions is None:
+        base.pop("preconditions", None)
+    else:
+        base["preconditions"] = preconditions.strip()
+    if postconditions is None:
+        base.pop("postconditions", None)
+    else:
+        base["postconditions"] = postconditions.strip()
     if expected_result is not None:
         base["expectedResult"] = expected_result.strip()
     return base
@@ -135,6 +167,17 @@ async def create_testcase(
 ) -> TestCase:
     project_id = uuid.UUID(payload.projectId)
     await _check_project_permission(db, user, project_id, [ProjectRole.OWNER, ProjectRole.ADMIN, ProjectRole.EDITOR])
+    test_case_id = _normalize_test_case_id(payload.testCaseId)
+    if test_case_id is not None:
+        existing = await db.scalar(
+            select(TestCase.id).where(
+                TestCase.tenant_id == user.tenant_id,
+                TestCase.project_id == project_id,
+                TestCase.test_case_id == test_case_id,
+            )
+        )
+        if existing:
+            raise HTTPException(status_code=400, detail="testCaseId already exists")
     feature = _normalize_optional_text(payload.feature)
     api_url = _normalize_optional_text(payload.apiUrl)
     api_method = _normalize_optional_text(payload.apiMethod.upper() if payload.apiMethod else None)
@@ -147,6 +190,8 @@ async def create_testcase(
     expected_result = _normalize_expected_result(payload.expectedResult)
     if expected_result is None:
         raise HTTPException(status_code=400, detail="expectedResult is required")
+    preconditions = _normalize_optional_text(payload.preconditions)
+    postconditions = _normalize_optional_text(payload.postconditions)
 
     owner_id = user.id
     if payload.ownerId:
@@ -160,6 +205,7 @@ async def create_testcase(
     testcase = TestCase(
         tenant_id=user.tenant_id,
         project_id=project_id,
+        test_case_id=test_case_id,
         title=payload.title,
         type=payload.type,
         priority=payload.priority,
@@ -173,6 +219,9 @@ async def create_testcase(
             {},
             api_params=payload.apiParams,
             api_headers=payload.apiHeaders,
+            expected_status_code=payload.expectedStatusCode,
+            preconditions=preconditions,
+            postconditions=postconditions,
             expected_result=expected_result,
         ),
         created_by=user.id,
@@ -282,6 +331,19 @@ async def update_testcase(
     if uuid.UUID(payload.projectId) != testcase.project_id:
         raise HTTPException(status_code=400, detail="projectId mismatch")
 
+    test_case_id = _normalize_test_case_id(payload.testCaseId)
+    if test_case_id is not None and test_case_id != testcase.test_case_id:
+        existing = await db.scalar(
+            select(TestCase.id).where(
+                TestCase.tenant_id == user.tenant_id,
+                TestCase.project_id == testcase.project_id,
+                TestCase.test_case_id == test_case_id,
+                TestCase.id != testcase.id,
+            )
+        )
+        if existing:
+            raise HTTPException(status_code=400, detail="testCaseId already exists")
+
     feature = _normalize_optional_text(payload.feature)
     api_method = _normalize_optional_text(payload.apiMethod.upper() if payload.apiMethod else None)
     api_url = _normalize_optional_text(payload.apiUrl)
@@ -294,7 +356,10 @@ async def update_testcase(
         raise HTTPException(status_code=400, detail="API URL is required")
     if expected_result is None:
         raise HTTPException(status_code=400, detail="expectedResult is required")
+    preconditions = _normalize_optional_text(payload.preconditions)
+    postconditions = _normalize_optional_text(payload.postconditions)
 
+    testcase.test_case_id = test_case_id
     testcase.title = payload.title
     testcase.type = payload.type
     testcase.priority = payload.priority
@@ -308,6 +373,9 @@ async def update_testcase(
         testcase.ai_meta_json,
         api_params=payload.apiParams,
         api_headers=payload.apiHeaders,
+        expected_status_code=payload.expectedStatusCode,
+        preconditions=preconditions,
+        postconditions=postconditions,
         expected_result=expected_result,
     )
     if payload.ownerId:

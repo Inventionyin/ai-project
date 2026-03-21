@@ -125,6 +125,43 @@ def _extract_testcase_expected_result(ai_meta_json: object) -> str | None:
     return normalized or None
 
 
+def _extract_testcase_expected_status_code(ai_meta_json: object) -> int | None:
+    if not isinstance(ai_meta_json, dict):
+        return None
+    value = ai_meta_json.get("expectedStatusCode")
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    try:
+        parsed = int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    return parsed
+
+
+def _extract_testcase_preconditions(ai_meta_json: object) -> str | None:
+    if not isinstance(ai_meta_json, dict):
+        return None
+    value = ai_meta_json.get("preconditions")
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    return normalized or None
+
+
+def _extract_testcase_postconditions(ai_meta_json: object) -> str | None:
+    if not isinstance(ai_meta_json, dict):
+        return None
+    value = ai_meta_json.get("postconditions")
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    return normalized or None
+
+
 def _build_execution_spec(runner_type: str) -> JobExecution:
     if runner_type != _RUNNER_TYPE_PYTEST_ALLURE:
         return JobExecution(runnerType=_RUNNER_TYPE_DEFAULT, artifactSpec=[])
@@ -200,6 +237,9 @@ async def _execute_inline_pytest_allure_job(
                 params=dict(item.get("params") or {}),
                 headers={str(k): str(v) for k, v in dict(item.get("headers") or {}).items()},
                 expectedResult=str(item.get("expectedResult") or "").strip() or None,
+                expectedStatusCode=item.get("expectedStatusCode") if isinstance(item.get("expectedStatusCode"), int) else None,
+                preconditions=str(item.get("preconditions") or "").strip() or None,
+                postconditions=str(item.get("postconditions") or "").strip() or None,
             )
         )
 
@@ -838,6 +878,9 @@ async def create_run_from_testcases_http(
             "api_params": _extract_testcase_api_params(r[5]),
             "api_headers": _extract_testcase_api_headers(r[5]),
             "expected_result": _extract_testcase_expected_result(r[5]),
+            "expected_status_code": _extract_testcase_expected_status_code(r[5]),
+            "preconditions": _extract_testcase_preconditions(r[5]),
+            "postconditions": _extract_testcase_postconditions(r[5]),
             "content_md": r[6],
         }
         for r in testcase_rows
@@ -868,6 +911,9 @@ async def create_run_from_testcases_http(
                 "params": merged_params,
                 "headers": merged_headers,
                 "expectedResult": testcase_item["expected_result"],
+                "expectedStatusCode": testcase_item["expected_status_code"],
+                "preconditions": testcase_item["preconditions"],
+                "postconditions": testcase_item["postconditions"],
             }
         )
 
@@ -980,6 +1026,9 @@ async def create_run_from_testcases_http(
                 "params": merged_params,
                 "headers": merged_headers,
                 "expectedResult": testcase_item["expected_result"],
+                "expectedStatusCode": testcase_item["expected_status_code"],
+                "preconditions": testcase_item["preconditions"],
+                "postconditions": testcase_item["postconditions"],
                 "orderNo": order_no,
             }
         )
