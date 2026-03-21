@@ -9,18 +9,20 @@ from urllib.parse import parse_qs, urlparse
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import FileResponse, RedirectResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, get_current_user, get_request_id, to_unix_ts
 from app.core.database import get_db
 from app.core.security import decode_access_token
 from app.models.enums import ArtifactType, CaseRunStatus, RunStatus
-from app.models.run import Artifact, Job
+from app.models.run import Artifact, Job, Run
 from app.schemas.common import ApiResponse, PageData
 from app.schemas.run import (
     CaseRunListItem,
     RunAllureReportGenerateData,
+    RunAllureReportDeleteData,
+    RunAllureReportListItem,
     RunCancelResponseData,
     RunCreateRequest,
     RunDetailData,
@@ -34,6 +36,7 @@ from app.services.run import (
     create_run,
     create_run_from_testcases,
     create_run_from_testcases_http,
+    delete_run_allure_report,
     get_run,
     list_case_runs,
     list_runs,
@@ -180,6 +183,86 @@ async def list_(
     )
     items = [_to_run_detail(run, done, total_) for run, done, total_ in rows]
     return ApiResponse(data=PageData(page=page, pageSize=pageSize, total=total, items=items), requestId=request_id)
+
+
+@router.get("/allure-reports", response_model=ApiResponse[PageData[RunAllureReportListItem]])
+async def list_allure_reports_(
+    projectId: str | None = Query(default=None),
+    page: int = Query(1, ge=1),
+    pageSize: int = Query(20, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    request_id: str = Depends(get_request_id),
+) -> ApiResponse[PageData[RunAllureReportListItem]]:
+    pid = str(projectId or "").strip()
+    if not pid:
+        raise HTTPException(status_code=400, detail="projectId_required")
+    try:
+        project_uuid = uuid.UUID(pid)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid projectId") from exc
+
+    where_clause = (
+        (Artifact.tenant_id == user.tenant_id)
+        & (Run.tenant_id == user.tenant_id)
+        & (Run.project_id == project_uuid)
+        & (Artifact.type == ArtifactType.LOG_BUNDLE)
+        & (Artifact.case_run_id.is_(None))
+        & (func.upper(Artifact.meta_json["kind"].astext) == "ALLURE_REPORT")
+    )
+
+    count_stmt = select(func.count()).select_from(
+        select(Artifact.id)
+        .join(Run, Run.id == Artifact.run_id)
+        .where(where_clause)
+        .subquery()
+    )
+    total = int((await db.execute(count_stmt)).scalar_one() or 0)
+
+    stmt = (
+        select(Artifact)
+        .join(Run, Run.id == Artifact.run_id)
+        .where(where_clause)
+        .order_by(Artifact.created_at.desc())
+        .offset((page - 1) * pageSize)
+        .limit(pageSize)
+    )
+    artifact_rows = (await db.execute(stmt)).scalars().all()
+    items = [
+        RunAllureReportListItem(
+            runId=str(row.run_id),
+            createdAt=to_unix_ts(row.created_at),
+            name=(row.meta_json.get("name") if isinstance(row.meta_json, dict) else None),
+            size=(row.size if row.size is not None else None),
+            reportUrl=f"/api/runs/{row.run_id}/allure-report/",
+        )
+        for row in artifact_rows
+    ]
+    return ApiResponse(data=PageData(page=page, pageSize=pageSize, total=total, items=items), requestId=request_id)
+
+
+@router.delete("/{runId}/allure-report", response_model=ApiResponse[RunAllureReportDeleteData])
+async def delete_allure_report_(
+    runId: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    request_id: str = Depends(get_request_id),
+) -> ApiResponse[RunAllureReportDeleteData]:
+    try:
+        deleted_artifacts, deleted_files, deleted_dirs = await delete_run_allure_report(db, user=user, run_id=runId)
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    return ApiResponse(
+        data=RunAllureReportDeleteData(
+            runId=str(runId),
+            deletedArtifacts=int(deleted_artifacts),
+            deletedFiles=int(deleted_files),
+            deletedDirs=int(deleted_dirs),
+        ),
+        requestId=request_id,
+    )
 
 
 @router.post("/from-testcases", response_model=ApiResponse[RunDetailData])

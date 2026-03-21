@@ -9,7 +9,6 @@ const props = defineProps<{
   envId: string
   environments: BatchRunEnvironmentOption[]
   state: 'preview' | 'executing' | 'completed'
-  canGenerateReport: boolean
   runId: string
 }>()
 
@@ -17,7 +16,6 @@ const emit = defineEmits<{
   (e: 'close'): void
   (e: 'update:envId', value: string): void
   (e: 'execute'): void
-  (e: 'generate-report'): void
 }>()
 
 const executeButtonLabel = computed(() => (props.state === 'executing' ? '执行中...' : '执行'))
@@ -120,14 +118,6 @@ function formatExpectedResult(expectedResult: Row['expectedResult']) {
               @click="emit('execute')"
             >
               {{ executeButtonLabel }}
-            </button>
-            <button
-              type="button"
-              class="h-[32px] rounded-[10px] border border-[#BEDBFF] px-[14px] text-[14px] font-medium leading-[20px] text-[#155DFC] disabled:cursor-not-allowed disabled:border-black/10 disabled:text-[#A1A1AA]"
-              :disabled="!canGenerateReport"
-              @click="emit('generate-report')"
-            >
-              生成报告
             </button>
           </div>
         </div>

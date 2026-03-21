@@ -134,6 +134,21 @@ class RunAllureReportGenerateData(BaseSchema):
     errorMessage: str | None = None
 
 
+class RunAllureReportListItem(BaseSchema):
+    runId: IdStr
+    createdAt: UnixTs
+    name: str | None = None
+    size: int | None = Field(default=None, ge=0)
+    reportUrl: str
+
+
+class RunAllureReportDeleteData(BaseSchema):
+    runId: IdStr
+    deletedArtifacts: int = Field(ge=0)
+    deletedFiles: int = Field(ge=0)
+    deletedDirs: int = Field(ge=0)
+
+
 class RunDebugRequest(BaseSchema):
     projectId: IdStr
     testcaseId: IdStr

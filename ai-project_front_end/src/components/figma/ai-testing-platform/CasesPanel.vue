@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import btnAiGenerate from '@/assets/figma/ai-testing-platform/btn-ai-generate.svg'
 import btnPlus from '@/assets/figma/ai-testing-platform/btn-plus.svg'
 import filterIcon from '@/assets/figma/ai-testing-platform/filter-icon.svg'
@@ -14,10 +14,9 @@ import CreateCaseModal from '@/components/figma/ai-testing-platform/CreateCaseMo
 import EditCaseModal from '@/components/figma/ai-testing-platform/EditCaseModal.vue'
 import AiGenerateCaseModal from '@/components/figma/ai-testing-platform/AiGenerateCaseModal.vue'
 import BatchRunDrawer from '@/components/figma/ai-testing-platform/BatchRunDrawer.vue'
-import { buildRunPayloadDirect, fetchProjectEnvironments, fetchRunCaseRuns, generateRunAllureReport, runFromTestcasesHttp, type BatchRunDirectFormItem, type BatchRunDirectFormState } from '@/lib/aiTestingPlatformApi'
+import { buildRunPayloadDirect, fetchProjectEnvironments, fetchRunCaseRuns, runFromTestcasesHttp, type BatchRunDirectFormItem, type BatchRunDirectFormState } from '@/lib/aiTestingPlatformApi'
 
 const route = useRoute()
-const router = useRouter()
 const isCreateCaseOpen = ref(false)
 const isAiGenerateOpen = ref(false)
 const isEditCaseOpen = ref(false)
@@ -222,7 +221,6 @@ const selectedRows = computed(() => {
   const selectedSet = new Set(selectedCaseIds.value)
   return rows.value.filter((row) => selectedSet.has(row.id))
 })
-const canGenerateBatchReport = computed(() => batchRunDrawerState.value === 'completed' && Boolean(batchRunRunId.value))
 
 const loadCurrentUser = async (authorization: string) => {
   const meResponse = await fetch(`${resolveApiBaseUrl()}/api/auth/me`, {
@@ -387,9 +385,11 @@ function openBatchRunDrawer() {
 
 function closeBatchRunDrawer() {
   isBatchRunDrawerOpen.value = false
-  clearBatchRunPolling()
-  batchRunRunId.value = ''
-  batchRunDrawerState.value = 'closed'
+  if (batchRunDrawerState.value === 'preview' || batchRunDrawerState.value === 'closed') {
+    clearBatchRunPolling()
+    batchRunRunId.value = ''
+    batchRunDrawerState.value = 'closed'
+  }
 }
 
 async function loadBatchRunEnvironments() {
@@ -435,7 +435,7 @@ function extractRunId(payload: unknown) {
 function scheduleBatchRunStatusPoll(runId: string) {
   clearBatchRunPolling()
   const poll = async () => {
-    if (!isBatchRunDrawerOpen.value || batchRunRunId.value !== runId) return
+    if (batchRunRunId.value !== runId) return
     try {
       const caseRuns = await fetchRunCaseRuns(runId)
       if (!caseRuns.length) {
@@ -448,7 +448,7 @@ function scheduleBatchRunStatusPoll(runId: string) {
       const isCompleted = caseRuns.every((item) => terminalStatuses.has(String(item.status || '').toUpperCase()))
       if (isCompleted) {
         batchRunDrawerState.value = 'completed'
-        showToast('批量执行已完成')
+        showToast('用例执行完成，可以查看报告')
         clearBatchRunPolling()
         return
       }
@@ -468,16 +468,16 @@ async function executeBatchRunFromDrawer() {
   const projectId = String(route.params.projectId || '').trim()
   if (!projectId) {
     showToast('缺少项目 ID', 'error')
-    return
+    return false
   }
   if (!selectedRows.value.length) {
     showToast('请先勾选需要执行的用例', 'error')
-    return
+    return false
   }
   const envId = String(batchRunEnvId.value || '').trim()
   if (!envId) {
     showToast(isLoadingBatchRunEnvironments.value ? '执行环境加载中，请稍后重试' : '请选择执行环境', 'error')
-    return
+    return false
   }
   batchRunDrawerState.value = 'executing'
   batchRunRunId.value = ''
@@ -509,31 +509,19 @@ async function executeBatchRunFromDrawer() {
     }
     scheduleBatchRunStatusPoll(runId)
     showToast('批量执行已发起')
+    return true
   } catch (error) {
     batchRunDrawerState.value = 'preview'
     const message = error instanceof Error ? error.message : '批量执行失败'
     showToast(message, 'error')
+    return false
   }
 }
 
-async function openBatchReport() {
-  const projectId = String(route.params.projectId || '').trim()
-  const runId = batchRunRunId.value
-  if (!projectId || !runId || !canGenerateBatchReport.value) return
-  try {
-    const reportResult = await generateRunAllureReport(runId)
-    const reportStatus = String(reportResult?.reportStatus || '').toUpperCase()
-    if (reportStatus !== 'READY') {
-      throw new Error(reportResult?.errorMessage || '生成 Allure 报告失败')
-    }
-    const target = router.resolve({
-      path: `/projects/${projectId}/reports/allure`,
-      query: { runId }
-    })
-    window.open(target.href, '_blank', 'noopener,noreferrer')
-  } catch (error) {
-    const message = error instanceof Error ? error.message : '生成 Allure 报告失败'
-    showToast(message, 'error')
+async function handleBatchRunDrawerExecute() {
+  const started = await executeBatchRunFromDrawer()
+  if (started) {
+    isBatchRunDrawerOpen.value = false
   }
 }
 
@@ -1036,11 +1024,9 @@ watch(() => route.params.projectId, () => {
     :env-id="batchRunEnvId"
     :environments="batchRunEnvironments"
     :state="batchRunDrawerState === 'closed' ? 'preview' : batchRunDrawerState"
-    :can-generate-report="canGenerateBatchReport"
     :run-id="batchRunRunId"
     @close="closeBatchRunDrawer"
     @update:env-id="batchRunEnvId = $event"
-    @execute="executeBatchRunFromDrawer"
-    @generate-report="openBatchReport"
+    @execute="handleBatchRunDrawerExecute"
   />
 </template>

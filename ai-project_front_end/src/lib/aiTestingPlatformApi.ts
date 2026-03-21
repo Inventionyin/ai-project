@@ -142,6 +142,21 @@ export type RunAllureReportGenerateData = {
   errorMessage?: string | null
 }
 
+export type RunAllureReportListItem = {
+  runId: string
+  createdAt: number
+  name?: string | null
+  size?: number | null
+  reportUrl: string
+}
+
+export type RunAllureReportDeleteData = {
+  runId: string
+  deletedArtifacts: number
+  deletedFiles: number
+  deletedDirs: number
+}
+
 const resolveApiBaseUrl = () => {
   const envBase = String(import.meta.env.VITE_API_BASE_URL || '').trim()
   if (!envBase) return ''
@@ -516,6 +531,35 @@ export async function fetchRunCaseRuns(runId: string) {
     }
   })
   return normalizeCaseRuns(data)
+}
+
+export async function fetchProjectAllureReports(projectId: string, page = 1, pageSize = 50) {
+  const pid = String(projectId || '').trim()
+  if (!pid) return []
+  const query = new URLSearchParams({
+    projectId: pid,
+    page: String(page),
+    pageSize: String(pageSize)
+  })
+  const data = await requestJson<{ items?: RunAllureReportListItem[] } | RunAllureReportListItem[]>(`/api/runs/allure-reports?${query.toString()}`, {
+    method: 'GET',
+    headers: {
+      Authorization: resolveAuthHeader()
+    }
+  })
+  if (Array.isArray(data)) return data
+  return Array.isArray(data?.items) ? data.items : []
+}
+
+export async function deleteRunAllureReport(runId: string) {
+  const id = String(runId || '').trim()
+  if (!id) throw new Error('runId 不能为空')
+  return requestJson<RunAllureReportDeleteData>(`/api/runs/${encodeURIComponent(id)}/allure-report`, {
+    method: 'DELETE',
+    headers: {
+      Authorization: resolveAuthHeader()
+    }
+  })
 }
 
 export async function generateRunAllureReport(runId: string) {

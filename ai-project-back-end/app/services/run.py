@@ -3,8 +3,10 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import shutil
 import uuid
 from datetime import datetime
+from pathlib import Path
 
 from fastapi import HTTPException
 from sqlalchemy import and_, func, or_, select, update
@@ -22,6 +24,7 @@ from app.models.testcase_binding import TestcaseBinding
 from app.schemas.worker import JobArtifactSpec, JobEnv, JobExecution, JobItem, JobPayload, JobSuiteConfig
 from app.services.environment import get_secret_keys
 from app.services.runner_dispatch import dispatch_job_runner
+from app.services.runner_pytest_allure import resolve_run_allure_paths
 
 
 def _is_admin(user: CurrentUser) -> bool:
@@ -1420,3 +1423,76 @@ async def retry_run(
     db.add(job)
     await db.flush()
     return retry_run_obj
+
+
+async def delete_run_allure_report(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    run_id: uuid.UUID,
+) -> tuple[int, int, int]:
+    run = await db.scalar(select(Run).where(Run.id == run_id, Run.tenant_id == user.tenant_id))
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    project = await _get_project(db, user=user, project_id=run.project_id)
+    await _require_project_write(db, user=user, project=project)
+
+    artifact_rows = (
+        await db.execute(
+            select(Artifact)
+            .where(
+                Artifact.tenant_id == user.tenant_id,
+                Artifact.run_id == run.id,
+                Artifact.case_run_id.is_(None),
+            )
+            .order_by(Artifact.created_at.desc())
+        )
+    ).scalars().all()
+
+    report_artifacts = [
+        row
+        for row in artifact_rows
+        if isinstance(row.meta_json, dict) and str(row.meta_json.get("kind") or "").upper() == "ALLURE_REPORT"
+    ]
+
+    deleted_files = 0
+    for row in report_artifacts:
+        storage = str(row.storage_url or "").strip()
+        if storage:
+            try:
+                candidate = Path(storage).expanduser()
+                if candidate.exists() and candidate.is_file():
+                    candidate.unlink()
+                    deleted_files += 1
+            except OSError:
+                pass
+        await db.delete(row)
+
+    deleted_dirs = 0
+    try:
+        _, report_dir = resolve_run_allure_paths(str(run.id))
+        if report_dir.exists():
+            shutil.rmtree(report_dir, ignore_errors=True)
+            deleted_dirs += 1
+        report_zip = report_dir.parent / "allure-report.zip"
+        if report_zip.exists() and report_zip.is_file():
+            try:
+                report_zip.unlink()
+                deleted_files += 1
+            except OSError:
+                pass
+    except Exception:
+        pass
+
+    run_summary = dict(run.summary_json or {})
+    execution_result = dict(run_summary.get("executionResult") or {})
+    execution_result["reportStatus"] = "DELETED"
+    execution_result["reportErrorCode"] = None
+    execution_result["reportMessage"] = None
+    execution_result["reportPath"] = None
+    run_summary["executionResult"] = execution_result
+    run.summary_json = run_summary
+
+    await db.flush()
+    return len(report_artifacts), deleted_files, deleted_dirs
