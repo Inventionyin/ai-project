@@ -556,7 +556,7 @@ function closeEditCase() {
 async function deleteCase(index: number) {
   const target = displayRows.value[index]
   if (!target) return
-  if (!window.confirm(`确认删除用例「${target.title}」吗？`)) return
+  if (!window.confirm(`该用例存在执行记录，是否确定删除？\n\n用例名称：${target.title}`)) return
   try {
     const authorization = resolveAuthHeader()
     const response = await fetch(`${resolveApiBaseUrl()}/api/testcases/${target.id}`, {

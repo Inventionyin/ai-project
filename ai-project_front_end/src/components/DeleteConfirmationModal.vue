@@ -29,7 +29,8 @@ const handleClose = () => {
           </div>
           <h3 class="mt-5 text-lg font-medium text-gray-900">确认删除</h3>
           <div class="mt-2">
-            <p class="text-sm text-gray-500">您确定要删除项目 “<strong class="text-gray-900">{{ projectName }}</strong>” 吗？此操作不可撤销。</p>
+            <p class="text-sm text-gray-500">该项目下存在测试用例等内容，是否确定删除？</p>
+            <p class="text-sm text-gray-500 mt-1">项目名称：<strong class="text-gray-900">{{ projectName }}</strong></p>
           </div>
         </div>
       </div>

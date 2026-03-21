@@ -4,14 +4,17 @@ import uuid
 from typing import Sequence
 
 from fastapi import HTTPException
-from sqlalchemy import and_, desc, func, select
+from sqlalchemy import and_, delete, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser
 from app.models.enums import ProjectRole, TestCaseStatus, TestCaseType
+from app.models.integration import IssueLink
 from app.models.project import Project, ProjectMember
-from app.models.run import CaseRun
+from app.models.run import Artifact, CaseRun
+from app.models.suite import SuiteItem
 from app.models.testcase import TestCase, TestCaseVersion
+from app.models.testcase_binding import TestcaseBinding
 from app.models.user import User
 from app.schemas.testcase import TestCaseCreateRequest, TestCasePutRequest
 
@@ -339,7 +342,56 @@ async def delete_testcase(
 ) -> None:
     testcase = await get_testcase(db, user=user, testcase_id=testcase_id)
     await _check_project_permission(db, user, testcase.project_id, [ProjectRole.OWNER, ProjectRole.ADMIN, ProjectRole.EDITOR])
-    
+
+    case_run_ids = list(
+        (
+            await db.scalars(
+                select(CaseRun.id).where(
+                    CaseRun.tenant_id == user.tenant_id,
+                    CaseRun.testcase_id == testcase.id,
+                )
+            )
+        ).all()
+    )
+    if case_run_ids:
+        await db.execute(
+            delete(IssueLink).where(
+                IssueLink.tenant_id == user.tenant_id,
+                IssueLink.case_run_id.in_(case_run_ids),
+            )
+        )
+        await db.execute(
+            delete(Artifact).where(
+                Artifact.tenant_id == user.tenant_id,
+                Artifact.case_run_id.in_(case_run_ids),
+            )
+        )
+
+    await db.execute(
+        delete(CaseRun).where(
+            CaseRun.tenant_id == user.tenant_id,
+            CaseRun.testcase_id == testcase.id,
+        )
+    )
+    await db.execute(
+        delete(SuiteItem).where(
+            SuiteItem.tenant_id == user.tenant_id,
+            SuiteItem.testcase_id == testcase.id,
+        )
+    )
+    await db.execute(
+        delete(TestcaseBinding).where(
+            TestcaseBinding.tenant_id == user.tenant_id,
+            TestcaseBinding.testcase_id == testcase.id,
+        )
+    )
+    await db.execute(
+        delete(TestCaseVersion).where(
+            TestCaseVersion.tenant_id == user.tenant_id,
+            TestCaseVersion.testcase_id == testcase.id,
+        )
+    )
+
     await db.delete(testcase)
 
 

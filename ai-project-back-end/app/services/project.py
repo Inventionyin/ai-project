@@ -4,14 +4,22 @@ import uuid
 from datetime import datetime, time, timedelta
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser
+from app.models.ai_import import AiImportItem, AiImportJob
+from app.models.api import ApiCollection, ApiCollectionGroup, ApiRequest
+from app.models.api_target import ApiTarget
+from app.models.environment import Environment
+from app.models.integration import AiRecord, IssueLink, Notification
 from app.models.enums import ProjectRole, RunStatus
 from app.models.project import Project, ProjectMember
-from app.models.run import Run
-from app.models.testcase import TestCase
+from app.models.run import Artifact, CaseRun, Job, Run
+from app.models.suite import Suite, SuiteItem
+from app.models.test_data_set import TestDataSet
+from app.models.testcase import TestCase, TestCaseVersion
+from app.models.testcase_binding import TestcaseBinding
 
 
 def _is_admin(user: CurrentUser) -> bool:
@@ -287,6 +295,201 @@ async def delete_project(
 ) -> None:
     project, _ = await get_project(db, user=user, project_id=project_id)
     await _require_project_write(db, user=user, project=project)
+
+    run_ids = list(
+        (
+            await db.scalars(
+                select(Run.id).where(
+                    Run.tenant_id == user.tenant_id,
+                    Run.project_id == project.id,
+                )
+            )
+        ).all()
+    )
+    testcase_ids = list(
+        (
+            await db.scalars(
+                select(TestCase.id).where(
+                    TestCase.tenant_id == user.tenant_id,
+                    TestCase.project_id == project.id,
+                )
+            )
+        ).all()
+    )
+    collection_ids = list(
+        (
+            await db.scalars(
+                select(ApiCollection.id).where(
+                    ApiCollection.tenant_id == user.tenant_id,
+                    ApiCollection.project_id == project.id,
+                )
+            )
+        ).all()
+    )
+    suite_ids = list(
+        (
+            await db.scalars(
+                select(Suite.id).where(
+                    Suite.tenant_id == user.tenant_id,
+                    Suite.project_id == project.id,
+                )
+            )
+        ).all()
+    )
+
+    if run_ids:
+        await db.execute(
+            delete(IssueLink).where(
+                IssueLink.tenant_id == user.tenant_id,
+                IssueLink.run_id.in_(run_ids),
+            )
+        )
+        await db.execute(
+            delete(Artifact).where(
+                Artifact.tenant_id == user.tenant_id,
+                Artifact.run_id.in_(run_ids),
+            )
+        )
+        await db.execute(
+            delete(CaseRun).where(
+                CaseRun.tenant_id == user.tenant_id,
+                CaseRun.run_id.in_(run_ids),
+            )
+        )
+        await db.execute(
+            delete(Job).where(
+                Job.tenant_id == user.tenant_id,
+                Job.run_id.in_(run_ids),
+            )
+        )
+
+    if testcase_ids:
+        await db.execute(
+            delete(SuiteItem).where(
+                SuiteItem.tenant_id == user.tenant_id,
+                SuiteItem.testcase_id.in_(testcase_ids),
+            )
+        )
+        await db.execute(
+            delete(TestCaseVersion).where(
+                TestCaseVersion.tenant_id == user.tenant_id,
+                TestCaseVersion.testcase_id.in_(testcase_ids),
+            )
+        )
+        await db.execute(
+            delete(TestcaseBinding).where(
+                TestcaseBinding.tenant_id == user.tenant_id,
+                TestcaseBinding.testcase_id.in_(testcase_ids),
+            )
+        )
+        await db.execute(
+            delete(CaseRun).where(
+                CaseRun.tenant_id == user.tenant_id,
+                CaseRun.testcase_id.in_(testcase_ids),
+            )
+        )
+
+    if suite_ids:
+        await db.execute(
+            delete(SuiteItem).where(
+                SuiteItem.tenant_id == user.tenant_id,
+                SuiteItem.suite_id.in_(suite_ids),
+            )
+        )
+
+    if collection_ids:
+        await db.execute(
+            delete(ApiRequest).where(
+                ApiRequest.tenant_id == user.tenant_id,
+                ApiRequest.collection_id.in_(collection_ids),
+            )
+        )
+        await db.execute(
+            delete(ApiCollectionGroup).where(
+                ApiCollectionGroup.tenant_id == user.tenant_id,
+                ApiCollectionGroup.collection_id.in_(collection_ids),
+            )
+        )
+
+    await db.execute(
+        delete(TestcaseBinding).where(
+            TestcaseBinding.tenant_id == user.tenant_id,
+            TestcaseBinding.project_id == project.id,
+        )
+    )
+    await db.execute(
+        delete(AiImportItem).where(
+            AiImportItem.tenant_id == user.tenant_id,
+            AiImportItem.project_id == project.id,
+        )
+    )
+    await db.execute(
+        delete(AiImportJob).where(
+            AiImportJob.tenant_id == user.tenant_id,
+            AiImportJob.project_id == project.id,
+        )
+    )
+    await db.execute(
+        delete(ApiTarget).where(
+            ApiTarget.tenant_id == user.tenant_id,
+            ApiTarget.project_id == project.id,
+        )
+    )
+    await db.execute(
+        delete(ApiCollection).where(
+            ApiCollection.tenant_id == user.tenant_id,
+            ApiCollection.project_id == project.id,
+        )
+    )
+    await db.execute(
+        delete(Run).where(
+            Run.tenant_id == user.tenant_id,
+            Run.project_id == project.id,
+        )
+    )
+    await db.execute(
+        delete(TestCase).where(
+            TestCase.tenant_id == user.tenant_id,
+            TestCase.project_id == project.id,
+        )
+    )
+    await db.execute(
+        delete(Suite).where(
+            Suite.tenant_id == user.tenant_id,
+            Suite.project_id == project.id,
+        )
+    )
+    await db.execute(
+        delete(TestDataSet).where(
+            TestDataSet.tenant_id == user.tenant_id,
+            TestDataSet.project_id == project.id,
+        )
+    )
+    await db.execute(
+        delete(Environment).where(
+            Environment.tenant_id == user.tenant_id,
+            Environment.project_id == project.id,
+        )
+    )
+    await db.execute(
+        delete(Notification).where(
+            Notification.tenant_id == user.tenant_id,
+            Notification.project_id == project.id,
+        )
+    )
+    await db.execute(
+        delete(AiRecord).where(
+            AiRecord.tenant_id == user.tenant_id,
+            AiRecord.project_id == project.id,
+        )
+    )
+    await db.execute(
+        delete(ProjectMember).where(
+            ProjectMember.tenant_id == user.tenant_id,
+            ProjectMember.project_id == project.id,
+        )
+    )
+
     await db.delete(project)
     await db.flush()
 
