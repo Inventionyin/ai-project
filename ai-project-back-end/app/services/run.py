@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser
 from app.models.environment import Environment
-from app.models.enums import CaseRunStatus, JobStatus, ProjectRole, RunStatus, TriggerType
+from app.models.enums import ArtifactType, CaseRunStatus, JobStatus, ProjectRole, RunStatus, TriggerType
 from app.models.project import Project, ProjectMember
 from app.models.run import Artifact, CaseRun, Job, Run
 from app.models.suite import Suite, SuiteItem
@@ -1450,7 +1450,7 @@ async def delete_run_allure_report(
             .where(
                 Artifact.tenant_id == user.tenant_id,
                 Artifact.run_id == run.id,
-                Artifact.case_run_id.is_(None),
+                Artifact.type == ArtifactType.LOG_BUNDLE,
             )
             .order_by(Artifact.created_at.desc())
         )
@@ -1459,23 +1459,32 @@ async def delete_run_allure_report(
     report_artifacts = [
         row
         for row in artifact_rows
-        if isinstance(row.meta_json, dict) and str(row.meta_json.get("kind") or "").upper() == "ALLURE_REPORT"
+        if isinstance(row.meta_json, dict) and str(row.meta_json.get("kind") or "").strip().upper() == "ALLURE_REPORT"
     ]
 
     deleted_files = 0
+    deleted_dirs = 0
     for row in report_artifacts:
         storage = str(row.storage_url or "").strip()
         if storage:
             try:
                 candidate = Path(storage).expanduser()
-                if candidate.exists() and candidate.is_file():
-                    candidate.unlink()
-                    deleted_files += 1
+                if candidate.exists():
+                    if candidate.is_file():
+                        candidate.unlink()
+                        deleted_files += 1
+                        if candidate.suffix.lower() == ".zip":
+                            extracted_dir = candidate.parent / "allure-report"
+                            if extracted_dir.exists() and extracted_dir.is_dir():
+                                shutil.rmtree(extracted_dir, ignore_errors=True)
+                                deleted_dirs += 1
+                    elif candidate.is_dir():
+                        shutil.rmtree(candidate, ignore_errors=True)
+                        deleted_dirs += 1
             except OSError:
                 pass
         await db.delete(row)
 
-    deleted_dirs = 0
     try:
         _, report_dir = resolve_run_allure_paths(str(run.id))
         if report_dir.exists():

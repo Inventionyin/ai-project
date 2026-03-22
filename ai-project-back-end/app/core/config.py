@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     runner_workspace_root: str = ""
     runner_python_executable: str = "python"
     runner_allure_command: str = "allure"
+    runner_allure_runs_root: str = ""
 
 
 @lru_cache

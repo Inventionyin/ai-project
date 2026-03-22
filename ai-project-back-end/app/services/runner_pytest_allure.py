@@ -17,7 +17,6 @@ from app.models.enums import ArtifactType, CaseRunStatus, JobStatus
 from app.schemas.run import ArtifactIndex, CaseRunMetrics, CaseRunResult
 from app.schemas.worker import JobPayload
 
-_ALLURE_RUNS_ROOT = Path("D:/ai-project/allure-data/runs")
 _SENSITIVE_HEADER_KEYS = {
     "authorization",
     "proxy-authorization",
@@ -36,6 +35,24 @@ def _mask_sensitive_headers(headers: dict[str, str]) -> dict[str, str]:
         else:
             masked[str(key)] = str(value)
     return masked
+
+
+def _default_runner_root() -> Path:
+    settings = get_settings()
+    configured = str(settings.runner_workspace_root or "").strip()
+    if configured:
+        return Path(configured).expanduser()
+    if platform.system().strip().lower().startswith("win"):
+        return Path("D:/ai-test-platform-runners")
+    return Path(tempfile.gettempdir()) / "ai-test-platform-runners"
+
+
+def _resolve_allure_runs_root() -> Path:
+    settings = get_settings()
+    configured = str(settings.runner_allure_runs_root or "").strip()
+    if configured:
+        return Path(configured).expanduser()
+    return _default_runner_root() / "allure-data" / "runs"
 
 
 def _job_item_key(item: object) -> str:
@@ -174,7 +191,7 @@ def resolve_run_allure_paths(run_id: str) -> tuple[Path, Path]:
     run_key = str(run_id).strip()
     if not run_key:
         raise ValueError("run_id_empty")
-    run_root = _ALLURE_RUNS_ROOT / run_key
+    run_root = _resolve_allure_runs_root() / run_key
     return run_root / "allure-results", run_root / "allure-report"
 
 

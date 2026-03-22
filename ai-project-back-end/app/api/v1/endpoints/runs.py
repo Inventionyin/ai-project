@@ -45,6 +45,7 @@ from app.services.run import (
 from app.services.runner_pytest_allure import generate_allure_report_for_run, resolve_run_allure_paths
 
 router = APIRouter(prefix="/runs")
+_LEGACY_ALLURE_RUNS_ROOT = Path("D:/ai-project/allure-data/runs")
 
 
 def _resolve_user_with_optional_token(user: CurrentUser, access_token: str | None) -> CurrentUser:
@@ -207,6 +208,7 @@ async def list_allure_reports_(
         & (Run.tenant_id == user.tenant_id)
         & (Run.project_id == project_uuid)
         & (Artifact.type == ArtifactType.LOG_BUNDLE)
+        & (Artifact.case_run_id.is_(None))
         & (func.upper(Artifact.meta_json["kind"].astext) == "ALLURE_REPORT")
     )
 
@@ -238,6 +240,21 @@ async def list_allure_reports_(
         .limit(pageSize)
     )
     artifact_rows = (await db.execute(stmt)).scalars().all()
+    artifact_run_ids = {
+        x
+        for x in (
+            (
+                await db.execute(
+                    select(Artifact.run_id)
+                    .join(Run, Run.id == Artifact.run_id)
+                    .where(where_clause)
+                    .distinct()
+                )
+            )
+            .scalars()
+            .all()
+        )
+    }
     items = [
         RunAllureReportListItem(
             runId=str(row.run_id),
@@ -248,7 +265,57 @@ async def list_allure_reports_(
         )
         for row in artifact_rows
     ]
-    return ApiResponse(data=PageData(page=page, pageSize=pageSize, total=total, items=items), requestId=request_id)
+
+    scan_limit = min(int(pageSize) * 3, 600)
+    run_rows = (
+        (
+            await db.execute(
+                select(Run.id, Run.start_at, Run.end_at)
+                .where(Run.tenant_id == user.tenant_id, Run.project_id == project_uuid)
+                .order_by(Run.start_at.desc().nullslast(), Run.id.desc())
+                .offset((page - 1) * pageSize)
+                .limit(scan_limit)
+            )
+        )
+        .all()
+        or []
+    )
+    legacy_enabled = _LEGACY_ALLURE_RUNS_ROOT.exists()
+    fallback_count = 0
+    for run_id, start_at, end_at in run_rows:
+        if run_id in artifact_run_ids:
+            continue
+        _, report_dir = resolve_run_allure_paths(str(run_id))
+        report_zip = report_dir.parent / "allure-report.zip"
+        found_dir: Path | None = report_dir if report_dir.exists() else None
+        found_zip: Path | None = report_zip if report_zip.exists() and report_zip.is_file() else None
+        if found_dir is None and found_zip is None and legacy_enabled:
+            legacy_run_root = _LEGACY_ALLURE_RUNS_ROOT / str(run_id)
+            legacy_report_dir = legacy_run_root / "allure-report"
+            legacy_report_zip = legacy_run_root / "allure-report.zip"
+            if legacy_report_dir.exists():
+                found_dir = legacy_report_dir
+            if legacy_report_zip.exists() and legacy_report_zip.is_file():
+                found_zip = legacy_report_zip
+        if found_dir is None and found_zip is None:
+            continue
+        created_at = start_at or end_at
+        items.append(
+            RunAllureReportListItem(
+                runId=str(run_id),
+                createdAt=to_unix_ts(created_at) if created_at else 0,
+                name="allure-report.zip" if found_zip is not None else "allure-report",
+                size=(found_zip.stat().st_size if found_zip is not None else None),
+                reportUrl=f"/api/runs/{run_id}/allure-report/",
+            )
+        )
+        fallback_count += 1
+
+    items.sort(key=lambda x: int(x.createdAt or 0), reverse=True)
+    return ApiResponse(
+        data=PageData(page=page, pageSize=pageSize, total=total + fallback_count, items=items[:pageSize]),
+        requestId=request_id,
+    )
 
 
 @router.delete("/{runId}/allure-report", response_model=ApiResponse[RunAllureReportDeleteData])
@@ -426,6 +493,7 @@ async def get_allure_report_(
                 Artifact.tenant_id == resolved_user.tenant_id,
                 Artifact.run_id == run.id,
                 Artifact.type == ArtifactType.LOG_BUNDLE,
+                Artifact.case_run_id.is_(None),
             )
             .order_by(Artifact.created_at.desc())
         )
@@ -453,6 +521,10 @@ async def get_allure_report_(
         _, run_report_dir = resolve_run_allure_paths(str(run.id))
         if run_report_dir.exists():
             report_dir = run_report_dir.resolve()
+    if report_dir is None and _LEGACY_ALLURE_RUNS_ROOT.exists():
+        legacy_dir = (_LEGACY_ALLURE_RUNS_ROOT / str(run.id) / "allure-report").resolve()
+        if legacy_dir.exists():
+            report_dir = legacy_dir
     if report_dir is None:
         raise HTTPException(status_code=404, detail="Allure report not found")
     try:
