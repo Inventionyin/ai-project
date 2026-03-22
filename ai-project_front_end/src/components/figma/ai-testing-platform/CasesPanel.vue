@@ -30,6 +30,7 @@ const total = ref(0)
 const page = ref(1)
 const pageSize = 20
 const selectedCaseIds = ref<string[]>([])
+const selectedCaseMap = ref<Record<string, Row>>({})
 const currentUserId = ref('')
 const currentUserName = ref('我')
 const ownerOptions = ref<Array<{ id: string; username: string }>>([])
@@ -215,7 +216,7 @@ function handleImportedCases(data: { importedCount: number; failedCount: number 
     showToast('导入失败', 'error')
   }
   page.value = 1
-  selectedCaseIds.value = []
+  clearSelection()
   void loadCases()
 }
 
@@ -243,8 +244,9 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize))
 const totalCasesLabel = computed(() => (total.value > 0 ? total.value : casesCount.value))
 const selectedRows = computed(() => {
   if (!selectedCaseIds.value.length) return []
-  const selectedSet = new Set(selectedCaseIds.value)
-  return rows.value.filter((row) => selectedSet.has(row.id))
+  return selectedCaseIds.value
+    .map((id) => selectedCaseMap.value[id])
+    .filter((row): row is Row => Boolean(row))
 })
 
 type PaginationItem = number | '...'
@@ -377,7 +379,14 @@ const loadCases = async () => {
       lastRun: resolveLastRunLabel(item.lastRun),
       updatedAt: formatDateTime(item.updatedAt)
     }))
-    selectedCaseIds.value = []
+    if (selectedCaseIds.value.length) {
+      const selectedSet = new Set(selectedCaseIds.value)
+      const nextMap: Record<string, Row> = { ...selectedCaseMap.value }
+      for (const row of rows.value) {
+        if (selectedSet.has(row.id)) nextMap[row.id] = row
+      }
+      selectedCaseMap.value = nextMap
+    }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : '获取用例列表失败，请稍后重试'
     showToast(errorMessage, 'error')
@@ -411,6 +420,7 @@ function openAiGenerateCase() {
 
 function clearSelection() {
   selectedCaseIds.value = []
+  selectedCaseMap.value = {}
 }
 
 function bulkTagSelected() {
@@ -684,6 +694,9 @@ async function deleteCase(index: number) {
     if (!response.ok || payload.code !== 0) {
       throw new Error(payload.message || '删除用例失败，请稍后重试')
     }
+    if (selectedCaseIds.value.includes(target.id)) {
+      selectedCaseIds.value = selectedCaseIds.value.filter((id) => id !== target.id)
+    }
     if (displayRows.value.length === 1 && page.value > 1) {
       page.value -= 1
     }
@@ -858,9 +871,30 @@ onBeforeUnmount(() => {
   clearBatchRunPolling()
 })
 
+watch(selectedCaseIds, (next, prev) => {
+  const prevIds = Array.isArray(prev) ? prev : []
+  const nextSet = new Set(next)
+  const prevSet = new Set(prevIds)
+
+  const nextMap: Record<string, Row> = { ...selectedCaseMap.value }
+
+  for (const id of prevSet) {
+    if (!nextSet.has(id)) delete nextMap[id]
+  }
+
+  for (const id of nextSet) {
+    if (prevSet.has(id)) continue
+    const row = rows.value.find((item) => item.id === id)
+    if (row) nextMap[id] = row
+  }
+
+  selectedCaseMap.value = nextMap
+})
+
 let searchTimer = 0
 watch(searchQuery, () => {
   page.value = 1
+  clearSelection()
   window.clearTimeout(searchTimer)
   searchTimer = window.setTimeout(() => {
     void loadCases()
@@ -869,11 +903,13 @@ watch(searchQuery, () => {
 
 watch([selectedTypes, selectedStatuses], () => {
   page.value = 1
+  clearSelection()
   void loadCases()
 }, { deep: true })
 
 watch(() => route.params.projectId, () => {
   page.value = 1
+  clearSelection()
   ownerOptions.value = []
   ownerOptionsProjectId.value = ''
   void loadCases()

@@ -36,33 +36,49 @@ alwaysApply: false
 | apiMethod | 请求方法 | POST |
 | apiUrl | 请求URL | /api/login <br> /users/${id}（支持变量拼接） |
 | apiHeaders | 请求头 | {"Content-Type": "application/json"} |
-| apiParams | 请求参数 | {"username": "admin", "password": "admin123"} |
+| apiParams | 请求参数 | {"username": "${adminUser}", "password": "${adminPwd}"} <br> {"name": "批量执行联调项目", "ownerId": "${userId}", "description": "1111"} |
 | expected_status_code | 期望状态码 | 200 |
-| expectedResult | 期望响应 | "code":0 |
+| expectedResult | 期望响应 | {"code": 200, "msg": "操作成功", "data": {"userId": "${userId}"}} |
 | test_type | 测试类型 | positive/negative/boundary |
 | priority | 优先级 | P0/P1/P2 |
 | status | 状态 | DRAFT |
 | type | 类型| API/UI/MIX |
-| preconditions | 前置条件 | `{"dependsOn":["TC00001"],"bind":{"headers":{"Authorization":"Bearer ${accessToken}"}}}` |
-| postconditions | 后置条件 | `{"asserts":[{"json":"$.code","op":"==","value":0},{"json":"$.data.accessToken","op":"!=","value":""}],"exports":{"accessToken":{"json":"$.data.accessToken"}}}` |
+| preconditions | 前置条件 | `{"dependsOn":["TC00001"],"bind":{"headers":{"Authorization":"Bearer ${accessToken}"},"params":{"userId":"$.data.userId"}},"vars":{"id":123,"orderNo":"ORD20250101"}}` |
+| postconditions | 后置条件 | `{"asserts":[{"json":"$.code","op":"==","value":0},{"json":"$.data.accessToken","op":"!=","value":""}],"exports":{"accessToken":{"json":"$.data.accessToken"},"userId":{"json":"$.data.userId"}}}` |
 | tags | 标签 | login,auth,smoke |
+
 #### 前置条件（preconditions）
 - 仅允许 JSON 字符串格式，禁止纯文本描述，包含三个核心可选节点：
 - dependsOn：数组类型，填写依赖的测试用例 ID，无依赖则为空数组[]
 - bind：对象类型，填写需要从依赖用例绑定的参数（如请求头、请求参数），无绑定则为空对象{}
-- vars：对象类型，填写 URL/参数拼接所需的自定义变量，无变量则为空对象{}
-- 无前置依赖/绑定/变量：{"dependsOn":[],"bind":{},"vars":{}}
-- 有URL变量：{"dependsOn":[],"bind":{},"vars":{"id":123,"orderNo":"ORD20250101"}}
-- 有登录依赖+URL变量：{"dependsOn":["TC001015"],"bind":{"headers":{"Authorization":"Bearer ${accessToken}"}},"vars":{"id":456}}
+  - headers：从依赖用例导出的参数绑定到当前用例请求头
+  - params：从依赖用例导出的参数绑定到当前用例请求参数（格式：`{"参数名":"JSONPath表达式"}`，表达式指向依赖用例的响应结果）
+- vars：对象类型，填写 URL/请求参数拼接所需的自定义变量，无变量则为空对象{}
+- 无前置依赖/绑定/变量：`{"dependsOn":[],"bind":{},"vars":{}}`
+- 仅URL变量：`{"dependsOn":[],"bind":{},"vars":{"id":123,"orderNo":"ORD20250101"}}`
+- 登录依赖+URL变量+请求参数绑定：`{"dependsOn":["TC001015"],"bind":{"headers":{"Authorization":"Bearer ${accessToken}"},"params":{"userId":"$.data.userId"}},"vars":{"id":456}}`
+- 仅请求参数自定义变量：`{"dependsOn":[],"bind":{},"vars":{"username":"test_user","password":"test_pwd123"}}`
+
 #### 后置条件（postconditions）
 - 仅允许 JSON 字符串格式，禁止纯文本描述，包含两个核心可选节点：
 - asserts：数组类型，填写响应结果的断言规则，无断言则为空数组[]
-- 断言节点格式：{"json":"JSONPath表达式","op":"比较运算符","value":"比较值"}
-- 支持运算符：==/!=/>/</>=/<=
+  - 断言节点格式：`{"json":"JSONPath表达式","op":"比较运算符","value":"比较值"}`
+  - 支持运算符：==/!=/>/</>=/<=
+  - 支持断言中使用变量（从前置绑定/自定义变量读取）：`{"json":"$.data.userId","op":"==","value":"${userId}"}`
 - exports：对象类型，填写需要导出的参数（供其他用例绑定使用），无导出则为空对象{}
-- 导出节点格式：{"导出参数名":{"json":"JSONPath表达式"}}
-- 无断言 / 导出：{"asserts":[],"exports":{}}
-- 有断言 + 导出 token：{"asserts":[{"json":"$.code","op":"==","value":0}],"exports":{"accessToken":{"json":"$.data.accessToken"}}}
+  - 导出节点格式：`{"导出参数名":{"json":"JSONPath表达式"}}`
+- 无断言/导出：`{"asserts":[],"exports":{}}`
+- 有断言+导出token/userId：`{"asserts":[{"json":"$.code","op":"==","value":0}],"exports":{"accessToken":{"json":"$.data.accessToken"},"userId":{"json":"$.data.userId"}}}`
+
+#### 请求参数（apiParams）参数化规则
+1. **变量格式**：请求参数中支持 `${变量名}` 占位符，示例：
+   - `{"name": "批量执行联调项目", "ownerId": "${userId}", "description": "1111"}`
+   - `{"username": "${adminUser}", "password": "${adminPwd}"}`
+2. **变量来源**（优先级从高到低）：
+   - 依赖用例导出的参数（通过 `preconditions.bind.params` 绑定）
+   - 自定义变量（通过 `preconditions.vars` 定义）
+3. **参数替换逻辑**：执行测试用例时，先读取 `preconditions` 中的绑定参数和自定义变量，将 `apiParams` 中的 `${变量名}` 替换为对应值。
+
 ### 测试用例类型
 为每个接口生成以下类型的测试用例：
 
@@ -86,7 +102,7 @@ alwaysApply: false
 ## 生成规则
 
 ### 1. 文件命名规则
-- **统一文件名**：`api_test_cases_${时间戳}.csv，时间戳格式为YYYYMMDDHHMMSS（如api_test_cases_20251020153028.csv）`
+- **统一文件名**：`api_test_cases_${时间戳}.csv`，时间戳格式为YYYYMMDDHHMMSS（如api_test_cases_20251020153028.csv）
 - **存放位置**：`test_cases/api_test_cases_${时间戳}.csv`
 - **说明**：所有接口的测试用例统一生成到一个CSV文件中，便于管理和维护
 
@@ -104,11 +120,18 @@ alwaysApply: false
 - 特殊字符需要转义
 - 空值用null表示
 - 数组用JSON数组格式
+- **参数化支持**：请求参数中允许使用 `${变量名}` 占位符，变量值从 `preconditions.bind.params`（依赖用例导出）或 `preconditions.vars`（自定义）读取
+- **依赖参数绑定规则**：
+  1. 若当前用例依赖其他用例（`dependsOn` 非空），需在 `bind.params` 中明确绑定关系（参数名 → 依赖用例响应的JSONPath）
+  2. 自定义变量需在 `vars` 中显式定义（键值对格式）
+  3. 变量名需唯一，禁止重复定义
 
 ### 4. 响应验证规则
 - 包含状态码验证
 - 包含关键字段验证
 - 包含业务逻辑验证
+- 支持断言中使用参数化变量（如验证返回的userId与请求的userId一致）
+
 ### 5. URL 变量拼接规则
 #### 变量格式
 - API URL 中支持 `${变量名}` 格式的占位符，示例：`/users/${id}`、`/api/order/${orderNo}`
@@ -124,6 +147,42 @@ alwaysApply: false
 - 最终拼接后 URL：`/users/123`
 
 ## 使用示例
+
+### 示例1：依赖其他用例的参数化请求
+#### 场景
+- 用例TC002001（创建用户）依赖TC001015（登录）的 `userId` 参数
+- 登录接口（TC001015）的响应：`{"code":0,"data":{"userId":10086,"accessToken":"xxx"}}`
+#### CSV配置
+| 列名 | 配置值 |
+|------|--------|
+| test_case_id | TC002001 |
+| feature | 用户管理模块 |
+| title | 创建用户_正常流程 |
+| apiMethod | POST |
+| apiUrl | /api/user/create |
+| apiParams | {"name": "批量执行联调项目", "ownerId": "${userId}", "description": "1111"} |
+| preconditions | {"dependsOn":["TC001015"],"bind":{"headers":{"Authorization":"Bearer ${accessToken}"},"params":{"userId":"$.data.userId"}},"vars":{}} |
+| postconditions | {"asserts":[{"json":"$.code","op":"==","value":0},{"json":"$.data.ownerId","op":"==","value":"${userId}"}],"exports":{"createUserId":{"json":"$.data.userId"}}} |
+
+#### 执行逻辑
+1. 先执行依赖用例TC001015，导出 `accessToken` 和 `userId`
+2. 绑定 `headers.Authorization` = `Bearer xxx`（xxx为导出的accessToken）
+3. 绑定 `params.userId` = 10086（从TC001015响应的 `$.data.userId` 读取）
+4. 替换 `apiParams` 中的 `${userId}` → 最终请求参数：
+   ```json
+   {"name": "批量执行联调项目", "ownerId": 10086, "description": "1111"}
+## 使用示例
+示例 2：自定义变量的参数化请求
+CSV 配置（核心列）
+表格
+列名	配置值
+apiParams	{"username": "
+testUser","password":"
+{testPwd}"}
+preconditions	{"dependsOn":[],"bind":{},"vars":{"testUser":"demo_001","testPwd":"Demo@123456"}}
+最终替换后请求参数
+json
+{"username": "demo_001", "password": "Demo@123456"}
 
 当用户提供接口文档时，按以下步骤生成CSV测试用例：
 
@@ -143,8 +202,7 @@ alwaysApply: false
 
 生成的CSV文件将配合以下Python测试框架使用：
 
-```# pytest + allure 示例代码结构
-import pytest
+```import pytest
 import allure
 import pandas as pd
 import json
@@ -177,7 +235,7 @@ def test_api(test_case_data):
     通用API测试方法，根据CSV中的测试用例数据执行测试
     """
     index, test_case = test_case_data
-      # 1. 读取 URL 原始值和 vars 变量
+    # 1. 读取 URL 原始值和 vars 变量
     raw_url = test_case['apiUrl']
     url_vars = test_case['preconditions'].get('vars', {})
     
@@ -186,7 +244,18 @@ def test_api(test_case_data):
     for var_name, var_value in url_vars.items():
         final_url = final_url.replace(f"${{{var_name}}}", str(var_value))
     
-    # 3. 后续使用 final_url 发起请求
+    # 3. 处理请求参数参数化
+    raw_params = test_case['apiParams']
+    # 3.1 合并变量：bind.params（依赖用例导出） + vars（自定义）
+    bind_params = test_case['preconditions'].get('bind', {}).get('params', {})
+    all_vars = {**bind_params, **url_vars}
+    
+    # 3.2 替换参数中的 ${变量名} 占位符
+    final_params = raw_params
+    for var_name, var_value in all_vars.items():
+        final_params = final_params.replace(f"${{{var_name}}}", str(var_value))
+    
+    # 4. 后续使用 final_url + final_params 发起请求
     # 根据test_case中的tags字段动态设置allure标签
     allure.dynamic.story(test_case['title'])
     allure.dynamic.title(test_case['title'])
@@ -194,7 +263,7 @@ def test_api(test_case_data):
     
     # 解析前置条件依赖和绑定参数
     pre_conditions = test_case['preconditions']
-    # 处理依赖用例、绑定参数逻辑
+    # 处理依赖用例、绑定参数逻辑（需补充：从依赖用例响应中提取bind.params的参数值）
     # ...
     
     # 解析后置条件断言和导出参数
@@ -202,7 +271,7 @@ def test_api(test_case_data):
     # 执行断言、导出参数逻辑
     # ...
     
-    # 根据method、url、headers、request_data执行API调用
+    # 根据method、final_url、apiHeaders、final_params执行API调用
     # 验证expected_status_code和expectedResult
     pass
 ```
