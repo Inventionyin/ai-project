@@ -464,7 +464,7 @@ function scheduleBatchRunStatusPoll(runId: string) {
   void poll()
 }
 
-async function executeBatchRunFromDrawer() {
+async function executeBatchRunFromDrawer(options?: { onStart?: () => void }) {
   const projectId = String(route.params.projectId || '').trim()
   if (!projectId) {
     showToast('缺少项目 ID', 'error')
@@ -501,6 +501,7 @@ async function executeBatchRunFromDrawer() {
       items
     }
     buildRunPayloadDirect(state)
+    options?.onStart?.()
     const response = await runFromTestcasesHttp(state, `ik_cases_drawer_${Date.now()}`)
     const runId = extractRunId(response)
     batchRunRunId.value = runId
@@ -508,7 +509,6 @@ async function executeBatchRunFromDrawer() {
       throw new Error('批量执行未返回 runId')
     }
     scheduleBatchRunStatusPoll(runId)
-    showToast('批量执行已发起')
     return true
   } catch (error) {
     batchRunDrawerState.value = 'preview'
@@ -519,9 +519,15 @@ async function executeBatchRunFromDrawer() {
 }
 
 async function handleBatchRunDrawerExecute() {
-  const started = await executeBatchRunFromDrawer()
-  if (started) {
-    isBatchRunDrawerOpen.value = false
+  let closedByExecute = false
+  const started = await executeBatchRunFromDrawer({
+    onStart: () => {
+      closedByExecute = true
+      closeBatchRunDrawer()
+    }
+  })
+  if (!started && closedByExecute) {
+    isBatchRunDrawerOpen.value = true
   }
 }
 

@@ -165,12 +165,14 @@ class PytestAllureExecutionOutput:
 @dataclass(frozen=True, slots=True)
 class _GeneratedCase:
     case_run_id: str
+    case_key: str
     test_file: Path
 
 
 @dataclass(frozen=True, slots=True)
 class _CaseExecutionOutput:
     case_run_id: str
+    status: CaseRunStatus
     start_ts: int
     end_ts: int
     return_code: int
@@ -213,64 +215,14 @@ class PytestAllureRunnerService:
         self._prepare_allure_metadata(job=job, allure_results_dir=allure_results_dir)
         execution_log = workspace / "execution.log"
         timeout_sec = max(int(job.suiteConfig.timeoutSec), 1)
-        case_outputs: list[_CaseExecutionOutput] = []
         logs: list[str] = []
-        for generated in generated_cases:
-            case_start = int(time.time())
-            pytest_cmd: Sequence[str] = (
-                self._python_executable,
-                "-m",
-                "pytest",
-                str(generated.test_file),
-                f"--alluredir={allure_results_dir}",
-                "-q",
-            )
-            error_message = ""
-            try:
-                completed = subprocess.run(
-                    pytest_cmd,
-                    cwd=workspace,
-                    capture_output=True,
-                    text=True,
-                    timeout=timeout_sec,
-                    check=False,
-                )
-            except subprocess.TimeoutExpired as exc:
-                completed = subprocess.CompletedProcess(
-                    args=pytest_cmd,
-                    returncode=1,
-                    stdout=(exc.stdout or ""),
-                    stderr=(exc.stderr or ""),
-                )
-                error_message = "pytest_timeout"
-            except FileNotFoundError:
-                completed = subprocess.CompletedProcess(
-                    args=pytest_cmd,
-                    returncode=1,
-                    stdout="",
-                    stderr=f"{self._python_executable} not found",
-                )
-                error_message = "pytest_cli_not_found"
-            case_end = int(time.time())
-            case_output = _CaseExecutionOutput(
-                case_run_id=generated.case_run_id,
-                start_ts=case_start,
-                end_ts=case_end,
-                return_code=int(completed.returncode),
-                stdout=str(completed.stdout or ""),
-                stderr=str(completed.stderr or ""),
-                error_message=error_message,
-            )
-            case_outputs.append(case_output)
-            logs.append(
-                "\n".join(
-                    [
-                        f"[caseRunId={generated.case_run_id}] returnCode={case_output.return_code}",
-                        case_output.stdout,
-                        case_output.stderr,
-                    ]
-                ).strip()
-            )
+        case_outputs = self._run_pytest_once(
+            workspace=workspace,
+            generated_cases=generated_cases,
+            allure_results_dir=allure_results_dir,
+            timeout_sec=timeout_sec,
+        )
+        logs.append(self._format_pytest_execution_log(case_outputs=case_outputs))
         report_output = self._generate_allure_report(
             allure_results_dir=allure_results_dir,
             report_dir=allure_report_dir,
@@ -291,7 +243,7 @@ class PytestAllureRunnerService:
         allure_report_zip = self._zip_allure_report(report_output.report_dir)
         artifacts = self._build_artifacts(execution_log, allure_zip, allure_report_zip)
         results = self._build_case_results(case_outputs=case_outputs, artifacts=artifacts)
-        job_status = JobStatus.DONE if all(item.return_code == 0 for item in case_outputs) else JobStatus.FAILED
+        job_status = JobStatus.DONE if all(item.status != CaseRunStatus.FAILED for item in case_outputs) else JobStatus.FAILED
         return PytestAllureExecutionOutput(job_status=job_status, results=results, workspace=workspace)
 
     def generate_report_for_run(self, run_id: str, *, timeout_sec: int) -> AllureGenerateOutput:
@@ -335,6 +287,7 @@ class PytestAllureRunnerService:
             api_url = str(item.apiUrl or "").strip()
             headers = {str(k): str(v) for k, v in dict(item.headers or {}).items()}
             masked_headers = _mask_sensitive_headers(headers)
+            case_key = _job_item_key(item)
             test_file.write_text(
                 "\n".join(
                     [
@@ -346,7 +299,7 @@ class PytestAllureRunnerService:
                         "import pytest",
                         "import requests",
                         "",
-                        f"CASE_KEY = {json.dumps(_job_item_key(item), ensure_ascii=False)}",
+                        f"CASE_KEY = {json.dumps(case_key, ensure_ascii=False)}",
                         f"PRECONDITIONS_RAW = {json.dumps(str(item.preconditions or '').strip(), ensure_ascii=False)}",
                         f"POSTCONDITIONS_RAW = {json.dumps(str(item.postconditions or '').strip(), ensure_ascii=False)}",
                         f"ENV_VARS = {json.dumps(dict(job.env.variables or {}), ensure_ascii=False)}",
@@ -589,8 +542,237 @@ class PytestAllureRunnerService:
                 ),
                 encoding="utf-8",
             )
-            generated_cases.append(_GeneratedCase(case_run_id=item.caseRunId, test_file=test_file))
+            generated_cases.append(_GeneratedCase(case_run_id=item.caseRunId, case_key=case_key, test_file=test_file))
         return workspace, generated_cases
+
+    def _run_pytest_once(
+        self,
+        *,
+        workspace: Path,
+        generated_cases: list[_GeneratedCase],
+        allure_results_dir: Path,
+        timeout_sec: int,
+    ) -> list[_CaseExecutionOutput]:
+        run_start = int(time.time())
+        pytest_cmd: Sequence[str] = (
+            self._python_executable,
+            "-m",
+            "pytest",
+            "tests",
+            f"--alluredir={allure_results_dir}",
+            "-q",
+        )
+        error_message = ""
+        total_timeout_sec = max(int(timeout_sec), 1) * max(len(generated_cases), 1)
+        try:
+            completed = subprocess.run(
+                pytest_cmd,
+                cwd=workspace,
+                capture_output=True,
+                text=True,
+                timeout=total_timeout_sec,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            completed = subprocess.CompletedProcess(
+                args=pytest_cmd,
+                returncode=1,
+                stdout=(exc.stdout or ""),
+                stderr=(exc.stderr or ""),
+            )
+            error_message = "pytest_timeout"
+        except FileNotFoundError:
+            completed = subprocess.CompletedProcess(
+                args=pytest_cmd,
+                returncode=1,
+                stdout="",
+                stderr=f"{self._python_executable} not found",
+            )
+            error_message = "pytest_cli_not_found"
+        run_end = int(time.time())
+
+        ctx_status_map = self._load_ctx_status_map(workspace)
+        allure_map = self._load_allure_case_results(allure_results_dir)
+        suite_stdout = str(completed.stdout or "")
+        suite_stderr = str(completed.stderr or "")
+        fallback_message = (suite_stderr or suite_stdout).strip()[:2000]
+
+        case_outputs: list[_CaseExecutionOutput] = []
+        for generated in generated_cases:
+            status = self._resolve_case_status(
+                case_key=generated.case_key,
+                case_run_id=generated.case_run_id,
+                ctx_status_map=ctx_status_map,
+                allure_map=allure_map,
+            )
+            start_ts, end_ts = self._resolve_case_timestamps(
+                case_run_id=generated.case_run_id,
+                allure_map=allure_map,
+                fallback_start_ts=run_start,
+                fallback_end_ts=run_end,
+            )
+            details_message = ""
+            if status in (CaseRunStatus.FAILED, CaseRunStatus.SKIPPED):
+                details_message = self._resolve_case_error_message(
+                    case_run_id=generated.case_run_id,
+                    allure_map=allure_map,
+                    fallback_message=fallback_message if status == CaseRunStatus.FAILED else "",
+                )
+            case_error_message = error_message or details_message if status == CaseRunStatus.FAILED else ""
+            case_outputs.append(
+                _CaseExecutionOutput(
+                    case_run_id=generated.case_run_id,
+                    status=status,
+                    start_ts=start_ts,
+                    end_ts=end_ts,
+                    return_code=0 if status != CaseRunStatus.FAILED else 1,
+                    stdout="",
+                    stderr=details_message,
+                    error_message=case_error_message,
+                )
+            )
+
+        if any(item.status == CaseRunStatus.FAILED and not item.error_message for item in case_outputs) and fallback_message:
+            case_outputs = [
+                _CaseExecutionOutput(
+                    case_run_id=item.case_run_id,
+                    status=item.status,
+                    start_ts=item.start_ts,
+                    end_ts=item.end_ts,
+                    return_code=item.return_code,
+                    stdout=item.stdout,
+                    stderr=item.stderr,
+                    error_message=fallback_message if item.status == CaseRunStatus.FAILED else item.error_message,
+                )
+                for item in case_outputs
+            ]
+
+        return case_outputs
+
+    def _format_pytest_execution_log(self, *, case_outputs: list[_CaseExecutionOutput]) -> str:
+        total = len(case_outputs)
+        passed = sum(1 for item in case_outputs if item.status == CaseRunStatus.PASSED)
+        failed = sum(1 for item in case_outputs if item.status == CaseRunStatus.FAILED)
+        skipped = sum(1 for item in case_outputs if item.status == CaseRunStatus.SKIPPED)
+        return f"[pytest] total={total} passed={passed} failed={failed} skipped={skipped}"
+
+    def _load_ctx_status_map(self, workspace: Path) -> dict[str, str]:
+        path = workspace / "context.json"
+        if not path.exists():
+            return {}
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8") or "{}")
+        except Exception:
+            return {}
+        if not isinstance(raw, dict):
+            return {}
+        status = raw.get("status")
+        if not isinstance(status, dict):
+            return {}
+        return {str(k): str(v) for k, v in status.items() if str(k).strip()}
+
+    def _load_allure_case_results(self, allure_results_dir: Path) -> dict[str, dict[str, object]]:
+        if not allure_results_dir.exists():
+            return {}
+        out: dict[str, dict[str, object]] = {}
+        uuid_re = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.I)
+        uuid_u_re = re.compile(r"\b[0-9a-f]{8}_[0-9a-f]{4}_[0-9a-f]{4}_[0-9a-f]{4}_[0-9a-f]{12}\b", re.I)
+        for child in allure_results_dir.glob("*-result.json"):
+            if not child.is_file():
+                continue
+            try:
+                data = json.loads(child.read_text(encoding="utf-8") or "{}")
+            except Exception:
+                continue
+            if not isinstance(data, dict):
+                continue
+            name = str(data.get("name") or "")
+            full_name = str(data.get("fullName") or "")
+            combined = f"{name}\n{full_name}"
+            case_run_id = ""
+            m = uuid_re.search(combined)
+            if m:
+                case_run_id = m.group(0)
+            if not case_run_id:
+                m2 = uuid_u_re.search(combined)
+                if m2:
+                    candidate = m2.group(0).replace("_", "-")
+                    if uuid_re.fullmatch(candidate):
+                        case_run_id = candidate
+            if not case_run_id:
+                continue
+            out[case_run_id] = data
+        return out
+
+    def _resolve_case_status(
+        self,
+        *,
+        case_key: str,
+        case_run_id: str,
+        ctx_status_map: dict[str, str],
+        allure_map: dict[str, dict[str, object]],
+    ) -> CaseRunStatus:
+        raw = str(ctx_status_map.get(case_key) or "").strip().upper()
+        if raw == "PASSED":
+            return CaseRunStatus.PASSED
+        if raw == "FAILED":
+            return CaseRunStatus.FAILED
+        if raw == "SKIPPED":
+            return CaseRunStatus.SKIPPED
+        allure_row = allure_map.get(case_run_id) or {}
+        allure_status = str(allure_row.get("status") or "").strip().lower()
+        if allure_status == "passed":
+            return CaseRunStatus.PASSED
+        if allure_status in ("skipped", "canceled"):
+            return CaseRunStatus.SKIPPED
+        if allure_status in ("failed", "broken"):
+            return CaseRunStatus.FAILED
+        return CaseRunStatus.FAILED
+
+    def _resolve_case_timestamps(
+        self,
+        *,
+        case_run_id: str,
+        allure_map: dict[str, dict[str, object]],
+        fallback_start_ts: int,
+        fallback_end_ts: int,
+    ) -> tuple[int, int]:
+        row = allure_map.get(case_run_id) or {}
+        start = row.get("start")
+        stop = row.get("stop")
+        start_s = self._normalize_epoch_ts(start, fallback=fallback_start_ts)
+        stop_s = self._normalize_epoch_ts(stop, fallback=fallback_end_ts)
+        if stop_s < start_s:
+            stop_s = start_s
+        return start_s, stop_s
+
+    def _normalize_epoch_ts(self, value: object, *, fallback: int) -> int:
+        try:
+            ts = int(value)  # type: ignore[arg-type]
+        except Exception:
+            return int(fallback)
+        if ts <= 0:
+            return int(fallback)
+        if ts > 1_000_000_000_000:
+            return int(ts // 1000)
+        return int(ts)
+
+    def _resolve_case_error_message(
+        self,
+        *,
+        case_run_id: str,
+        allure_map: dict[str, dict[str, object]],
+        fallback_message: str,
+    ) -> str:
+        row = allure_map.get(case_run_id) or {}
+        details = row.get("statusDetails")
+        if isinstance(details, dict):
+            message = str(details.get("message") or "").strip()
+            trace = str(details.get("trace") or "").strip()
+            combined = "\n".join([x for x in [message, trace] if x]).strip()
+            if combined:
+                return combined[:2000]
+        return (fallback_message or "").strip()[:2000]
 
     def _prepare_allure_metadata(self, *, job: JobPayload, allure_results_dir: Path) -> None:
         allure_results_dir.mkdir(parents=True, exist_ok=True)
@@ -738,11 +920,7 @@ class PytestAllureRunnerService:
     ) -> list[CaseRunResult]:
         results: list[CaseRunResult] = []
         for item in case_outputs:
-            combined = f"{item.stdout}\n{item.stderr}".lower()
-            if item.return_code == 0 and re.search(r"\b1\s+skipped\b", combined):
-                status = CaseRunStatus.SKIPPED
-            else:
-                status = CaseRunStatus.PASSED if item.return_code == 0 else CaseRunStatus.FAILED
+            status = item.status
             duration_ms = max((item.end_ts - item.start_ts) * 1000, 0)
             error_message = item.error_message or (item.stderr or "").strip()
             error_message = error_message[:2000] if error_message else None
