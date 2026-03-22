@@ -13,6 +13,7 @@ import CasesTable, { type Row } from '@/components/figma/ai-testing-platform/Cas
 import CreateCaseModal from '@/components/figma/ai-testing-platform/CreateCaseModal.vue'
 import EditCaseModal from '@/components/figma/ai-testing-platform/EditCaseModal.vue'
 import AiGenerateCaseModal from '@/components/figma/ai-testing-platform/AiGenerateCaseModal.vue'
+import UploadCasesModal from '@/components/figma/ai-testing-platform/UploadCasesModal.vue'
 import BatchRunDrawer from '@/components/figma/ai-testing-platform/BatchRunDrawer.vue'
 import { buildRunPayloadDirect, fetchProjectEnvironments, fetchRunCaseRuns, runFromTestcasesHttp, type BatchRunDirectFormItem, type BatchRunDirectFormState } from '@/lib/aiTestingPlatformApi'
 
@@ -20,6 +21,7 @@ const route = useRoute()
 const isCreateCaseOpen = ref(false)
 const isAiGenerateOpen = ref(false)
 const isEditCaseOpen = ref(false)
+const isUploadCasesOpen = ref(false)
 const editingCaseId = ref<string | null>(null)
 const isLoadingCases = ref(false)
 const searchQuery = ref('')
@@ -194,6 +196,29 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
   window.dispatchEvent(new CustomEvent('app-toast', { detail: { message, type } }))
 }
 
+function openUploadCases() {
+  isUploadCasesOpen.value = true
+}
+
+function closeUploadCases() {
+  isUploadCasesOpen.value = false
+}
+
+function handleImportedCases(data: { importedCount: number; failedCount: number }) {
+  const imported = Number(data.importedCount || 0)
+  const failed = Number(data.failedCount || 0)
+  if (imported > 0 && failed === 0) {
+    showToast(`成功导入 ${imported} 条用例`, 'success')
+  } else if (imported > 0 && failed > 0) {
+    showToast(`已导入 ${imported} 条，失败 ${failed} 条`, 'error')
+  } else {
+    showToast('导入失败', 'error')
+  }
+  page.value = 1
+  selectedCaseIds.value = []
+  void loadCases()
+}
+
 const formatDateTime = (timestamp: number) => {
   if (!Number.isFinite(timestamp) || timestamp <= 0) return '-'
   const date = new Date(timestamp * 1000)
@@ -221,6 +246,39 @@ const selectedRows = computed(() => {
   const selectedSet = new Set(selectedCaseIds.value)
   return rows.value.filter((row) => selectedSet.has(row.id))
 })
+
+type PaginationItem = number | '...'
+
+const paginationItems = computed<PaginationItem[]>(() => {
+  const totalValue = totalPages.value
+  const current = page.value
+  if (totalValue <= 7) {
+    return Array.from({ length: totalValue }, (_, idx) => idx + 1)
+  }
+
+  const items: PaginationItem[] = [1]
+  if (current > 4) items.push('...')
+
+  const start = current <= 4 ? 2 : Math.max(2, Math.min(totalValue - 4, current - 1))
+  const end = current >= totalValue - 3 ? totalValue - 1 : Math.min(totalValue - 1, Math.max(5, current + 1))
+  for (let p = start; p <= end; p += 1) {
+    items.push(p)
+  }
+
+  if (current < totalValue - 3) items.push('...')
+  items.push(totalValue)
+  return items
+})
+
+function goToPage(nextPage: number) {
+  const nextValue = Math.max(1, Math.min(totalPages.value, Math.floor(nextPage)))
+  if (nextValue === page.value) return
+  page.value = nextValue
+  void loadCases()
+}
+
+const canGoPrev = computed(() => page.value > 1 && !isLoadingCases.value)
+const canGoNext = computed(() => page.value < totalPages.value && !isLoadingCases.value)
 
 const loadCurrentUser = async (authorization: string) => {
   const meResponse = await fetch(`${resolveApiBaseUrl()}/api/auth/me`, {
@@ -322,7 +380,7 @@ const loadCases = async () => {
     selectedCaseIds.value = []
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : '获取用例列表失败，请稍后重试'
-    window.alert(errorMessage)
+    showToast(errorMessage, 'error')
   } finally {
     isLoadingCases.value = false
   }
@@ -837,6 +895,13 @@ watch(() => route.params.projectId, () => {
         <div class="flex h-[32px] items-center gap-[8px]">
           <button
             type="button"
+            class="h-[32px] rounded-[10px] border border-[#BEDBFF] bg-white px-[14px] text-[14px] font-medium leading-[20px] text-[#155DFC]"
+            @click="openUploadCases"
+          >
+            上传用例
+          </button>
+          <button
+            type="button"
             class="h-[32px] rounded-[10px] border border-[#BEDBFF] bg-white px-[14px] text-[14px] font-medium leading-[20px] text-[#155DFC] disabled:cursor-not-allowed disabled:border-black/10 disabled:text-[#A1A1AA]"
             :disabled="selectedCount === 0"
             @click="openBatchRunDrawer"
@@ -977,11 +1042,18 @@ watch(() => route.params.projectId, () => {
 
       <div class="w-full rounded-[14px] border border-black/10 bg-white p-[0.67px]">
         <CasesTable
+          v-if="displayRows.length > 0"
           v-model:selectedIds="selectedCaseIds"
           :rows="displayRows"
           @delete="deleteCase"
           @edit="openEditCase"
         />
+        <div
+          v-else
+          class="flex h-[120px] items-center justify-center text-[14px] leading-[20px] text-[#717182]"
+        >
+          {{ isLoadingCases ? '加载中...' : '暂无用例' }}
+        </div>
       </div>
 
       <div class="flex items-center justify-between">
@@ -990,14 +1062,49 @@ watch(() => route.params.projectId, () => {
           <span v-if="isLoadingCases"> · 加载中...</span>
           <span v-else> · 第 {{ page }}/{{ totalPages }} 页</span>
         </div>
-        <div class="flex h-[28px] w-[92px] items-center gap-[4px]">
-          <button type="button" class="relative h-[28px] w-[28px] rounded-[4px] opacity-30">
+        <div class="flex h-[28px] items-center gap-[4px]">
+          <button
+            type="button"
+            class="relative h-[28px] w-[28px] rounded-[4px]"
+            :class="canGoPrev ? 'bg-white hover:bg-black/5' : 'opacity-30'"
+            :disabled="!canGoPrev"
+            aria-label="上一页"
+            @click="goToPage(page - 1)"
+          >
             <span class="absolute left-[11.93px] top-[6px] text-[12px] font-medium leading-[16px] text-[#717182]">‹</span>
           </button>
-          <button type="button" class="relative h-[28px] w-[28px] rounded-[4px] bg-[#155DFC]">
-            <span class="absolute left-[11.48px] top-[6px] text-[12px] font-medium leading-[16px] text-white">1</span>
-          </button>
-          <button type="button" class="relative h-[28px] w-[28px] rounded-[4px] opacity-30">
+          <template v-for="(item, idx) in paginationItems" :key="`${item}-${idx}`">
+            <span
+              v-if="item === '...'"
+              class="flex h-[28px] min-w-[28px] items-center justify-center text-[12px] font-medium leading-[16px] text-[#717182]"
+            >
+              ...
+            </span>
+            <button
+              v-else
+              type="button"
+              class="relative h-[28px] min-w-[28px] rounded-[4px] px-[8px]"
+              :class="item === page ? 'bg-[#155DFC]' : 'bg-white hover:bg-black/5'"
+              :disabled="isLoadingCases"
+              :aria-label="`第 ${item} 页`"
+              @click="goToPage(item)"
+            >
+              <span
+                class="absolute left-1/2 top-[6px] -translate-x-1/2 text-[12px] font-medium leading-[16px]"
+                :class="item === page ? 'text-white' : 'text-[#717182]'"
+              >
+                {{ item }}
+              </span>
+            </button>
+          </template>
+          <button
+            type="button"
+            class="relative h-[28px] w-[28px] rounded-[4px]"
+            :class="canGoNext ? 'bg-white hover:bg-black/5' : 'opacity-30'"
+            :disabled="!canGoNext"
+            aria-label="下一页"
+            @click="goToPage(page + 1)"
+          >
             <span class="absolute left-[11.93px] top-[6px] text-[12px] font-medium leading-[16px] text-[#717182]">›</span>
           </button>
         </div>
@@ -1005,6 +1112,12 @@ watch(() => route.params.projectId, () => {
     </div>
   </div>
 
+  <UploadCasesModal
+    :is-open="isUploadCasesOpen"
+    :project-id="String(route.params.projectId || '')"
+    @close="closeUploadCases"
+    @imported="handleImportedCases"
+  />
   <CreateCaseModal
     :is-open="isCreateCaseOpen"
     :default-owner-id="currentUserId"

@@ -5,6 +5,19 @@ export type ApiResponse<T> = {
   requestId?: string
 }
 
+export type TestCaseImportErrorItem = {
+  rowNumber: number
+  testCaseId?: string | null
+  field?: string | null
+  message: string
+}
+
+export type TestCaseImportData = {
+  importedCount: number
+  failedCount: number
+  errors: TestCaseImportErrorItem[]
+}
+
 export type ApiTarget = {
   id: string
   projectId?: string
@@ -193,6 +206,28 @@ async function requestJson<T>(path: string, init: RequestInit) {
   return payload.data as T
 }
 
+async function requestFormData<T>(path: string, init: RequestInit) {
+  const baseUrl = resolveApiBaseUrl()
+  const res = await fetch(`${baseUrl}${path}`, init)
+  let payload: ApiResponse<T> = {}
+  try {
+    payload = (await res.json()) as ApiResponse<T>
+  } catch {
+    payload = {}
+  }
+  if (!res.ok || payload.code !== 0) {
+    const codeText = typeof payload.code === 'number' ? `（${payload.code}）` : ''
+    const err = new Error(payload.message ? `${payload.message}${codeText}` : `请求失败${codeText}`)
+    ;(err as { apiCode?: number; requestId?: string; httpStatus?: number }).apiCode =
+      typeof payload.code === 'number' ? payload.code : undefined
+    ;(err as { apiCode?: number; requestId?: string; httpStatus?: number }).requestId =
+      typeof payload.requestId === 'string' ? payload.requestId : undefined
+    ;(err as { apiCode?: number; requestId?: string; httpStatus?: number }).httpStatus = res.status
+    throw err
+  }
+  return payload.data as T
+}
+
 function normalizeApiTargets(data: unknown) {
   if (Array.isArray(data)) return data as ApiTarget[]
   if (data && typeof data === 'object' && Array.isArray((data as { items?: unknown[] }).items)) {
@@ -220,6 +255,23 @@ export async function fetchApiTargets(projectId: string) {
     }
   })
   return normalizeApiTargets(data)
+}
+
+export async function importTestcases(payload: { projectId: string; file: File; mode?: 'partial' | 'atomic' }) {
+  const pid = String(payload.projectId || '').trim()
+  if (!pid) throw new Error('项目 ID 不能为空')
+  if (!payload.file) throw new Error('请选择文件')
+  const form = new FormData()
+  form.append('projectId', pid)
+  form.append('mode', payload.mode || 'partial')
+  form.append('file', payload.file, payload.file.name)
+  return requestFormData<TestCaseImportData>('/api/testcases/import', {
+    method: 'POST',
+    headers: {
+      Authorization: resolveAuthHeader()
+    },
+    body: form
+  })
 }
 
 export async function fetchCollections(projectId: string, page = 1, pageSize = 200) {

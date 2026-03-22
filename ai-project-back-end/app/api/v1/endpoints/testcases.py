@@ -25,6 +25,7 @@ from app.schemas.testcase import (
     TestCaseRestoreRequest,
     TestCaseVersionSchema,
 )
+from app.schemas.testcase_import import TestCaseImportData
 from app.services.testcase import (
     create_testcase,
     delete_testcase,
@@ -38,6 +39,7 @@ from app.services.testcase import (
     update_testcase,
 )
 from app.services.ai_import import create_ai_import_job, get_ai_import_job, upload_ai_import_job_file
+from app.services.testcase_import import import_testcases_from_file
 
 router = APIRouter(prefix="/testcases")
 
@@ -232,6 +234,36 @@ async def get_ai_import_job_(
         ),
         requestId=request_id,
     )
+
+
+@router.post("/import", response_model=ApiResponse[TestCaseImportData])
+async def import_(
+    projectId: str = Form(...),
+    mode: str = Form(default="partial"),
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    request_id: str = Depends(get_request_id),
+) -> ApiResponse[TestCaseImportData]:
+    project_uuid = uuid.UUID(projectId)
+    file_content = await file.read()
+    try:
+        data = await import_testcases_from_file(
+            db,
+            user=user,
+            project_id=project_uuid,
+            filename=file.filename or "",
+            file_bytes=file_content,
+            mode=mode,
+        )
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    finally:
+        await file.close()
+
+    return ApiResponse(data=data, requestId=request_id)
 
 
 @router.post("", response_model=ApiResponse[TestCaseDetail])

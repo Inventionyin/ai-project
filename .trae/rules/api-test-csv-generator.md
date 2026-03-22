@@ -43,10 +43,25 @@ alwaysApply: false
 | priority | 优先级 | P0/P1/P2 |
 | status | 状态 | DRAFT |
 | type | 类型| API/UI/MIX |
-| preconditions | 前置条件 | 用户账号存在且状态正常 |
-| postconditions | 后置条件 | 返回有效token |
+| preconditions | 前置条件 | `{"dependsOn":["TC00001"],"bind":{"headers":{"Authorization":"Bearer ${accessToken}"}}}` |
+| postconditions | 后置条件 | `{"asserts":[{"json":"$.code","op":"==","value":0},{"json":"$.data.accessToken","op":"!=","value":""}],"exports":{"accessToken":{"json":"$.data.accessToken"}}}` |
 | tags | 标签 | login,auth,smoke |
-
+### 前置 / 后置条件格式强制规范
+#### 前置条件（preconditions）
+- 仅允许 JSON 字符串格式，禁止纯文本描述，包含两个核心可选节点：
+- dependsOn：数组类型，填写依赖的测试用例 ID，无依赖则为空数组[]
+- bind：对象类型，填写需要从依赖用例绑定的参数（如请求头、请求参数），无绑定则为空对象{}
+- 无前置依赖 / 绑定：{"dependsOn":[],"bind":{}}
+- 有登录依赖：{"dependsOn":["TC001015"],"bind":{"headers":{"Authorization":"Bearer ${accessToken}"}}}
+#### 后置条件（postconditions）
+- 仅允许 JSON 字符串格式，禁止纯文本描述，包含两个核心可选节点：
+- asserts：数组类型，填写响应结果的断言规则，无断言则为空数组[]
+- 断言节点格式：{"json":"JSONPath表达式","op":"比较运算符","value":"比较值"}
+- 支持运算符：==/!=/>/</>=/<=
+- exports：对象类型，填写需要导出的参数（供其他用例绑定使用），无导出则为空对象{}
+- 导出节点格式：{"导出参数名":{"json":"JSONPath表达式"}}
+- 无断言 / 导出：{"asserts":[],"exports":{}}
+- 有断言 + 导出 token：{"asserts":[{"json":"$.code","op":"==","value":0}],"exports":{"accessToken":{"json":"$.data.accessToken"}}}
 ### 测试用例类型
 为每个接口生成以下类型的测试用例：
 
@@ -70,8 +85,8 @@ alwaysApply: false
 ## 生成规则
 
 ### 1. 文件命名规则
-- **统一文件名**：`all_api_test_cases.csv`
-- **存放位置**：`test_cases/all_api_test_cases.csv`
+- **统一文件名**：`api_test_cases_${时间戳}.csv，时间戳格式为YYYYMMDDHHMMSS（如api_test_cases_20251020153028.csv）`
+- **存放位置**：`test_cases/api_test_cases_${时间戳}.csv`
 - **说明**：所有接口的测试用例统一生成到一个CSV文件中，便于管理和维护
 
 ### 2. 测试用例ID规则
@@ -114,16 +129,32 @@ alwaysApply: false
 
 生成的CSV文件将配合以下Python测试框架使用：
 
-```python
-# pytest + allure 示例代码结构
+```# pytest + allure 示例代码结构
 import pytest
 import allure
 import pandas as pd
+import json
+import time
 from api_client import APIClient
+
+# 动态读取test_cases下最新的CSV测试用例
+def get_latest_test_case_file():
+    import os
+    test_dir = 'test_cases'
+    files = [f for f in os.listdir(test_dir) if f.startswith('api_test_cases_') and f.endswith('.csv')]
+    files.sort(reverse=True)
+    return os.path.join(test_dir, files[0]) if files else None
 
 @pytest.fixture
 def test_data():
-    return pd.read_csv('test_cases/all_api_test_cases.csv')
+    csv_file = get_latest_test_case_file()
+    if not csv_file:
+        raise FileNotFoundError("未找到测试用例CSV文件")
+    df = pd.read_csv(csv_file)
+    # 解析JSON格式的前置/后置条件
+    df['preconditions'] = df['preconditions'].apply(lambda x: json.loads(x) if pd.notna(x) else {})
+    df['postconditions'] = df['postconditions'].apply(lambda x: json.loads(x) if pd.notna(x) else {})
+    return df
 
 @allure.feature("若依系统API测试")
 @pytest.mark.parametrize("test_case_data", test_data.iterrows())
@@ -134,14 +165,22 @@ def test_api(test_case_data):
     index, test_case = test_case_data
     
     # 根据test_case中的tags字段动态设置allure标签
-    allure.dynamic.story(test_case['api_name'])
-    allure.dynamic.title(test_case['test_case_name'])
-    allure.dynamic.description(test_case['description'])
+    allure.dynamic.story(test_case['title'])
+    allure.dynamic.title(test_case['title'])
     allure.dynamic.tag(*test_case['tags'].split(','))
     
-    # 测试逻辑实现
+    # 解析前置条件依赖和绑定参数
+    pre_conditions = test_case['preconditions']
+    # 处理依赖用例、绑定参数逻辑
+    # ...
+    
+    # 解析后置条件断言和导出参数
+    post_conditions = test_case['postconditions']
+    # 执行断言、导出参数逻辑
+    # ...
+    
     # 根据method、url、headers、request_data执行API调用
-    # 验证expected_status_code和expected_response
+    # 验证expected_status_code和expectedResult
     pass
 ```
 
@@ -162,4 +201,3 @@ def test_api(test_case_data):
 4. **数据清理**：标明需要数据清理的测试用例
 
 ````
-
