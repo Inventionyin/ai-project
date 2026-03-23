@@ -1,77 +1,59 @@
-
-
-### 2. scripts/generate_csv_from_api_doc.py（简化示例）
-
-
 #!/usr/bin/env python3
-"""
-根据接口文档生成 CSV 测试用例
-"""
+from __future__ import annotations
 
 import argparse
-import csv
-import json
-import re
-from datetime import datetime
+import sys
 from pathlib import Path
 
-def parse_api_doc(doc_path):
-    """解析 Markdown 格式的接口文档，返回接口列表"""
-    # 这里需要根据实际文档格式解析，假设文档按章节包含每个接口
-    # 返回结构：[{ 'name': '登录', 'method': 'POST', 'url': '/api/login', ... }]
-    pass
 
-def generate_test_cases(apis):
-    """根据接口列表生成测试用例（正向、负向、边界）"""
-    test_cases = []
-    for idx, api in enumerate(apis):
-        # 生成正向用例
-        test_cases.append({
-            'test_case_id': f"TC{idx+1:03d}001",
-            'feature': api.get('feature', ''),
-            'title': f"{api['name']}_正常流程",
-            'apiMethod': api['method'],
-            'apiUrl': api['url'],
-            'apiParams': json.dumps(api.get('params', {}), ensure_ascii=False),
-            'expected_status_code': 200,
-            'expectedResult': json.dumps(api.get('success_response', {}), ensure_ascii=False),
-            'test_type': 'positive',
-            'priority': 'P0',
-            'status': 'DRAFT',
-            'type': 'API',
-            'preconditions': '{"dependsOn":[],"bind":{},"vars":{}}',
-            'postconditions': '{"asserts":[],"exports":{}}',
-            'tags': api.get('tags', '')
-        })
-        # 添加负向用例等...
-    return test_cases
+def _wire_backend_imports() -> None:
+    repo_root = Path(__file__).resolve().parents[4]
+    backend_root = repo_root / "ai-project-back-end"
+    sys.path.insert(0, str(backend_root))
 
-def write_csv(test_cases, output_dir):
-    timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
-    filename = f"api_test_cases_{timestamp}.csv"
-    output_path = Path(output_dir) / filename
-    output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    with open(output_path, 'w', newline='', encoding='utf-8') as f:
-        fieldnames = ['test_case_id', 'feature', 'title', 'apiMethod', 'apiUrl',
-                      'apiHeaders', 'apiParams', 'expected_status_code', 'expectedResult',
-                      'test_type', 'priority', 'status', 'type', 'preconditions',
-                      'postconditions', 'tags']
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(test_cases)
-    return output_path
-
-def main():
+def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument('--doc', required=True, help='接口文档路径')
-    parser.add_argument('--output', default='test_cases', help='输出目录')
+    parser.add_argument("--doc", required=True, help="接口文档路径")
+    parser.add_argument("--output", default="test_cases", help="输出目录")
+    parser.add_argument("--case-gen-mode", default="AUTO", help="OFF/SUGGEST/AUTO")
+    parser.add_argument("--llm-mode", default="OFF", help="OFF/SUGGEST/AUTO")
+    parser.add_argument("--skill-id", default="api-doc-test-generator", help="skillId")
+    parser.add_argument("--max-cases", default="200", help="最大用例数")
+    parser.add_argument("--instruction", default="", help="生成指令/过滤关键词")
     args = parser.parse_args()
 
-    apis = parse_api_doc(args.doc)
-    test_cases = generate_test_cases(apis)
-    output_file = write_csv(test_cases, args.output)
-    print(f"CSV generated: {output_file}")
+    _wire_backend_imports()
+    from app.services.doc_ingest.case_generator import generate_testcase_rows, rows_to_csv_dicts
+    from app.services.doc_ingest.csv_builder import build_csv_from_doc_parse, build_csv_from_rows
+    from app.services.doc_ingest.llm_enhancer import apply_llm_enhancement
+    from app.services.doc_ingest.parse_with_docling import parse_document
 
-if __name__ == '__main__':
-    main()
+    doc_path = Path(args.doc)
+    content = doc_path.read_bytes()
+    result = parse_document(content, doc_path.name)
+    result = apply_llm_enhancement(result, args.llm_mode)
+
+    rows = generate_testcase_rows(
+        result=result,
+        instruction=str(args.instruction or "").strip(),
+        skill_id=str(args.skill_id or "api-doc-test-generator").strip() or "api-doc-test-generator",
+        max_cases=max(1, min(2000, int(args.max_cases))),
+        mode=str(args.case_gen_mode or "OFF"),
+    )
+
+    if rows:
+        fname, csv_text, _ = build_csv_from_rows(rows_to_csv_dicts(rows), fname_prefix="api_test_cases")
+    else:
+        fname, csv_text, _ = build_csv_from_doc_parse(result)
+
+    out_dir = Path(args.output)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / fname
+    out_path.write_text(csv_text, encoding="utf-8")
+    print(str(out_path))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

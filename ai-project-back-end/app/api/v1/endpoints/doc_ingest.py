@@ -13,10 +13,11 @@ from app.core.database import get_db
 from app.schemas.common import ApiResponse
 from app.schemas.doc_ingest import DocCsvGenerateData, DocParseResult, QualityIssue
 from app.services.doc_ingest.parse_with_docling import parse_document
-from app.services.doc_ingest.csv_builder import build_csv_from_doc_parse
+from app.services.doc_ingest.csv_builder import build_csv_from_doc_parse, build_csv_from_rows
 from app.schemas.testcase_import import TestCaseImportData
 from app.services.testcase_import import import_testcases_from_file
 from app.services.doc_ingest.llm_enhancer import apply_llm_enhancement
+from app.services.doc_ingest.case_generator import generate_testcase_rows, rows_to_csv_dicts
 
 router = APIRouter(prefix="/doc-ingest")
 
@@ -122,6 +123,10 @@ async def preview(
 @router.post("/generate-csv", response_model=ApiResponse[DocCsvGenerateData])
 async def generate_csv(
     llmMode: str = Form(default="OFF"),
+    caseGenMode: str = Form(default="OFF"),
+    skillId: str = Form(default="api-doc-test-generator"),
+    maxCases: int = Form(default=200),
+    candidateIds: str | None = Form(default=None),
     instruction: str = Form(default=""),
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
@@ -132,12 +137,24 @@ async def generate_csv(
     try:
         result = parse_document(content, file.filename or "unknown", job_id=None)
         result = apply_llm_enhancement(result, llmMode)
+        selected_ids = _parse_candidate_ids(candidateIds)
         before = len(result.apiCandidates or [])
+        result.apiCandidates = _filter_candidates(result.apiCandidates or [], selected_ids)
         result.apiCandidates = _filter_candidates_by_instruction(result.apiCandidates or [], instruction)
         after = len(result.apiCandidates or [])
         if before != after:
             result.quality.issues.append(QualityIssue(code="INSTRUCTION_FILTER", message=f"{after}/{before}", severity="INFO"))
-        fname, csv_text, count = build_csv_from_doc_parse(result)
+        rows = generate_testcase_rows(
+            result=result,
+            instruction=instruction,
+            skill_id=str(skillId or "api-doc-test-generator").strip() or "api-doc-test-generator",
+            max_cases=max(1, min(2000, int(maxCases or 200))),
+            mode=caseGenMode,
+        )
+        if rows:
+            fname, csv_text, count = build_csv_from_rows(rows_to_csv_dicts(rows), fname_prefix="api_test_cases")
+        else:
+            fname, csv_text, count = build_csv_from_doc_parse(result)
         data = DocCsvGenerateData(fileName=fname, csvText=csv_text, itemCount=count, status=result.status)
     finally:
         await file.close()
@@ -148,6 +165,9 @@ async def generate_and_import(
     projectId: str = Form(...),
     mode: str = Form(default="partial"),
     llmMode: str = Form(default="OFF"),
+    caseGenMode: str = Form(default="OFF"),
+    skillId: str = Form(default="api-doc-test-generator"),
+    maxCases: int = Form(default=200),
     candidateIds: str | None = Form(default=None),
     instruction: str = Form(default=""),
     file: UploadFile = File(...),
@@ -167,7 +187,17 @@ async def generate_and_import(
         after = len(result.apiCandidates or [])
         if before != after:
             result.quality.issues.append(QualityIssue(code="INSTRUCTION_FILTER", message=f"{after}/{before}", severity="INFO"))
-        fname, csv_text, count = build_csv_from_doc_parse(result)
+        rows = generate_testcase_rows(
+            result=result,
+            instruction=instruction,
+            skill_id=str(skillId or "api-doc-test-generator").strip() or "api-doc-test-generator",
+            max_cases=max(1, min(2000, int(maxCases or 200))),
+            mode=caseGenMode,
+        )
+        if rows:
+            fname, csv_text, count = build_csv_from_rows(rows_to_csv_dicts(rows), fname_prefix="api_test_cases")
+        else:
+            fname, csv_text, count = build_csv_from_doc_parse(result)
         data = await import_testcases_from_file(
             db,
             user=user,

@@ -3,7 +3,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import modalCreateIcon from '@/assets/figma/ai-testing-platform/modal-create-icon.svg'
 import modalClose28 from '@/assets/figma/ai-testing-platform/modal-close-28.svg'
 import filterChevron from '@/assets/figma/ai-testing-platform/filter-chevron.svg'
-import { generateDocAndImport, previewDocIngest, type DocIngestApiCandidate } from '@/lib/aiTestingPlatformApi'
+import { generateDocAndImport, generateDocCsv, previewDocIngest, type DocIngestApiCandidate } from '@/lib/aiTestingPlatformApi'
 
 type SourceType = 'prd' | 'figma' | 'html'
 type DedupStrategy = 'STRICT' | 'MERGE' | 'NONE'
@@ -27,6 +27,7 @@ const formData = reactive({
   dedupStrategy: 'STRICT' as DedupStrategy,
   defaultPriority: 'P1' as CasePriority,
   defaultType: 'API' as CaseType,
+  useAiCaseGen: true,
   instruction: ''
 })
 
@@ -47,6 +48,7 @@ const generatedCount = ref(0)
 const dedupRemovedCount = ref(0)
 const lowConfidenceCount = ref(0)
 const isImporting = ref(false)
+const isDownloading = ref(false)
 let progressTimer = 0
 
 type PreviewCase = {
@@ -313,6 +315,52 @@ function regenerateCases() {
   currentStep.value = 1
 }
 
+function _resolveCaseGenMode() {
+  return formData.useAiCaseGen ? 'AUTO' : 'OFF'
+}
+
+function _resolveMaxCases() {
+  const n = Math.max(1, Number(formData.maxCount) || 1)
+  return Math.min(2000, n * 10)
+}
+
+async function downloadCsv() {
+  if (isDownloading.value) return
+  const file = selectedFileRef.value
+  if (!file) return
+  const candidateIds = selectedCaseIds.value.slice()
+  if (candidateIds.length === 0) return
+  isDownloading.value = true
+  try {
+    const instruction = String(formData.instruction || '').trim()
+    const llmMode = instruction ? 'AUTO' : 'OFF'
+    const res = await generateDocCsv({
+      file,
+      llmMode,
+      instruction,
+      candidateIds,
+      caseGenMode: _resolveCaseGenMode(),
+      skillId: 'api-doc-test-generator',
+      maxCases: _resolveMaxCases()
+    })
+    const blob = new Blob([res.csvText], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = res.fileName || 'api_test_cases.csv'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+    showToast('CSV 已下载')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '下载失败'
+    showToast(message, 'error')
+  } finally {
+    isDownloading.value = false
+  }
+}
+
 async function importCases() {
   if (isImporting.value) return
   const projectId = String(props.projectId || '').trim()
@@ -324,7 +372,17 @@ async function importCases() {
   try {
     const instruction = String(formData.instruction || '').trim()
     const llmMode = instruction ? 'AUTO' : 'OFF'
-    const data = await generateDocAndImport({ projectId, file, mode: 'partial', llmMode, candidateIds, instruction })
+    const data = await generateDocAndImport({
+      projectId,
+      file,
+      mode: 'partial',
+      llmMode,
+      candidateIds,
+      instruction,
+      caseGenMode: _resolveCaseGenMode(),
+      skillId: 'api-doc-test-generator',
+      maxCases: _resolveMaxCases()
+    })
     emit('imported', { importedCount: data.importedCount, failedCount: data.failedCount })
     closeModal()
   } catch (error) {
@@ -461,6 +519,11 @@ watch(() => props.isOpen, (isOpen) => {
               </div>
             </div>
           </div>
+
+          <label class="flex items-center gap-[8px] text-[12px] leading-[16px] text-[#0A0A0A]">
+            <input v-model="formData.useAiCaseGen" type="checkbox" class="h-[14px] w-[14px]" />
+            使用大模型生成测试用例（按 CSV 模板）
+          </label>
         </div>
  
         <div v-else-if="currentStep === 2" class="relative flex h-full flex-col items-center">
@@ -602,6 +665,15 @@ watch(() => props.isOpen, (isOpen) => {
               <path d="M10.8335 1.89575V4.33325H8.396" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round" />
             </svg>
             重新生成
+          </button>
+          <button
+            type="button"
+            class="flex h-[36px] items-center gap-[8px] rounded-[10px] border border-black/10 px-[16px] text-[14px] font-medium leading-[20px] text-[#0A0A0A]"
+            :disabled="selectedCount === 0 || isDownloading"
+            :class="selectedCount > 0 && !isDownloading ? 'opacity-100' : 'opacity-50'"
+            @click="downloadCsv"
+          >
+            {{ isDownloading ? '下载中...' : '下载 CSV' }}
           </button>
           <button type="button" class="flex h-[36px] items-center gap-[8px] rounded-[10px] bg-[#155DFC] px-[20px] text-[14px] font-medium leading-[20px] text-white" :disabled="selectedCount === 0 || isImporting" :class="selectedCount > 0 && !isImporting ? 'opacity-100' : 'opacity-50'" @click="importCases">
             <svg width="13" height="13" viewBox="0 0 13 13" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">

@@ -355,11 +355,27 @@ export async function previewDocIngest(payload: { file: File; llmMode?: 'OFF' | 
   })
 }
 
-export async function generateDocCsv(payload: { file: File; llmMode?: 'OFF' | 'SUGGEST' | 'AUTO'; instruction?: string }) {
+export async function generateDocCsv(payload: {
+  file: File
+  llmMode?: 'OFF' | 'SUGGEST' | 'AUTO'
+  instruction?: string
+  candidateIds?: string[]
+  caseGenMode?: 'OFF' | 'SUGGEST' | 'AUTO'
+  skillId?: string
+  maxCases?: number
+}) {
   if (!payload?.file) throw new Error('请选择文件')
   const form = new FormData()
   form.append('llmMode', payload.llmMode || 'OFF')
   form.append('instruction', String(payload.instruction || '').trim())
+  if (Array.isArray(payload.candidateIds)) {
+    form.append('candidateIds', JSON.stringify(payload.candidateIds))
+  }
+  form.append('caseGenMode', payload.caseGenMode || 'OFF')
+  form.append('skillId', String(payload.skillId || '').trim())
+  if (typeof payload.maxCases === 'number' && Number.isFinite(payload.maxCases)) {
+    form.append('maxCases', String(Math.max(1, Math.floor(payload.maxCases))))
+  }
   form.append('file', payload.file, payload.file.name)
   return requestFormData<{ fileName: string; csvText: string; itemCount: number; status: string }>('/api/doc-ingest/generate-csv', {
     method: 'POST',
@@ -370,7 +386,17 @@ export async function generateDocCsv(payload: { file: File; llmMode?: 'OFF' | 'S
   })
 }
 
-export async function generateDocAndImport(payload: { projectId: string; file: File; mode?: 'partial' | 'atomic'; llmMode?: 'OFF' | 'SUGGEST' | 'AUTO'; candidateIds?: string[]; instruction?: string }) {
+export async function generateDocAndImport(payload: {
+  projectId: string
+  file: File
+  mode?: 'partial' | 'atomic'
+  llmMode?: 'OFF' | 'SUGGEST' | 'AUTO'
+  candidateIds?: string[]
+  instruction?: string
+  caseGenMode?: 'OFF' | 'SUGGEST' | 'AUTO'
+  skillId?: string
+  maxCases?: number
+}) {
   const pid = String(payload.projectId || '').trim()
   if (!pid) throw new Error('项目 ID 不能为空')
   if (!payload.file) throw new Error('请选择文件')
@@ -379,6 +405,11 @@ export async function generateDocAndImport(payload: { projectId: string; file: F
   form.append('mode', payload.mode || 'partial')
   form.append('llmMode', payload.llmMode || 'OFF')
   form.append('instruction', String(payload.instruction || '').trim())
+  form.append('caseGenMode', payload.caseGenMode || 'OFF')
+  form.append('skillId', String(payload.skillId || '').trim())
+  if (typeof payload.maxCases === 'number' && Number.isFinite(payload.maxCases)) {
+    form.append('maxCases', String(Math.max(1, Math.floor(payload.maxCases))))
+  }
   if (Array.isArray(payload.candidateIds)) {
     form.append('candidateIds', JSON.stringify(payload.candidateIds))
   }
