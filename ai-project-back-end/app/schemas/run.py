@@ -54,10 +54,21 @@ class RunProgress(BaseSchema):
     total: int = Field(ge=0)
 
 
+class RunMetrics(BaseSchema):
+    total: int = Field(ge=0)
+    done: int = Field(ge=0)
+    passed: int = Field(ge=0)
+    failed: int = Field(ge=0)
+    skipped: int = Field(ge=0)
+
+
 class RunDetailData(BaseSchema):
     id: IdStr
     status: RunStatus
     progress: RunProgress
+    triggerType: TriggerType | None = None
+    executionSource: str | None = None
+    metrics: RunMetrics | None = None
     suiteId: IdStr
     envId: IdStr | None = None
     startAt: UnixTs

@@ -39,6 +39,31 @@ export type ProjectEnvironment = {
   baseUrl: string
 }
 
+export type PageData<T> = {
+  page: number
+  pageSize: number
+  total: number
+  items: T[]
+}
+
+export type SuiteLite = {
+  id: string
+  name: string
+}
+
+export type RunProgress = {
+  done: number
+  total: number
+}
+
+export type RunMetrics = {
+  total: number
+  done: number
+  passed: number
+  failed: number
+  skipped: number
+}
+
 export type CollectionListItem = {
   id: string
   projectId: string
@@ -124,14 +149,14 @@ export type BatchRunDirectFormState = {
 
 export type RunDetailData = {
   id: string
-  status: string
-  progress?: {
-    done?: number
-    total?: number
-  }
-  suiteId?: string
-  envId?: string
-  startAt?: number
+  status: 'QUEUED' | 'RUNNING' | 'PASSED' | 'FAILED' | 'CANCELED'
+  progress: RunProgress
+  triggerType?: 'MANUAL' | 'CI' | 'CRON' | 'WEBHOOK' | null
+  executionSource?: 'TESTCASE_DIRECT' | 'TESTCASE_HTTP_DIRECT' | null
+  metrics?: RunMetrics | null
+  suiteId: string
+  envId?: string | null
+  startAt: number
 }
 
 export type CaseRunItem = {
@@ -356,6 +381,62 @@ export async function fetchProjectEnvironments(projectId: string) {
   const pid = String(projectId || '').trim()
   if (!pid) return []
   return requestJson<ProjectEnvironment[]>(`/api/projects/${encodeURIComponent(pid)}/environments`, {
+    method: 'GET',
+    headers: {
+      Authorization: resolveAuthHeader()
+    }
+  })
+}
+
+export async function fetchSuitesLite(projectId: string, page = 1, pageSize = 200) {
+  const pid = String(projectId || '').trim()
+  if (!pid) {
+    return {
+      page,
+      pageSize,
+      total: 0,
+      items: []
+    } satisfies PageData<SuiteLite>
+  }
+  const query = new URLSearchParams({
+    projectId: pid,
+    page: String(page),
+    pageSize: String(pageSize)
+  })
+  return requestJson<PageData<SuiteLite>>(`/api/suites?${query.toString()}`, {
+    method: 'GET',
+    headers: {
+      Authorization: resolveAuthHeader()
+    }
+  })
+}
+
+export async function fetchRuns(payload: {
+  projectId: string
+  page?: number
+  pageSize?: number
+  status?: RunDetailData['status']
+  from?: number
+  to?: number
+}) {
+  const pid = String(payload.projectId || '').trim()
+  if (!pid) {
+    return {
+      page: payload.page ?? 1,
+      pageSize: payload.pageSize ?? 20,
+      total: 0,
+      items: []
+    } satisfies PageData<RunDetailData>
+  }
+  const query = new URLSearchParams({
+    projectId: pid,
+    page: String(payload.page ?? 1),
+    pageSize: String(payload.pageSize ?? 20)
+  })
+  if (payload.status) query.set('status', payload.status)
+  if (typeof payload.from === 'number' && Number.isFinite(payload.from)) query.set('from', String(payload.from))
+  if (typeof payload.to === 'number' && Number.isFinite(payload.to)) query.set('to', String(payload.to))
+  return requestJson<PageData<RunDetailData>>(`/api/runs?${query.toString()}`, {
     method: 'GET',
     headers: {
       Authorization: resolveAuthHeader()

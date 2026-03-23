@@ -28,6 +28,7 @@ from app.schemas.run import (
     RunDetailData,
     RunFromTestcasesHttpRequest,
     RunFromTestcasesRequest,
+    RunMetrics,
     RunProgress,
     RunRetryRequest,
 )
@@ -107,14 +108,24 @@ def _resolve_token(access_token: str | None, referer: str | None) -> str:
     return str(token_values[0] or "").strip()
 
 
-def _to_run_detail(run, done: int, total: int) -> RunDetailData:
+def _to_run_detail(run, done: int, total: int, passed: int, failed: int, skipped: int) -> RunDetailData:
     if run.suite_id is None:
         raise HTTPException(status_code=500, detail="Run data invalid")
     start_at = run.start_at or run.created_at
+    execution_source = None
+    try:
+        raw = (run.summary_json or {}).get("executionSource")
+        if isinstance(raw, str) and raw.strip():
+            execution_source = raw.strip()
+    except Exception:
+        execution_source = None
     return RunDetailData(
         id=str(run.id),
         status=run.status,
         progress=RunProgress(done=done, total=total),
+        triggerType=run.trigger_type,
+        executionSource=execution_source,
+        metrics=RunMetrics(total=total, done=done, passed=passed, failed=failed, skipped=skipped),
         suiteId=str(run.suite_id),
         envId=str(run.env_id) if run.env_id else None,
         startAt=to_unix_ts(start_at),
@@ -149,8 +160,8 @@ async def create_(
         await db.rollback()
         raise
 
-    run, done, total = await get_run(db, user=user, run_id=run.id)
-    return ApiResponse(data=_to_run_detail(run, done, total), requestId=request_id)
+    run, done, total, passed, failed, skipped = await get_run(db, user=user, run_id=run.id)
+    return ApiResponse(data=_to_run_detail(run, done, total, passed, failed, skipped), requestId=request_id)
 
 
 @router.get("", response_model=ApiResponse[PageData[RunDetailData]])
@@ -182,7 +193,7 @@ async def list_(
         page=page,
         page_size=pageSize,
     )
-    items = [_to_run_detail(run, done, total_) for run, done, total_ in rows]
+    items = [_to_run_detail(run, done, total_, passed, failed, skipped) for run, done, total_, passed, failed, skipped in rows]
     return ApiResponse(data=PageData(page=page, pageSize=pageSize, total=total, items=items), requestId=request_id)
 
 
@@ -395,8 +406,8 @@ async def create_from_testcases_(
     except Exception:
         await db.rollback()
         raise
-    run, done, total = await get_run(db, user=user, run_id=run.id)
-    return ApiResponse(data=_to_run_detail(run, done, total), requestId=request_id)
+    run, done, total, passed, failed, skipped = await get_run(db, user=user, run_id=run.id)
+    return ApiResponse(data=_to_run_detail(run, done, total, passed, failed, skipped), requestId=request_id)
 
 
 @router.post("/from-testcases-http", response_model=ApiResponse[RunDetailData])
@@ -431,8 +442,8 @@ async def create_from_testcases_http_(
     except Exception:
         await db.rollback()
         raise
-    run, done, total = await get_run(db, user=user, run_id=run.id)
-    return ApiResponse(data=_to_run_detail(run, done, total), requestId=request_id)
+    run, done, total, passed, failed, skipped = await get_run(db, user=user, run_id=run.id)
+    return ApiResponse(data=_to_run_detail(run, done, total, passed, failed, skipped), requestId=request_id)
 
 
 @router.get("/{runId}", response_model=ApiResponse[RunDetailData])
@@ -442,8 +453,8 @@ async def get_(
     user: CurrentUser = Depends(get_current_user),
     request_id: str = Depends(get_request_id),
 ) -> ApiResponse[RunDetailData]:
-    run, done, total = await get_run(db, user=user, run_id=runId)
-    return ApiResponse(data=_to_run_detail(run, done, total), requestId=request_id)
+    run, done, total, passed, failed, skipped = await get_run(db, user=user, run_id=runId)
+    return ApiResponse(data=_to_run_detail(run, done, total, passed, failed, skipped), requestId=request_id)
 
 
 @router.get("/{runId}/allure-report", include_in_schema=False)
@@ -485,7 +496,7 @@ async def get_allure_report_(
     if user is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
     resolved_user = user
-    run, _, _ = await get_run(db, user=resolved_user, run_id=runId)
+    run, _, _, _, _, _ = await get_run(db, user=resolved_user, run_id=runId)
     artifact_rows = (
         await db.execute(
             select(Artifact)
@@ -544,7 +555,7 @@ async def generate_allure_report_(
     user: CurrentUser = Depends(get_current_user),
     request_id: str = Depends(get_request_id),
 ) -> ApiResponse[RunAllureReportGenerateData]:
-    run, _, _ = await get_run(db, user=user, run_id=runId)
+    run, _, _, _, _, _ = await get_run(db, user=user, run_id=runId)
     job = await db.scalar(
         select(Job)
         .where(Job.tenant_id == user.tenant_id, Job.run_id == run.id)
@@ -703,5 +714,5 @@ async def retry_(
         await db.rollback()
         raise
 
-    run, done, total = await get_run(db, user=user, run_id=new_run.id)
-    return ApiResponse(data=_to_run_detail(run, done, total), requestId=request_id)
+    run, done, total, passed, failed, skipped = await get_run(db, user=user, run_id=new_run.id)
+    return ApiResponse(data=_to_run_detail(run, done, total, passed, failed, skipped), requestId=request_id)

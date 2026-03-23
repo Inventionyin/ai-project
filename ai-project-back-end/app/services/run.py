@@ -371,22 +371,50 @@ async def _get_or_create_direct_suite(
     user: CurrentUser,
     project: Project,
 ) -> Suite:
+    suite_source = "TESTCASE_DIRECT"
+    suite_name = "批量运行"
+    legacy_suite_name = "__TESTCASE_DIRECT__"
+
     suite = await db.scalar(
         select(Suite)
         .where(
             Suite.tenant_id == user.tenant_id,
             Suite.project_id == project.id,
-            Suite.name == "__TESTCASE_DIRECT__",
+            Suite.name == suite_name,
+            Suite.config_json["source"].astext == suite_source,
         )
         .order_by(Suite.created_at.asc())
     )
     if suite is not None:
         return suite
+
+    legacy_suites = (
+        await db.execute(
+            select(Suite)
+            .where(
+                Suite.tenant_id == user.tenant_id,
+                Suite.project_id == project.id,
+                Suite.name == legacy_suite_name,
+                Suite.config_json["source"].astext == suite_source,
+            )
+            .order_by(Suite.created_at.asc())
+        )
+    ).scalars().all()
+    if legacy_suites:
+        for s in legacy_suites:
+            s.name = suite_name
+            cfg = dict(s.config_json or {})
+            if cfg.get("source") != suite_source:
+                cfg["source"] = suite_source
+                s.config_json = cfg
+        await db.flush()
+        return legacy_suites[0]
+
     suite = Suite(
         tenant_id=user.tenant_id,
         project_id=project.id,
-        name="__TESTCASE_DIRECT__",
-        config_json={"source": "TESTCASE_DIRECT"},
+        name=suite_name,
+        config_json={"source": suite_source},
         created_by=user.id,
     )
     db.add(suite)
@@ -1088,7 +1116,7 @@ async def list_runs(
     to_ts: int | None,
     page: int,
     page_size: int,
-) -> tuple[int, list[tuple[Run, int, int]]]:
+) -> tuple[int, list[tuple[Run, int, int, int, int, int]]]:
     if project_id is not None:
         project = await _get_project(db, user=user, project_id=project_id)
         await _require_project_read(db, user=user, project=project)
@@ -1102,6 +1130,24 @@ async def list_runs(
         .correlate(Run)
         .scalar_subquery()
     )
+    passed_subq = (
+        select(func.count(CaseRun.id))
+        .where(CaseRun.run_id == Run.id, CaseRun.status == CaseRunStatus.PASSED)
+        .correlate(Run)
+        .scalar_subquery()
+    )
+    failed_subq = (
+        select(func.count(CaseRun.id))
+        .where(CaseRun.run_id == Run.id, CaseRun.status == CaseRunStatus.FAILED)
+        .correlate(Run)
+        .scalar_subquery()
+    )
+    skipped_subq = (
+        select(func.count(CaseRun.id))
+        .where(CaseRun.run_id == Run.id, CaseRun.status == CaseRunStatus.SKIPPED)
+        .correlate(Run)
+        .scalar_subquery()
+    )
     total_subq = (
         select(func.count(CaseRun.id))
         .where(CaseRun.run_id == Run.id)
@@ -1110,7 +1156,14 @@ async def list_runs(
     )
 
     stmt = (
-        select(Run, done_subq.label("done"), total_subq.label("total"))
+        select(
+            Run,
+            done_subq.label("done"),
+            total_subq.label("total"),
+            passed_subq.label("passed"),
+            failed_subq.label("failed"),
+            skipped_subq.label("skipped"),
+        )
         .join(Project, Run.project_id == Project.id)
         .outerjoin(
             ProjectMember,
@@ -1147,7 +1200,9 @@ async def list_runs(
             .limit(page_size)
         )
     ).all()
-    items: list[tuple[Run, int, int]] = [(r[0], int(r[1] or 0), int(r[2] or 0)) for r in rows]
+    items: list[tuple[Run, int, int, int, int, int]] = [
+        (r[0], int(r[1] or 0), int(r[2] or 0), int(r[3] or 0), int(r[4] or 0), int(r[5] or 0)) for r in rows
+    ]
     return total, items
 
 
@@ -1156,7 +1211,7 @@ async def get_run(
     *,
     user: CurrentUser,
     run_id: uuid.UUID,
-) -> tuple[Run, int, int]:
+) -> tuple[Run, int, int, int, int, int]:
     run = await db.scalar(select(Run).where(Run.id == run_id, Run.tenant_id == user.tenant_id))
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -1165,24 +1220,22 @@ async def get_run(
     await _require_project_read(db, user=user, project=project)
 
     total = int(
-        (
-            await db.execute(select(func.count(CaseRun.id)).where(CaseRun.run_id == run.id, CaseRun.tenant_id == user.tenant_id))
-        ).scalar_one()
+        (await db.execute(select(func.count(CaseRun.id)).where(CaseRun.run_id == run.id, CaseRun.tenant_id == user.tenant_id))).scalar_one()
         or 0
     )
-    done = int(
-        (
-            await db.execute(
-                select(func.count(CaseRun.id)).where(
-                    CaseRun.run_id == run.id,
-                    CaseRun.tenant_id == user.tenant_id,
-                    CaseRun.status.in_((CaseRunStatus.PASSED, CaseRunStatus.FAILED, CaseRunStatus.SKIPPED)),
-                )
-            )
-        ).scalar_one()
-        or 0
-    )
-    return run, done, total
+    grouped = (
+        await db.execute(
+            select(CaseRun.status, func.count(CaseRun.id))
+            .where(CaseRun.run_id == run.id, CaseRun.tenant_id == user.tenant_id)
+            .group_by(CaseRun.status)
+        )
+    ).all()
+    counts = {status: int(cnt or 0) for status, cnt in grouped}
+    passed = int(counts.get(CaseRunStatus.PASSED, 0))
+    failed = int(counts.get(CaseRunStatus.FAILED, 0))
+    skipped = int(counts.get(CaseRunStatus.SKIPPED, 0))
+    done = passed + failed + skipped
+    return run, done, total, passed, failed, skipped
 
 
 async def list_case_runs(

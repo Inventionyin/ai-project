@@ -38,11 +38,14 @@ def _suite_config_from_json(config_json: dict | None) -> SuiteConfig:
 
 def _to_public(suite) -> SuitePublic:
     cfg = dict(suite.config_json or {})
+    name = suite.name
+    if name == "__TESTCASE_DIRECT__" and cfg.get("source") == "TESTCASE_DIRECT":
+        name = "批量运行"
     default_env_id = cfg.get("defaultEnvId")
     return SuitePublic(
         id=str(suite.id),
         projectId=str(suite.project_id),
-        name=suite.name,
+        name=name,
         defaultEnvId=str(default_env_id) if default_env_id else None,
         config=_suite_config_from_json(cfg),
         createdAt=to_unix_ts(suite.created_at),

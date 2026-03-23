@@ -9,8 +9,8 @@ import runsTriggerCicd from '@/assets/figma/ai-testing-platform/runs-trigger-cic
 import runsTriggerManual from '@/assets/figma/ai-testing-platform/runs-trigger-manual.svg'
 import runsTriggerSchedule from '@/assets/figma/ai-testing-platform/runs-trigger-schedule.svg'
 
-type TriggerType = '手动' | 'CI/CD' | '定时'
-type RunStatus = '通过' | '失败' | '执行中' | '已取消'
+type TriggerType = '手动' | 'CI/CD' | '定时' | '未知'
+type RunStatus = '通过' | '失败' | '执行中' | '排队中' | '已取消'
 
 export type RunRow = {
   runId: string
@@ -33,13 +33,15 @@ defineProps<{
 function triggerMeta(type: TriggerType) {
   if (type === '手动') return { icon: runsTriggerManual, color: '#155DFC' }
   if (type === 'CI/CD') return { icon: runsTriggerCicd, color: '#9810FA' }
-  return { icon: runsTriggerSchedule, color: '#F54900' }
+  if (type === '定时') return { icon: runsTriggerSchedule, color: '#F54900' }
+  return { icon: runsTriggerManual, color: '#717182' }
 }
 
 function statusMeta(status: RunStatus) {
   if (status === '通过') return { icon: runsStatusPass, bg: '#DCFCE7', color: '#008236', width: '40px' }
   if (status === '失败') return { icon: runsStatusFail, bg: '#FFE2E2', color: '#E7000B', width: '40px' }
   if (status === '执行中') return { icon: runsStatusRunning, bg: '#DBEAFE', color: '#155DFC', width: '52px' }
+  if (status === '排队中') return { icon: runsStatusRunning, bg: '#DBEAFE', color: '#155DFC', width: '52px' }
   return { icon: runsStatusCancel, bg: '#F3F4F6', color: '#6A7282', width: '52px' }
 }
 
