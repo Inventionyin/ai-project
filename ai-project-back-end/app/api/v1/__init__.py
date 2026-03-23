@@ -11,6 +11,7 @@ from app.api.v1.endpoints.testcases import router as testcases_router
 from app.api.v1.endpoints.testcase_bindings import router as testcase_bindings_router
 from app.api.v1.endpoints.collections import router as collections_router
 from app.api.v1.endpoints.worker import router as worker_router
+from app.api.v1.endpoints.doc_ingest import router as doc_ingest_router
 
 router = APIRouter()
 router.include_router(auth_router, tags=["auth"])
@@ -24,3 +25,4 @@ router.include_router(runs_router, tags=["runs"])
 router.include_router(collections_router, tags=["collections"])
 router.include_router(dashboard_router, tags=["dashboard"])
 router.include_router(worker_router, tags=["workers"])
+router.include_router(doc_ingest_router, tags=["doc-ingest"])

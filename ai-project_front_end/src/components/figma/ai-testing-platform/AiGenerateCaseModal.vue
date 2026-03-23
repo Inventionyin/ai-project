@@ -3,6 +3,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import modalCreateIcon from '@/assets/figma/ai-testing-platform/modal-create-icon.svg'
 import modalClose28 from '@/assets/figma/ai-testing-platform/modal-close-28.svg'
 import filterChevron from '@/assets/figma/ai-testing-platform/filter-chevron.svg'
+import { generateDocAndImport, previewDocIngest, type DocIngestApiCandidate } from '@/lib/aiTestingPlatformApi'
 
 type SourceType = 'prd' | 'figma' | 'html'
 type DedupStrategy = 'STRICT' | 'MERGE' | 'NONE'
@@ -11,18 +12,12 @@ type CaseType = 'API' | 'UI' | 'PERF' | 'MIX'
 
 const props = defineProps<{
   isOpen: boolean
+  projectId: string
 }>()
 
 const emit = defineEmits<{
   (e: 'close'): void
-  (e: 'start', payload: {
-    source: SourceType
-    maxCount: number
-    dedupStrategy: DedupStrategy
-    defaultPriority: CasePriority
-    defaultType: CaseType
-    extractFields: string[]
-  }): void
+  (e: 'imported', data: { importedCount: number; failedCount: number }): void
 }>()
 
 const formData = reactive({
@@ -32,13 +27,7 @@ const formData = reactive({
   dedupStrategy: 'STRICT' as DedupStrategy,
   defaultPriority: 'P1' as CasePriority,
   defaultType: 'API' as CaseType,
-  extractFeature: true,
-  extractEpic: true,
-  extractStory: true,
-  extractTask: true,
-  extractTitle: true,
-  extractSteps: false,
-  extractDescription: false
+  instruction: ''
 })
 
 const dedupOptions: Array<{ label: string; value: DedupStrategy }> = [
@@ -50,12 +39,14 @@ const dedupOptions: Array<{ label: string; value: DedupStrategy }> = [
 const priorityOptions: CasePriority[] = ['P0', 'P1', 'P2', 'P3']
 const typeOptions: CaseType[] = ['API', 'UI', 'PERF', 'MIX']
 const selectedFileName = ref('')
+const selectedFileRef = ref<File | null>(null)
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const currentStep = ref<1 | 2 | 3>(1)
 const progressPercent = ref(0)
 const generatedCount = ref(0)
 const dedupRemovedCount = ref(0)
 const lowConfidenceCount = ref(0)
+const isImporting = ref(false)
 let progressTimer = 0
 
 type PreviewCase = {
@@ -71,21 +62,8 @@ type PreviewCase = {
   confidence: number
 }
 
-const previewCases = ref<PreviewCase[]>([
-  { id: '1', title: '用户登录-正确账号密码登录成功', description: '验证正确凭证', feature: '用户认证', story: '用户登录', method: 'POST', url: '/api/v1/auth/login', caseType: 'API', priority: 'P1', confidence: 97 },
-  { id: '2', title: '用户登录-错误密码提示失败', description: '验证密码错误', feature: '用户认证', story: '用户登录', method: 'POST', url: '/api/v1/auth/login', caseType: 'API', priority: 'P1', confidence: 95 },
-  { id: '3', title: '用户登录-账号被禁用拒绝登录', description: '验证账号状态', feature: '用户认证', story: '用户登录', method: 'POST', url: '/api/v1/auth/login', caseType: 'API', priority: 'P0', confidence: 93 },
-  { id: '4', title: '创建订单-库存充足创建成功', description: '验证下单成功', feature: '订单管理', story: '创建订单', method: 'POST', url: '/api/v1/orders', caseType: 'API', priority: 'P1', confidence: 96 },
-  { id: '5', title: '创建订单-库存不足返回错误', description: '验证库存校验', feature: '订单管理', story: '创建订单', method: 'POST', url: '/api/v1/orders', caseType: 'API', priority: 'P0', confidence: 94 },
-  { id: '6', title: '订单详情-存在订单查询成功', description: '验证详情返回', feature: '订单管理', story: '订单详情', method: 'GET', url: '/api/v1/orders/{id}', caseType: 'API', priority: 'P1', confidence: 96 },
-  { id: '7', title: '订单详情-不存在订单返回404', description: '验证异常场景', feature: '订单管理', story: '订单详情', method: 'GET', url: '/api/v1/orders/{id}', caseType: 'API', priority: 'P1', confidence: 92 },
-  { id: '8', title: '订单取消-未支付订单取消成功', description: '验证状态流转', feature: '订单管理', story: '取消订单', method: 'PUT', url: '/api/v1/orders/{id}/cancel', caseType: 'API', priority: 'P1', confidence: 95 },
-  { id: '9', title: '订单取消-已支付订单取消失败', description: '验证状态限制', feature: '订单管理', story: '取消订单', method: 'PUT', url: '/api/v1/orders/{id}/cancel', caseType: 'API', priority: 'P1', confidence: 91 },
-  { id: '10', title: '用户登出-Token失效成功', description: '验证会话退出', feature: '用户认证', story: '用户登出', method: 'POST', url: '/api/v1/auth/logout', caseType: 'API', priority: 'P2', confidence: 90 },
-  { id: '11', title: '刷新Token-合法刷新成功', description: '验证续期逻辑', feature: '用户认证', story: '刷新令牌', method: 'POST', url: '/api/v1/auth/refresh', caseType: 'API', priority: 'P1', confidence: 89 },
-  { id: '12', title: '刷新Token-过期Token刷新失败', description: '验证过期拦截', feature: '用户认证', story: '刷新令牌', method: 'POST', url: '/api/v1/auth/refresh', caseType: 'API', priority: 'P1', confidence: 86 }
-])
-const selectedCaseIds = ref<string[]>(previewCases.value.map((item) => item.id))
+const previewCases = ref<PreviewCase[]>([])
+const selectedCaseIds = ref<string[]>([])
 
 const selectedSourceSubText = computed(() => {
   if (formData.source === 'prd') return '.md / .docx / .pdf'
@@ -122,10 +100,6 @@ function sourceButtonClass(value: SourceType) {
   return 'bg-white border-black/10 border-[2px] text-[#717182]'
 }
 
-function switchTrackClass(value: boolean) {
-  return value ? 'bg-[#155DFC] justify-end' : 'bg-black/10 justify-start'
-}
-
 function onSourceChange(value: SourceType) {
   formData.source = value
   selectedFileName.value = ''
@@ -153,10 +127,12 @@ function onSelectFile(e: Event) {
   if (!isValidFileBySource(file.name)) {
     input.value = ''
     selectedFileName.value = ''
+    selectedFileRef.value = null
     window.alert(`文件格式不支持，请上传 ${selectedSourceSubText.value} 文件`)
     return
   }
   selectedFileName.value = file.name
+  selectedFileRef.value = file
 }
 
 const canStartGeneration = computed(() => {
@@ -166,36 +142,79 @@ const canStartGeneration = computed(() => {
 
 const progressWidth = computed(() => `${Math.min(100, Math.max(0, progressPercent.value))}%`)
 
+function showToast(message: string, type: 'success' | 'error' = 'success') {
+  window.dispatchEvent(new CustomEvent('app-toast', { detail: { message, type } }))
+}
+
 function resetGenerationView() {
   currentStep.value = 1
   progressPercent.value = 0
-  generatedCount.value = previewCases.value.length
-  dedupRemovedCount.value = 2
-  lowConfidenceCount.value = 1
-  selectedCaseIds.value = previewCases.value.map((item) => item.id)
+  generatedCount.value = 0
+  dedupRemovedCount.value = 0
+  lowConfidenceCount.value = 0
+  previewCases.value = []
+  selectedCaseIds.value = []
   window.clearInterval(progressTimer)
 }
 
-function simulateGenerating() {
-  resetGenerationView()
-  currentStep.value = 2
-  progressTimer = window.setInterval(() => {
-    if (progressPercent.value >= 100) {
-      window.clearInterval(progressTimer)
-      progressPercent.value = 100
-      generatedCount.value = previewCases.value.length
-      currentStep.value = 3
-      return
-    }
-    progressPercent.value += 5
-    const ratio = progressPercent.value / 100
-    generatedCount.value = Math.min(previewCases.value.length, Math.round(previewCases.value.length * ratio))
-    dedupRemovedCount.value = Math.round(2 * ratio)
-    lowConfidenceCount.value = Math.round(1 * ratio)
-  }, 120)
+function _normalizeMethod(v: unknown): PreviewCase['method'] {
+  const m = String(v || '').trim().toUpperCase()
+  if (m === 'POST' || m === 'PUT' || m === 'DELETE') return m
+  return 'GET'
 }
 
-function handleStart() {
+function _normalizeUrl(v: unknown) {
+  const u = String(v || '').trim()
+  return u || '/unknown'
+}
+
+function _normalizeTitle(c: DocIngestApiCandidate) {
+  const name = String(c?.name || '').trim()
+  if (name) return name.slice(0, 100)
+  return `${_normalizeMethod(c?.method)} ${_normalizeUrl(c?.url)}`.slice(0, 100)
+}
+
+function _normalizeFeature(c: DocIngestApiCandidate) {
+  const f = String(c?.feature || '').trim()
+  return f ? f.slice(0, 128) : 'DEFAULT'
+}
+
+function _normalizeDescription(c: DocIngestApiCandidate) {
+  const t = String(c?.expectedResult || '').trim()
+  return t ? t.slice(0, 80) : ''
+}
+
+function _confidencePercent(v: unknown) {
+  const n = typeof v === 'number' ? v : Number(v)
+  if (!Number.isFinite(n)) return 0
+  if (n > 1) return Math.max(0, Math.min(100, Math.round(n)))
+  return Math.max(0, Math.min(100, Math.round(n * 100)))
+}
+
+function _dedupeKey(item: PreviewCase) {
+  return `${item.method}::${item.url}::${item.title}`.toLowerCase()
+}
+
+function _applyDedup(items: PreviewCase[], strategy: DedupStrategy) {
+  if (strategy === 'NONE') {
+    return { items, removedCount: 0 }
+  }
+  const next: PreviewCase[] = []
+  const seen = new Set<string>()
+  let removedCount = 0
+  for (const item of items) {
+    const key = _dedupeKey(item)
+    if (seen.has(key)) {
+      removedCount += 1
+      continue
+    }
+    seen.add(key)
+    next.push(item)
+  }
+  return { items: next, removedCount }
+}
+
+async function handleStart() {
   if (formData.source === 'figma' && !formData.figmaUrl.trim()) {
     window.alert('请输入 Figma 链接')
     return
@@ -204,23 +223,62 @@ function handleStart() {
     window.alert(`请上传 ${selectedSourceSubText.value} 文件`)
     return
   }
-  const extractFields: string[] = []
-  if (formData.extractFeature) extractFields.push('feature')
-  if (formData.extractEpic) extractFields.push('epic')
-  if (formData.extractStory) extractFields.push('story')
-  if (formData.extractTask) extractFields.push('task')
-  if (formData.extractTitle) extractFields.push('title')
-  if (formData.extractSteps) extractFields.push('steps')
-  if (formData.extractDescription) extractFields.push('description')
-  emit('start', {
-    source: formData.source,
-    maxCount: Math.max(1, Number(formData.maxCount) || 1),
-    dedupStrategy: formData.dedupStrategy,
-    defaultPriority: formData.defaultPriority,
-    defaultType: formData.defaultType,
-    extractFields
-  })
-  simulateGenerating()
+  if (formData.source === 'figma') {
+    window.alert('暂不支持 Figma 源，请先使用文档文件')
+    return
+  }
+  const file = selectedFileRef.value
+  if (!file) {
+    window.alert('请选择文件')
+    return
+  }
+
+  resetGenerationView()
+  currentStep.value = 2
+  progressTimer = window.setInterval(() => {
+    if (progressPercent.value >= 95) return
+    progressPercent.value = Math.min(95, progressPercent.value + 5)
+  }, 120)
+
+  try {
+    const instruction = String(formData.instruction || '').trim()
+    const llmMode = instruction ? 'AUTO' : 'OFF'
+    const parsed = await previewDocIngest({ file, llmMode, instruction })
+    const rawCandidates = Array.isArray(parsed?.apiCandidates) ? parsed.apiCandidates : []
+    const maxCount = Math.max(1, Number(formData.maxCount) || 1)
+    const limited = rawCandidates.slice(0, maxCount)
+    const mapped: PreviewCase[] = limited
+      .filter((c) => c && typeof c.id === 'string' && c.id.trim())
+      .map((c) => ({
+        id: c.id,
+        title: _normalizeTitle(c),
+        description: _normalizeDescription(c),
+        feature: _normalizeFeature(c),
+        story: '',
+        method: _normalizeMethod(c.method),
+        url: _normalizeUrl(c.url),
+        caseType: formData.defaultType,
+        priority: formData.defaultPriority,
+        confidence: _confidencePercent(c.confidence)
+      }))
+
+    const deduped = _applyDedup(mapped, formData.dedupStrategy)
+    previewCases.value = deduped.items
+    selectedCaseIds.value = deduped.items.map((item) => item.id)
+    generatedCount.value = deduped.items.length
+    dedupRemovedCount.value = deduped.removedCount
+    lowConfidenceCount.value = deduped.items.filter((item) => item.confidence > 0 && item.confidence < 90).length
+
+    window.clearInterval(progressTimer)
+    progressPercent.value = 100
+    currentStep.value = 3
+  } catch (error) {
+    window.clearInterval(progressTimer)
+    progressPercent.value = 0
+    currentStep.value = 1
+    const message = error instanceof Error ? error.message : '生成失败'
+    showToast(message, 'error')
+  }
 }
 
 const allSelected = computed(() => previewCases.value.length > 0 && selectedCaseIds.value.length === previewCases.value.length)
@@ -255,8 +313,26 @@ function regenerateCases() {
   currentStep.value = 1
 }
 
-function importCases() {
-  closeModal()
+async function importCases() {
+  if (isImporting.value) return
+  const projectId = String(props.projectId || '').trim()
+  if (!projectId) return
+  const file = selectedFileRef.value
+  if (!file) return
+  const candidateIds = selectedCaseIds.value.slice()
+  isImporting.value = true
+  try {
+    const instruction = String(formData.instruction || '').trim()
+    const llmMode = instruction ? 'AUTO' : 'OFF'
+    const data = await generateDocAndImport({ projectId, file, mode: 'partial', llmMode, candidateIds, instruction })
+    emit('imported', { importedCount: data.importedCount, failedCount: data.failedCount })
+    closeModal()
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '入库失败'
+    showToast(message, 'error')
+  } finally {
+    isImporting.value = false
+  }
 }
 
 watch(() => props.isOpen, (isOpen) => {
@@ -372,56 +448,21 @@ watch(() => props.isOpen, (isOpen) => {
           </div>
 
           <div class="flex flex-col gap-[12px]">
-            <div class="text-[12px] font-semibold leading-[16px] text-[#0A0A0A]">提取字段</div>
-            <div class="rounded-[14px] border border-black/10 bg-[rgba(236,236,240,0.3)] p-[16px]">
-              <div class="grid grid-cols-2 gap-y-[12px] sm:grid-cols-4">
-                <label class="flex items-center gap-[8px] text-[12px] font-medium leading-[16px] text-[#0A0A0A]">
-                  <span class="flex h-[18px] w-[34px] items-center rounded-full p-[2px]" :class="switchTrackClass(formData.extractFeature)">
-                    <button type="button" class="h-[14px] w-[14px] rounded-full bg-white shadow-[0px_1px_2px_-1px_rgba(0,0,0,0.1),0px_1px_3px_0px_rgba(0,0,0,0.1)]" @click="formData.extractFeature = !formData.extractFeature" />
-                  </span>
-                  <span>Feature</span>
-                </label>
-                <label class="flex items-center gap-[8px] text-[12px] font-medium leading-[16px] text-[#0A0A0A]">
-                  <span class="flex h-[18px] w-[34px] items-center rounded-full p-[2px]" :class="switchTrackClass(formData.extractEpic)">
-                    <button type="button" class="h-[14px] w-[14px] rounded-full bg-white shadow-[0px_1px_2px_-1px_rgba(0,0,0,0.1),0px_1px_3px_0px_rgba(0,0,0,0.1)]" @click="formData.extractEpic = !formData.extractEpic" />
-                  </span>
-                  <span>Epic</span>
-                </label>
-                <label class="flex items-center gap-[8px] text-[12px] font-medium leading-[16px] text-[#0A0A0A]">
-                  <span class="flex h-[18px] w-[34px] items-center rounded-full p-[2px]" :class="switchTrackClass(formData.extractStory)">
-                    <button type="button" class="h-[14px] w-[14px] rounded-full bg-white shadow-[0px_1px_2px_-1px_rgba(0,0,0,0.1),0px_1px_3px_0px_rgba(0,0,0,0.1)]" @click="formData.extractStory = !formData.extractStory" />
-                  </span>
-                  <span>Story</span>
-                </label>
-                <label class="flex items-center gap-[8px] text-[12px] font-medium leading-[16px] text-[#0A0A0A]">
-                  <span class="flex h-[18px] w-[34px] items-center rounded-full p-[2px]" :class="switchTrackClass(formData.extractTask)">
-                    <button type="button" class="h-[14px] w-[14px] rounded-full bg-white shadow-[0px_1px_2px_-1px_rgba(0,0,0,0.1),0px_1px_3px_0px_rgba(0,0,0,0.1)]" @click="formData.extractTask = !formData.extractTask" />
-                  </span>
-                  <span>Task</span>
-                </label>
-                <label class="flex items-center gap-[8px] text-[12px] font-medium leading-[16px] text-[#0A0A0A]">
-                  <span class="flex h-[18px] w-[34px] items-center rounded-full p-[2px]" :class="switchTrackClass(formData.extractTitle)">
-                    <button type="button" class="h-[14px] w-[14px] rounded-full bg-white shadow-[0px_1px_2px_-1px_rgba(0,0,0,0.1),0px_1px_3px_0px_rgba(0,0,0,0.1)]" @click="formData.extractTitle = !formData.extractTitle" />
-                  </span>
-                  <span>用例标题</span>
-                </label>
-                <label class="flex items-center gap-[8px] text-[12px] font-medium leading-[16px] text-[#0A0A0A]">
-                  <span class="flex h-[18px] w-[34px] items-center rounded-full p-[2px]" :class="switchTrackClass(formData.extractSteps)">
-                    <button type="button" class="h-[14px] w-[14px] rounded-full bg-white shadow-[0px_1px_2px_-1px_rgba(0,0,0,0.1),0px_1px_3px_0px_rgba(0,0,0,0.1)]" @click="formData.extractSteps = !formData.extractSteps" />
-                  </span>
-                  <span>测试步骤</span>
-                </label>
-                <label class="flex items-center gap-[8px] text-[12px] font-medium leading-[16px] text-[#0A0A0A]">
-                  <span class="flex h-[18px] w-[34px] items-center rounded-full p-[2px]" :class="switchTrackClass(formData.extractDescription)">
-                    <button type="button" class="h-[14px] w-[14px] rounded-full bg-white shadow-[0px_1px_2px_-1px_rgba(0,0,0,0.1),0px_1px_3px_0px_rgba(0,0,0,0.1)]" @click="formData.extractDescription = !formData.extractDescription" />
-                  </span>
-                  <span>描述</span>
-                </label>
+            <div class="text-[12px] font-semibold leading-[16px] text-[#0A0A0A]">指令</div>
+            <div class="flex flex-col gap-[6px]">
+              <textarea
+                v-model="formData.instruction"
+                rows="3"
+                placeholder="例如：根据接口文档生成测试用例；只生成“用户/登录”模块；输出 CSV"
+                class="w-full resize-none rounded-[10px] border border-black/10 px-[16px] py-[12px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
+              />
+              <div class="text-[12px] leading-[16px] text-[#717182]">
+                触发示例：根据接口文档生成测试用例 / 把 API.md 转成测试用例 / 生成登录模块的接口文档
               </div>
             </div>
           </div>
         </div>
-
+ 
         <div v-else-if="currentStep === 2" class="relative flex h-full flex-col items-center">
           <div class="relative mt-[24px] h-[80px] w-[80px]">
             <div class="absolute -left-[28.15px] -top-[28.15px] h-[136.3px] w-[136.3px] rounded-full bg-[#DBEAFE] opacity-[0.118484]" />
@@ -431,7 +472,7 @@ watch(() => props.isOpen, (isOpen) => {
               </svg>
             </div>
           </div>
-          <div class="mt-[24px] text-[14px] font-semibold leading-[20px] text-[#0A0A0A]">生成完成！</div>
+          <div class="mt-[24px] text-[14px] font-semibold leading-[20px] text-[#0A0A0A]">生成中...</div>
           <div class="mt-[4px] text-[12px] leading-[16px] text-[#717182]">请稍候，这通常需要 10-30 秒</div>
 
           <div class="mt-[24px] w-full max-w-[384px]">
@@ -562,11 +603,11 @@ watch(() => props.isOpen, (isOpen) => {
             </svg>
             重新生成
           </button>
-          <button type="button" class="flex h-[36px] items-center gap-[8px] rounded-[10px] bg-[#155DFC] px-[20px] text-[14px] font-medium leading-[20px] text-white" :disabled="selectedCount === 0" :class="selectedCount > 0 ? 'opacity-100' : 'opacity-50'" @click="importCases">
+          <button type="button" class="flex h-[36px] items-center gap-[8px] rounded-[10px] bg-[#155DFC] px-[20px] text-[14px] font-medium leading-[20px] text-white" :disabled="selectedCount === 0 || isImporting" :class="selectedCount > 0 && !isImporting ? 'opacity-100' : 'opacity-50'" @click="importCases">
             <svg width="13" height="13" viewBox="0 0 13 13" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
               <path d="M6.5 1.625V11.375M1.625 6.5H11.375" stroke="white" stroke-width="1.1" stroke-linecap="round" />
             </svg>
-            入库 {{ selectedCount }} 条
+            {{ isImporting ? '入库中...' : `入库 ${selectedCount} 条` }}
           </button>
         </div>
       </div>

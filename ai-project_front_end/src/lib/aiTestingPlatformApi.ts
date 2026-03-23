@@ -328,6 +328,70 @@ export async function fetchCollectionDetail(collectionId: string) {
   })
 }
 
+export type DocIngestApiCandidate = {
+  id: string
+  name?: string | null
+  feature?: string | null
+  method?: string | null
+  url?: string | null
+  expectedStatusCode?: number | null
+  expectedResult?: string | null
+  tags?: string[] | null
+  confidence?: number | null
+}
+
+export async function previewDocIngest(payload: { file: File; llmMode?: 'OFF' | 'SUGGEST' | 'AUTO'; instruction?: string }) {
+  if (!payload?.file) throw new Error('请选择文件')
+  const form = new FormData()
+  form.append('llmMode', payload.llmMode || 'OFF')
+  form.append('instruction', String(payload.instruction || '').trim())
+  form.append('file', payload.file, payload.file.name)
+  return requestFormData<{ meta: unknown; status: string; apiCandidates: DocIngestApiCandidate[] }>('/api/doc-ingest/preview', {
+    method: 'POST',
+    headers: {
+      Authorization: resolveAuthHeader()
+    },
+    body: form
+  })
+}
+
+export async function generateDocCsv(payload: { file: File; llmMode?: 'OFF' | 'SUGGEST' | 'AUTO'; instruction?: string }) {
+  if (!payload?.file) throw new Error('请选择文件')
+  const form = new FormData()
+  form.append('llmMode', payload.llmMode || 'OFF')
+  form.append('instruction', String(payload.instruction || '').trim())
+  form.append('file', payload.file, payload.file.name)
+  return requestFormData<{ fileName: string; csvText: string; itemCount: number; status: string }>('/api/doc-ingest/generate-csv', {
+    method: 'POST',
+    headers: {
+      Authorization: resolveAuthHeader()
+    },
+    body: form
+  })
+}
+
+export async function generateDocAndImport(payload: { projectId: string; file: File; mode?: 'partial' | 'atomic'; llmMode?: 'OFF' | 'SUGGEST' | 'AUTO'; candidateIds?: string[]; instruction?: string }) {
+  const pid = String(payload.projectId || '').trim()
+  if (!pid) throw new Error('项目 ID 不能为空')
+  if (!payload.file) throw new Error('请选择文件')
+  const form = new FormData()
+  form.append('projectId', pid)
+  form.append('mode', payload.mode || 'partial')
+  form.append('llmMode', payload.llmMode || 'OFF')
+  form.append('instruction', String(payload.instruction || '').trim())
+  if (Array.isArray(payload.candidateIds)) {
+    form.append('candidateIds', JSON.stringify(payload.candidateIds))
+  }
+  form.append('file', payload.file, payload.file.name)
+  return requestFormData<TestCaseImportData>('/api/doc-ingest/generate-import', {
+    method: 'POST',
+    headers: {
+      Authorization: resolveAuthHeader()
+    },
+    body: form
+  })
+}
+
 export async function createCollection(payload: { projectId: string; name: string; variables?: Record<string, unknown> }) {
   return requestJson<CollectionDetail>('/api/collections', {
     method: 'POST',

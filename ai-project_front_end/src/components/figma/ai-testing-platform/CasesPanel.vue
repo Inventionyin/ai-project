@@ -607,9 +607,6 @@ function closeCreateCase() {
   isCreateCaseOpen.value = false
 }
 
-function startAiGenerateCase() {
-}
-
 async function saveCreateCase(payload: CreateCasePayload) {
   const projectId = String(route.params.projectId || '').trim()
   if (!projectId) return
@@ -1170,8 +1167,9 @@ watch(() => route.params.projectId, () => {
   />
   <AiGenerateCaseModal
     :is-open="isAiGenerateOpen"
+    :project-id="String(route.params.projectId || '')"
     @close="closeAiGenerateCase"
-    @start="startAiGenerateCase"
+    @imported="handleImportedCases"
   />
   <BatchRunDrawer
     :is-open="isBatchRunDrawerOpen"
