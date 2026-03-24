@@ -97,3 +97,31 @@ class DocCsvGenerateData(BaseSchema):
     csvText: str
     itemCount: int = Field(ge=0)
     status: str = Field(min_length=4, max_length=6)
+
+
+class LlmDemoRequest(BaseSchema):
+    prompt: str = Field(min_length=1, max_length=4000)
+    system: str | None = Field(default=None, max_length=4000)
+    temperature: float = Field(default=0.2, ge=0.0, le=2.0)
+    maxTokens: int | None = Field(default=256, ge=1, le=8192)
+
+
+class LlmDemoTokenUsage(BaseSchema):
+    promptTokens: int | None = Field(default=None, ge=0)
+    completionTokens: int | None = Field(default=None, ge=0)
+    totalTokens: int | None = Field(default=None, ge=0)
+
+
+class LlmDemoData(BaseSchema):
+    baseUrl: str = Field(min_length=1, max_length=2048)
+    model: str = Field(min_length=1, max_length=128)
+    responseId: str | None = Field(default=None, max_length=128)
+    content: str = Field(min_length=0, max_length=20000)
+    usage: LlmDemoTokenUsage | None = None
+
+
+class K6ScriptGenerateData(BaseSchema):
+    fileName: str = Field(min_length=1, max_length=255)
+    scriptText: str
+    status: str = Field(min_length=4, max_length=6)
+    llm: LlmDemoData | None = None

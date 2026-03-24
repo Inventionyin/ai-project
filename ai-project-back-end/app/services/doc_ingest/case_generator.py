@@ -74,7 +74,7 @@ def _expected_result_text(status_code: int, value: str | None) -> str:
         return text
     if 200 <= status_code <= 299:
         return '"code":0'
-    return "{}"
+    return '"code":40001'
 
 
 def _coerce_status_code(v: object, default: int = 200) -> int:
@@ -163,6 +163,10 @@ def _parameterize_params(params: dict) -> tuple[dict, set[str]]:
         kk = str(k or "").strip()
         if not kk:
             continue
+        if kk.startswith("_"):
+            required |= _collect_placeholders(v)
+            out[k] = v
+            continue
         low = kk.lower()
         if isinstance(v, dict):
             child, child_req = _parameterize_params(v)
@@ -232,6 +236,68 @@ def _ensure_postconditions(post: dict | None) -> dict:
     return obj
 
 
+def _parse_expected_json(text: str) -> object | None:
+    raw = str(text or "").strip()
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except Exception:
+        pass
+    first_obj = raw.find("{")
+    last_obj = raw.rfind("}")
+    if 0 <= first_obj < last_obj:
+        snippet = raw[first_obj : last_obj + 1]
+        try:
+            return json.loads(snippet)
+        except Exception:
+            pass
+    first_arr = raw.find("[")
+    last_arr = raw.rfind("]")
+    if 0 <= first_arr < last_arr:
+        snippet = raw[first_arr : last_arr + 1]
+        try:
+            return json.loads(snippet)
+        except Exception:
+            pass
+    if ":" in raw and not raw.lstrip().startswith(("{", "[")):
+        try:
+            return json.loads("{" + raw + "}")
+        except Exception:
+            return None
+    return None
+
+
+def _flatten_json_asserts(obj: object, *, max_items: int = 8) -> list[dict[str, object]]:
+    out: list[dict[str, object]] = []
+
+    def _is_primitive(v: object) -> bool:
+        return v is None or isinstance(v, (str, int, float, bool))
+
+    def _add(path: str, value: object) -> None:
+        if len(out) >= max_items:
+            return
+        out.append({"json": path, "op": "==", "value": value})
+
+    if isinstance(obj, dict):
+        for k, v in list(obj.items())[:max_items]:
+            key = str(k or "").strip()
+            if not key:
+                continue
+            if _is_primitive(v):
+                _add(f"$.{key}", v)
+            elif isinstance(v, dict):
+                for k2, v2 in list(v.items())[: max_items - len(out)]:
+                    key2 = str(k2 or "").strip()
+                    if not key2:
+                        continue
+                    if _is_primitive(v2):
+                        _add(f"$.{key}.{key2}", v2)
+            if len(out) >= max_items:
+                break
+    return out
+
+
 def _maybe_add_common_asserts(post: dict, expected_result: str) -> dict:
     if post.get("asserts"):
         return post
@@ -244,7 +310,29 @@ def _maybe_add_common_asserts(post: dict, expected_result: str) -> dict:
             code = None
         if code is not None:
             post["asserts"] = [{"json": "$.code", "op": "==", "value": code}]
+            return post
+    parsed = _parse_expected_json(text)
+    inferred = _flatten_json_asserts(parsed)
+    if inferred:
+        post["asserts"] = inferred
     return post
+
+
+def _requires_auth_like(*, method: str, url: str, title: str) -> bool:
+    m = _normalize_method(method)
+    if m == "OPTIONS":
+        return False
+    u = str(url or "").strip().lower()
+    if not u.startswith("/"):
+        return False
+    t = str(title or "").lower()
+    if "/health" in u or u.startswith("/public/"):
+        return False
+    if "/auth/login" in u or u.endswith("/login") or "登录" in title or "login" in t:
+        return False
+    if "/auth/register" in u:
+        return False
+    return True
 
 
 _JSON_METHODS_WITH_BODY = {"POST", "PUT", "PATCH"}
@@ -525,7 +613,12 @@ def _maybe_add_exports(post: dict, *, method: str, url: str, title: str, expecte
     t = str(title or "")
     er = str(expected_result or "").lower()
     if "/login" in u or "/auth/login" in u or "登录" in t:
-        path = "$.data.token" if ("data" in er and "token" in er) else "$.token"
+        if "accesstoken" in er:
+            path = "$.data.accessToken"
+        elif "data" in er and "token" in er:
+            path = "$.data.token"
+        else:
+            path = "$.token"
         post["exports"] = {"token": {"json": path}}
         return post
     if method == "POST" and ("id" in er or '"id"' in er):
@@ -550,12 +643,63 @@ def _auto_parameterize_row(r: GeneratedTestCaseRow) -> GeneratedTestCaseRow:
         title=str(r.title or ""),
         expected_result=str(r.expectedResult or ""),
     )
+    if _requires_auth_like(method=_normalize_method(r.apiMethod), url=url, title=str(r.title or "")):
+        bind = pre.get("bind") if isinstance(pre.get("bind"), dict) else {}
+        headers_bind = bind.get("headers") if isinstance(bind.get("headers"), dict) else {}
+        if not any(str(k).strip().lower() == "authorization" for k in headers_bind.keys()):
+            headers_bind = dict(headers_bind)
+            headers_bind["Authorization"] = "Bearer ${token}"
+            bind = dict(bind)
+            bind["headers"] = headers_bind
+            pre["bind"] = bind
+        if not any(str(k).strip().lower() == "authorization" for k in (headers or {}).keys()):
+            headers = dict(headers or {})
+            headers["Authorization"] = "Bearer ${token}"
+        req = pre.get("requires")
+        if not isinstance(req, list):
+            req = []
+        if "token" not in req:
+            pre["requires"] = sorted(set([*req, "token"]))
     r.apiUrl = url
     r.apiHeaders = headers
     r.apiParams = params
     r.preconditions = pre
     r.postconditions = post
     return r
+
+
+def _apply_login_dependency(rows: list[GeneratedTestCaseRow]) -> list[GeneratedTestCaseRow]:
+    login_case_id: str | None = None
+    for r in rows:
+        url = str(r.apiUrl or "").lower()
+        title = str(r.title or "")
+        if "/auth/login" in url or url.endswith("/login") or "登录" in title or "login" in title.lower():
+            if str(r.test_type or "").lower() == "positive":
+                login_case_id = str(r.test_case_id or "").strip() or None
+                break
+    if not login_case_id:
+        return rows
+    for r in rows:
+        if str(r.test_case_id or "").strip() == login_case_id:
+            continue
+        pre = _coerce_json_obj(r.preconditions)
+        requires = pre.get("requires") or []
+        if isinstance(requires, str):
+            requires = [requires]
+        if not isinstance(requires, list):
+            continue
+        if "token" not in [str(x).strip() for x in requires if str(x).strip()]:
+            continue
+        depends = pre.get("dependsOn") or []
+        if isinstance(depends, str):
+            depends = [depends]
+        if not isinstance(depends, list):
+            depends = []
+        dep_list = [str(x).strip() for x in depends if str(x).strip()]
+        if login_case_id not in dep_list:
+            pre["dependsOn"] = [*dep_list, login_case_id]
+            r.preconditions = pre
+    return rows
 
 
 def _test_case_id(api_seq: int, case_seq: int) -> str:
@@ -566,7 +710,7 @@ def _negative_params(params: dict) -> dict:
     if not params:
         return {"_invalid": True}
     out = dict(params)
-    first_key = next(iter(out.keys()))
+    first_key = next((k for k in out.keys() if not str(k).startswith("_")), next(iter(out.keys())))
     out.pop(first_key, None)
     if not out:
         out["_invalid"] = True
@@ -577,7 +721,7 @@ def _boundary_params(params: dict) -> dict:
     if not params:
         return {"_boundary": "empty"}
     out = dict(params)
-    first_key = next(iter(out.keys()))
+    first_key = next((k for k in out.keys() if not str(k).startswith("_")), next(iter(out.keys())))
     value = out.get(first_key)
     if isinstance(value, bool):
         out[first_key] = not value
@@ -716,9 +860,9 @@ def generate_testcase_rows(
         normalized: list[GeneratedTestCaseRow] = []
         for r in rows[: max(1, max_cases)]:
             normalized.append(_auto_parameterize_row(r))
-        return normalized
+        return _apply_login_dependency(normalized)
 
-    return _heuristic_rows(items)[: max(1, max_cases)]
+    return _apply_login_dependency(_heuristic_rows(items)[: max(1, max_cases)])
 
 
 def rows_to_csv_dicts(rows: list[GeneratedTestCaseRow]) -> list[dict[str, str]]:

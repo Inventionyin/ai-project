@@ -105,3 +105,106 @@ def test_parameterize_url_and_params_add_requires() -> None:
     assert isinstance(pre, dict)
     assert "requires" in pre
     assert "userId" in (pre.get("requires") or [])
+
+
+def test_expected_result_json_infers_postcondition_asserts() -> None:
+    candidate = ApiCandidate(
+        id="api_health",
+        name="健康检查",
+        feature="健康检查",
+        method="GET",
+        url="/health",
+        params={},
+        headers={},
+        expectedStatusCode=200,
+        expectedResult='{"status":"ok"}',
+        tags=["health"],
+        sourceRefs={},
+        confidence=0.9,
+    )
+    rows = _heuristic_rows([candidate])
+    assert len(rows) >= 1
+    post = rows[0].postconditions
+    assert isinstance(post, dict)
+    asserts = post.get("asserts") or []
+    assert isinstance(asserts, list)
+    assert {"json": "$.status", "op": "==", "value": "ok"} in asserts
+
+
+def test_requires_auth_like_adds_token_bind_and_requires() -> None:
+    candidate = ApiCandidate(
+        id="api_users",
+        name="获取用户列表",
+        feature="用户",
+        method="GET",
+        url="/api/users",
+        params={},
+        headers={},
+        expectedStatusCode=200,
+        expectedResult='{"code":0}',
+        tags=["user"],
+        sourceRefs={},
+        confidence=0.9,
+    )
+    rows = _heuristic_rows([candidate])
+    pre = rows[0].preconditions
+    assert isinstance(pre, dict)
+    assert "token" in (pre.get("requires") or [])
+    bind = pre.get("bind") or {}
+    assert isinstance(bind, dict)
+    headers = bind.get("headers") or {}
+    assert isinstance(headers, dict)
+    assert headers.get("Authorization") == "Bearer ${token}"
+
+
+def test_negative_empty_params_not_parameterized_to_placeholder() -> None:
+    candidate = ApiCandidate(
+        id="api_empty",
+        name="无参数接口",
+        feature="demo",
+        method="GET",
+        url="/api/demo/empty",
+        params={},
+        headers={},
+        expectedStatusCode=200,
+        expectedResult='{"code":0}',
+        tags=[],
+        sourceRefs={},
+        confidence=0.9,
+    )
+    rows = _heuristic_rows([candidate])
+    assert len(rows) >= 2
+    neg = rows[1]
+    assert isinstance(neg.apiParams, dict)
+    assert neg.apiParams.get("_invalid") is True
+
+
+def test_fallback_markdown_parser_extracts_params_from_table() -> None:
+    from app.services.doc_ingest.parse_with_docling import parse_document
+
+    md = """
+### 1.1 创建用户
+
+**请求 URL：** `POST /api/users`
+
+**请求头：**
+| Header | 类型 | 必填 | 说明 |
+|------|--|--|--|
+| Authorization | string | 是 |  |
+
+**请求体（JSON）：**
+| 字段 | 类型 | 必填 | 说明 |
+|--|--|--|--|
+| username | string | 是 |  |
+| age | integer | 否 |  |
+"""
+    result = parse_document(md.encode("utf-8"), "API.md", job_id=None)
+    assert result.apiCandidates
+    c = result.apiCandidates[0]
+    assert c.method == "POST"
+    assert c.url == "/api/users"
+    assert isinstance(c.params, dict)
+    assert "username" in c.params
+    assert "age" in c.params
+    assert isinstance(c.headers, dict)
+    assert "Authorization" in c.headers

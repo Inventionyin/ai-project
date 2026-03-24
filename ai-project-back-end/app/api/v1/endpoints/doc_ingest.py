@@ -4,20 +4,30 @@ import json
 from typing import Iterable
 import re
 
-from fastapi import APIRouter, Depends, File, UploadFile, Form
+from fastapi import APIRouter, Depends, File, UploadFile, Form, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 import uuid
 
 from app.api.deps import CurrentUser, get_current_user, get_request_id
 from app.core.database import get_db
 from app.schemas.common import ApiResponse
-from app.schemas.doc_ingest import DocCsvGenerateData, DocParseResult, QualityIssue
+from app.schemas.doc_ingest import (
+    DocCsvGenerateData,
+    DocParseResult,
+    K6ScriptGenerateData,
+    LlmDemoData,
+    LlmDemoRequest,
+    LlmDemoTokenUsage,
+    QualityIssue,
+)
 from app.services.doc_ingest.parse_with_docling import parse_document
 from app.services.doc_ingest.csv_builder import build_csv_from_doc_parse, build_csv_from_rows
 from app.schemas.testcase_import import TestCaseImportData
 from app.services.testcase_import import import_testcases_from_file
 from app.services.doc_ingest.llm_enhancer import apply_llm_enhancement
 from app.services.doc_ingest.case_generator import generate_testcase_rows, rows_to_csv_dicts
+from app.services.doc_ingest.k6_agent import generate_k6_script_heuristic, generate_k6_script_with_langgraph
+from app.services.llm.provider import get_provider
 
 router = APIRouter(prefix="/doc-ingest")
 
@@ -50,12 +60,16 @@ def _parse_candidate_ids(raw: str | None) -> list[str] | None:
     return items
 
 def _filter_candidates(items: Iterable, candidate_ids: list[str] | None) -> list:
+    all_items = list(items)
     if candidate_ids is None:
-        return list(items)
+        return all_items
     if not candidate_ids:
-        return []
+        return all_items
     allowed = set(candidate_ids)
-    return [c for c in items if getattr(c, "id", None) in allowed]
+    matched = [c for c in all_items if getattr(c, "id", None) in allowed]
+    if matched:
+        return matched
+    return all_items
 
 def _extract_instruction_keywords(instruction: str | None) -> list[str]:
     raw = str(instruction or "").strip()
@@ -210,6 +224,113 @@ async def generate_and_import(
     except Exception:
         await db.rollback()
         raise
+    finally:
+        await file.close()
+    return ApiResponse(data=data, requestId=request_id)
+
+
+@router.post("/llm-demo", response_model=ApiResponse[LlmDemoData])
+async def llm_demo(
+    body: LlmDemoRequest,
+    user: CurrentUser = Depends(get_current_user),
+    request_id: str = Depends(get_request_id),
+) -> ApiResponse[LlmDemoData]:
+    provider = get_provider()
+    result = provider.chat(
+        prompt=body.prompt,
+        system=body.system,
+        temperature=float(body.temperature),
+        max_tokens=body.maxTokens,
+    )
+    content = str((result or {}).get("content") or "")
+    if not content:
+        raise HTTPException(status_code=400, detail="llm_not_configured_or_empty_response")
+    usage_raw = (result or {}).get("usage")
+    usage = None
+    if isinstance(usage_raw, dict):
+        usage = LlmDemoTokenUsage(
+            promptTokens=usage_raw.get("promptTokens"),
+            completionTokens=usage_raw.get("completionTokens"),
+            totalTokens=usage_raw.get("totalTokens"),
+        )
+    data = LlmDemoData(
+        baseUrl=str((result or {}).get("baseUrl") or ""),
+        model=str((result or {}).get("model") or ""),
+        responseId=(result or {}).get("responseId"),
+        content=content,
+        usage=usage,
+    )
+    return ApiResponse(data=data, requestId=request_id)
+
+
+@router.post("/generate-k6", response_model=ApiResponse[K6ScriptGenerateData])
+async def generate_k6(
+    llmMode: str = Form(default="OFF"),
+    k6GenMode: str = Form(default="LLM"),
+    baseUrl: str = Form(default=""),
+    vus: int = Form(default=10),
+    duration: str = Form(default="30s"),
+    candidateIds: str | None = Form(default=None),
+    instruction: str = Form(default=""),
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    request_id: str = Depends(get_request_id),
+) -> ApiResponse[K6ScriptGenerateData]:
+    content = await file.read()
+    try:
+        result = parse_document(content, file.filename or "unknown", job_id=None)
+        result = apply_llm_enhancement(result, llmMode)
+        selected_ids = _parse_candidate_ids(candidateIds)
+        before = len(result.apiCandidates or [])
+        result.apiCandidates = _filter_candidates(result.apiCandidates or [], selected_ids)
+        result.apiCandidates = _filter_candidates_by_instruction(result.apiCandidates or [], instruction)
+        after = len(result.apiCandidates or [])
+        if before != after:
+            result.quality.issues.append(QualityIssue(code="INSTRUCTION_FILTER", message=f"{after}/{before}", severity="INFO"))
+
+        mode = str(k6GenMode or "LLM").strip().upper()
+        llm_data: LlmDemoData | None = None
+        if mode == "LLM":
+            provider = get_provider()
+            agent_out = generate_k6_script_with_langgraph(
+                provider=provider,
+                api_candidates=result.apiCandidates or [],
+                doc_text=str(result.raw.textDigest or ""),
+                instruction=instruction,
+                base_url=baseUrl,
+                vus=max(1, int(vus or 10)),
+                duration=str(duration or "30s"),
+            )
+            script_text = str(agent_out.get("scriptText") or "")
+            if not script_text:
+                raise HTTPException(status_code=400, detail="llm_not_configured_or_empty_response")
+            llm_raw = agent_out.get("llm") or {}
+            usage_raw = (llm_raw or {}).get("usage")
+            usage = None
+            if isinstance(usage_raw, dict):
+                usage = LlmDemoTokenUsage(
+                    promptTokens=usage_raw.get("promptTokens"),
+                    completionTokens=usage_raw.get("completionTokens"),
+                    totalTokens=usage_raw.get("totalTokens"),
+                )
+            if isinstance(llm_raw, dict) and llm_raw:
+                llm_data = LlmDemoData(
+                    baseUrl=str(llm_raw.get("baseUrl") or ""),
+                    model=str(llm_raw.get("model") or ""),
+                    responseId=llm_raw.get("responseId"),
+                    content=str(llm_raw.get("content") or "")[:20000],
+                    usage=usage,
+                )
+        else:
+            script_text = generate_k6_script_heuristic(
+                api_candidates=result.apiCandidates or [],
+                base_url=baseUrl,
+                vus=max(1, int(vus or 10)),
+                duration=str(duration or "30s"),
+            )
+
+        data = K6ScriptGenerateData(fileName="k6_perf_test.js", scriptText=script_text, status=result.status, llm=llm_data)
     finally:
         await file.close()
     return ApiResponse(data=data, requestId=request_id)

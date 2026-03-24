@@ -252,6 +252,148 @@ def _parse_markdown_api_candidates(text: str, *, default_feature: str) -> list[A
             _push_candidate(mm.group(1), mm.group(2), source="inline_method_url", line_no=idx)
             continue
 
+    def _is_table_sep(line: str) -> bool:
+        s = str(line or "").strip()
+        if not s.startswith("|"):
+            return False
+        inner = s.strip("|").strip()
+        if not inner:
+            return False
+        parts = [p.strip() for p in inner.split("|")]
+        if len(parts) < 2:
+            return False
+        return all(re.fullmatch(r":?-{2,}:?", p or "") is not None for p in parts)
+
+    def _parse_md_table(start_line_index: int) -> tuple[list[str], list[list[str]]] | None:
+        if start_line_index < 0 or start_line_index >= len(lines):
+            return None
+        header_line = lines[start_line_index].strip()
+        if not header_line.startswith("|"):
+            return None
+        if start_line_index + 1 >= len(lines):
+            return None
+        if not _is_table_sep(lines[start_line_index + 1]):
+            return None
+        headers = [h.strip() for h in header_line.strip().strip("|").split("|")]
+        rows: list[list[str]] = []
+        for j in range(start_line_index + 2, len(lines)):
+            row_line = lines[j].strip()
+            if not row_line.startswith("|"):
+                break
+            if _is_table_sep(row_line):
+                continue
+            cols = [c.strip() for c in row_line.strip().strip("|").split("|")]
+            if len(cols) < 1:
+                continue
+            while len(cols) < len(headers):
+                cols.append("")
+            rows.append(cols[: len(headers)])
+        if not headers:
+            return None
+        return headers, rows
+
+    def _find_table_after(start: int, end: int) -> tuple[int, list[str], list[list[str]]] | None:
+        s = max(0, start)
+        e = min(len(lines), max(s, end))
+        for i in range(s, e - 1):
+            if lines[i].lstrip().startswith("|") and _is_table_sep(lines[i + 1]):
+                parsed = _parse_md_table(i)
+                if not parsed:
+                    continue
+                headers, rows = parsed
+                return i, headers, rows
+        return None
+
+    def _col_index(headers: list[str], names: list[str]) -> int | None:
+        lowered = [str(h or "").strip().lower() for h in headers]
+        for want in names:
+            w = want.lower()
+            for i, h in enumerate(lowered):
+                if w == h or w in h:
+                    return i
+        return None
+
+    def _sample_value(type_text: str) -> object:
+        t = str(type_text or "").strip().lower()
+        t = t.split("|", 1)[0].strip()
+        if "bool" in t:
+            return True
+        if "int" in t or "integer" in t:
+            return 1
+        if "float" in t or "double" in t or "number" in t or "numeric" in t:
+            return 1
+        if "uuid" in t:
+            return "00000000-0000-0000-0000-000000000000"
+        if "list" in t or "array" in t:
+            return []
+        if "object" in t or "map" in t or "dict" in t:
+            return {}
+        return "demo"
+
+    candidates_with_line: list[tuple[int, ApiCandidate]] = []
+    for c in candidates:
+        ln = 0
+        try:
+            ln = int((c.sourceRefs or {}).get("line") or 0)
+        except Exception:
+            ln = 0
+        candidates_with_line.append((max(1, ln or 1), c))
+    candidates_with_line.sort(key=lambda x: x[0])
+
+    for i, (line_no, c) in enumerate(candidates_with_line):
+        start_idx = max(0, line_no - 1)
+        next_line = candidates_with_line[i + 1][0] if i + 1 < len(candidates_with_line) else (len(lines) + 1)
+        end_idx = min(len(lines), next_line - 1)
+        region_end = min(len(lines), start_idx + 180, end_idx)
+        region_lower = "\n".join(lines[start_idx:region_end]).lower()
+
+        def _find_label_index(substrings: list[str]) -> int | None:
+            for j in range(start_idx, region_end):
+                sj = str(lines[j] or "").lower()
+                if any(s in sj for s in substrings):
+                    return j
+            return None
+
+        if not c.headers and any(x in region_lower for x in ["请求头", "request header", "headers"]):
+            label_idx = _find_label_index(["请求头", "request header", "headers"])
+            hit = _find_table_after(label_idx if label_idx is not None else start_idx, region_end)
+            if hit:
+                _, headers, rows = hit
+                key_idx = _col_index(headers, ["header"])
+                type_idx = _col_index(headers, ["类型", "type"])
+                if key_idx is not None:
+                    out_headers: dict[str, str] = {}
+                    for r in rows[:60]:
+                        key = str(r[key_idx] or "").strip()
+                        if not key or key == "-":
+                            continue
+                        val: object = "demo"
+                        if type_idx is not None:
+                            val = _sample_value(str(r[type_idx] or ""))
+                        out_headers[key] = str(val)
+                    c.headers = out_headers
+
+        if not c.params and any(x in region_lower for x in ["请求体", "request body", "query", "请求参数", "request params"]):
+            label_idx = _find_label_index(["请求体", "request body", "query", "请求参数", "request params"])
+            hit = _find_table_after(label_idx if label_idx is not None else start_idx, region_end)
+            if hit:
+                _, headers, rows = hit
+                field_idx = _col_index(headers, ["字段", "field", "参数", "param"])
+                type_idx = _col_index(headers, ["类型", "type"])
+                if field_idx is not None:
+                    out_params: dict[str, object] = {}
+                    for r in rows[:120]:
+                        name = str(r[field_idx] or "").strip()
+                        if not name or name == "-":
+                            continue
+                        if "." in name:
+                            continue
+                        if len(out_params) >= 50:
+                            break
+                        type_text = str(r[type_idx] or "") if type_idx is not None else ""
+                        out_params[name] = _sample_value(type_text)
+                    c.params = out_params
+
     return candidates
 
 
