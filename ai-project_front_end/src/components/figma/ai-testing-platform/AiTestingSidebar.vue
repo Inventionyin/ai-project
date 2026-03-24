@@ -63,6 +63,7 @@ const resolvedActiveAssetChild = computed(() => {
   if (route.path.startsWith(`/projects/${projectId.value}/assets/data`)) return '测试数据'
   if (route.path.startsWith(`/projects/${projectId.value}/runs`)) return '运行记录'
   if (route.path.startsWith(`/projects/${projectId.value}/workers`)) return 'Worker 管理'
+  if (route.path.startsWith(`/projects/${projectId.value}/ai-assistant`)) return 'AI 助手'
   if (route.path.startsWith('/figma/untitled-47-1415')) return '测试套件'
   if (route.path.startsWith('/figma/untitled-34-158')) return '用例管理'
   if (route.path.startsWith('/figma/untitled-9-3')) return '用例管理'
@@ -116,7 +117,7 @@ const groups = computed<GroupItem[]>(() => [
 const extraLinks = computed<LinkItem[]>(() => [
   { label: '报告中心', icon: navReports, to: `/projects/${projectId.value}/reports` },
   { label: 'Allure报告', icon: navReports, to: `/projects/${projectId.value}/reports/allure` },
-  { label: 'AI 助手', icon: navAiAssistant }
+  { label: 'AI 助手', icon: navAiAssistant, to: `/projects/${projectId.value}/ai-assistant` }
 ])
 
 const settingsLinks = computed<LinkItem[]>(() => [

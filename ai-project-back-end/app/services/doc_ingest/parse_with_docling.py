@@ -42,7 +42,60 @@ def _detect_source_type(filename: str) -> str:
         return "TXT"
     if name.endswith(".md"):
         return "MD"
+    if name.endswith(".json"):
+        return "JSON"
+    if name.endswith(".yaml") or name.endswith(".yml"):
+        return "YAML"
     return "OTHER"
+
+
+def _parse_swagger_openapi(content: bytes, filename: str) -> list[ApiCandidate]:
+    import json
+    import yaml
+    
+    name = filename.lower()
+    data: dict = {}
+    try:
+        if name.endswith(".json"):
+            data = json.loads(content)
+        elif name.endswith(".yaml") or name.endswith(".yml"):
+            data = yaml.safe_load(content)
+    except Exception:
+        return []
+    
+    if not isinstance(data, dict):
+        return []
+        
+    candidates: list[ApiCandidate] = []
+    paths = data.get("paths", {})
+    if not isinstance(paths, dict):
+        return []
+        
+    for path, methods in paths.items():
+        if not isinstance(methods, dict):
+            continue
+        for method, info in methods.items():
+            if method.upper() not in _HTTP_METHODS:
+                continue
+            
+            summary = info.get("summary") or info.get("operationId") or f"{method.upper()} {path}"
+            candidates.append(
+                ApiCandidate(
+                    id=_make_candidate_id(f"swagger|{path}|{method}|{filename}"),
+                    name=str(summary)[:100],
+                    feature=data.get("info", {}).get("title", "Swagger API")[:128],
+                    method=method.upper(),
+                    url=path,
+                    params={},
+                    headers={},
+                    expectedStatusCode=200,
+                    expectedResult=None,
+                    tags=info.get("tags", []),
+                    sourceRefs={"source": filename},
+                    confidence=1.0,
+                )
+            )
+    return candidates
 
 
 def _make_issue(code: str, message: str, severity: str = "WARN") -> QualityIssue:
@@ -437,11 +490,19 @@ def parse_document(file_bytes: bytes, filename: str, *, job_id: str | None = Non
             text_guess = ""
 
     if not candidates and text_guess.strip():
-        fb_feature = (filename or "").strip()
-        c_fb = _parse_markdown_api_candidates(text_guess, default_feature=fb_feature or "DEFAULT")
-        if c_fb:
-            candidates.extend(c_fb)
-            issues.append(_make_issue("FALLBACK_MD_USED", "fallback markdown parser applied", "INFO"))
+        source_type = _detect_source_type(filename)
+        if source_type in ("JSON", "YAML"):
+            c_swagger = _parse_swagger_openapi(file_bytes, filename)
+            if c_swagger:
+                candidates.extend(c_swagger)
+                issues.append(_make_issue("SWAGGER_PARSED", "swagger/openapi parser applied", "INFO"))
+        
+        if not candidates:
+            fb_feature = (filename or "").strip()
+            c_fb = _parse_markdown_api_candidates(text_guess, default_feature=fb_feature or "DEFAULT")
+            if c_fb:
+                candidates.extend(c_fb)
+                issues.append(_make_issue("FALLBACK_MD_USED", "fallback markdown parser applied", "INFO"))
 
     q = _evaluate_quality(candidates)
     if issues:

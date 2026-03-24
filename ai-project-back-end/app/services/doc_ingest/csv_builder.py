@@ -223,11 +223,19 @@ def _build_preconditions(
     return preconditions
 
 
-def _row_from_candidate(c: ApiCandidate, idx: int, ctx: dict[str, str]) -> dict[str, str]:
+def _row_from_candidate(c: ApiCandidate, idx: int, ctx: dict[str, str], *, base_url: str = "") -> dict[str, str]:
     case_id = f"TC{idx:03d}"
     title = _normalize_title(c)
     method = _normalize_method(c.method)
     url = _normalize_url(c.url)
+    if base_url:
+        base_url = str(base_url or "").strip()
+        if base_url.endswith("/"):
+            base_url = base_url[:-1]
+        if not url.startswith("/"):
+            url = f"/{url}"
+        url = f"{base_url}{url}"
+
     is_login = _is_login_candidate(c, title=title, url=url)
     is_me = _is_me_candidate(c, title=title, url=url)
     expected_status_code = c.expectedStatusCode if c.expectedStatusCode is not None else 200
@@ -300,8 +308,8 @@ def build_csv_from_rows(rows: list[dict[str, str]], *, fname_prefix: str = "api_
     return fname, buf.getvalue(), len(rows)
 
 
-def build_csv_from_doc_parse(result: DocParseResult) -> tuple[str, str, int]:
+def build_csv_from_doc_parse(result: DocParseResult, *, base_url: str = "") -> tuple[str, str, int]:
     items: Iterable[ApiCandidate] = result.apiCandidates or []
     ctx: dict[str, str] = {}
-    rows = [_row_from_candidate(c, idx, ctx) for idx, c in enumerate(items, start=1)]
+    rows = [_row_from_candidate(c, idx, ctx, base_url=base_url) for idx, c in enumerate(items, start=1)]
     return build_csv_from_rows(rows, fname_prefix="api_test_cases")

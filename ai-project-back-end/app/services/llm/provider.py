@@ -7,12 +7,17 @@ from typing import Iterable
 
 import requests
 
+from app.core.config import get_settings
 from app.schemas.doc_ingest import ApiCandidate
 from app.schemas.testcase_gen import GeneratedTestCaseRow
 from app.services.llm.skills.api_doc_test_generator import build_system_prompt
 
 
 class LlmProvider:
+    @property
+    def is_configured(self) -> bool:
+        return False
+
     def enhance(self, items: Iterable[ApiCandidate]) -> list[ApiCandidate]:
         return list(items)
 
@@ -80,11 +85,15 @@ def _normalize_usage(raw: object) -> dict[str, int] | None:
 # 配置大模型? 还没有配置,脚本编写的效果不好
 class OpenAICompatibleProvider(LlmProvider):
     def __init__(self) -> None:
-        self._api_key = (os.getenv("LLM_API_KEY") or os.getenv("DEEPSEEK_API_KEY") or "").strip()
-        self._base_url = (os.getenv("LLM_BASE_URL") or os.getenv("DEEPSEEK_BASE_URL") or "https://api.deepseek.com").strip()
-        self._base_url = self._base_url or "https://api.deepseek.com"
-        self._model = (os.getenv("LLM_MODEL") or os.getenv("DEEPSEEK_MODEL") or "deepseek-chat").strip() or "deepseek-chat"
-        self._timeout_s = float(os.getenv("LLM_TIMEOUT_SECONDS", "").strip() or "60")
+        settings = get_settings()
+        self._api_key = settings.llm_api_key.strip()
+        self._base_url = settings.llm_base_url.strip() or "https://api.deepseek.com"
+        self._model = settings.llm_model.strip() or "deepseek-chat"
+        self._timeout_s = settings.llm_timeout_seconds
+
+    @property
+    def is_configured(self) -> bool:
+        return bool(self._api_key)
 
     def _post_chat_completions(
         self,
@@ -192,11 +201,12 @@ class OpenAICompatibleProvider(LlmProvider):
 
 
 def get_provider() -> LlmProvider:
-    provider = os.getenv("LLM_PROVIDER", "").strip().lower()
+    settings = get_settings()
+    provider = settings.llm_provider.strip().lower()
     if provider in {"openai", "openai_compatible", "deepseek"}:
         return OpenAICompatibleProvider()
     if provider:
         return LlmProvider()
-    if (os.getenv("LLM_API_KEY") or os.getenv("DEEPSEEK_API_KEY") or "").strip():
+    if settings.llm_api_key.strip():
         return OpenAICompatibleProvider()
     return LlmProvider()

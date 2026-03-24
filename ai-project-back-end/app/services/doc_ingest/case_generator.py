@@ -829,32 +829,34 @@ def generate_testcase_rows(
         return []
 
     provider = get_provider()
-    doc_text = ""
-    if result.sections:
-        chunks: list[str] = []
-        for s in result.sections[:60]:
-            title = str(getattr(s, "title", "") or "").strip()
-            body = str(getattr(s, "text", "") or "").strip()
-            if not body:
-                continue
-            if title:
-                chunks.append(title)
-            chunks.append(body)
-        doc_text = "\n\n".join(chunks).strip()
-    if not doc_text:
-        raw = getattr(result, "raw", None)
-        if raw is not None:
-            doc_text = str(getattr(raw, "textDigest", "") or "")
-    try:
-        rows = provider.generate_testcases(
-            skill_id=skill_id,
-            instruction=str(instruction or "").strip(),
-            api_candidates=items,
-            doc_text=doc_text,
-            max_cases=max_cases,
-        )
-    except Exception:
-        rows = []
+    rows = []
+    if provider.is_configured:
+        doc_text = ""
+        if result.sections:
+            chunks: list[str] = []
+            for s in result.sections[:60]:
+                title = str(getattr(s, "title", "") or "").strip()
+                body = str(getattr(s, "text", "") or "").strip()
+                if not body:
+                    continue
+                if title:
+                    chunks.append(title)
+                chunks.append(body)
+            doc_text = "\n\n".join(chunks).strip()
+        if not doc_text:
+            raw = getattr(result, "raw", None)
+            if raw is not None:
+                doc_text = str(getattr(raw, "textDigest", "") or "")
+        try:
+            rows = provider.generate_testcases(
+                skill_id=skill_id,
+                instruction=str(instruction or "").strip(),
+                api_candidates=items,
+                doc_text=doc_text,
+                max_cases=max_cases,
+            )
+        except Exception:
+            rows = []
 
     if rows:
         normalized: list[GeneratedTestCaseRow] = []
@@ -865,8 +867,12 @@ def generate_testcase_rows(
     return _apply_login_dependency(_heuristic_rows(items)[: max(1, max_cases)])
 
 
-def rows_to_csv_dicts(rows: list[GeneratedTestCaseRow]) -> list[dict[str, str]]:
+def rows_to_csv_dicts(rows: list[GeneratedTestCaseRow], *, base_url: str = "") -> list[dict[str, str]]:
     out: list[dict[str, str]] = []
+    base_url = str(base_url or "").strip()
+    if base_url and base_url.endswith("/"):
+        base_url = base_url[:-1]
+
     for r in rows:
         api_headers = _coerce_json_obj(r.apiHeaders)
         api_params = _coerce_json_obj(r.apiParams)
@@ -880,13 +886,20 @@ def rows_to_csv_dicts(rows: list[GeneratedTestCaseRow]) -> list[dict[str, str]]:
         if not expected_result:
             expected_result = "{}"
         expected_status_code = _coerce_status_code(r.expected_status_code, default=200)
+
+        url = _normalize_url(r.apiUrl)
+        if base_url:
+            if not url.startswith("/"):
+                url = f"/{url}"
+            url = f"{base_url}{url}"
+
         out.append(
             {
                 "test_case_id": str(r.test_case_id or ""),
                 "feature": _normalize_feature(r.feature),
                 "title": str(r.title or "")[:100],
                 "apiMethod": _normalize_method(r.apiMethod),
-                "apiUrl": _normalize_url(r.apiUrl),
+                "apiUrl": url,
                 "apiHeaders": json.dumps(api_headers or {}, ensure_ascii=False),
                 "apiParams": json.dumps(api_params or {}, ensure_ascii=False),
                 "expected_status_code": str(expected_status_code),

@@ -38,11 +38,45 @@ class _K6State(TypedDict, total=False):
 
 def _strip_code_fences(text: str) -> str:
     t = (text or "").strip()
-    if not t.startswith("```"):
-        return t
-    t = re.sub(r"^```[a-zA-Z0-9_-]*\s*", "", t)
-    t = re.sub(r"\s*```$", "", t)
-    return t.strip()
+    # 移除 BOM
+    if t.startswith("\ufeff"):
+        t = t[1:]
+    
+    # 更加健壮的 Markdown 代码块提取
+    # 寻找第一个 ``` 和最后一个 ```
+    match = re.search(r"```(?:[a-zA-Z0-9_-]*)\s*(.*?)```", t, re.DOTALL)
+    if match:
+        return _sanitize_script(match.group(1).strip())
+    
+    return _sanitize_script(t)
+
+
+def _sanitize_script(script_text: str) -> str:
+    """清理脚本中的非法字符，如全角引号、全角空格、零宽空格等"""
+    if not script_text:
+        return ""
+    
+    # 替换常见的全角标点为半角（LLM 有时会混淆）
+    s = script_text
+    replacements = {
+        "\u201c": "\"",  # “
+        "\u201d": "\"",  # ”
+        "\u2018": "'",   # ‘
+        "\u2019": "'",   # ’
+        "\uff0c": ",",   # ，
+        "\uff1a": ":",   # ：
+        "\uff1b": ";",   # ；
+        "\uff08": "(",   # （
+        "\uff09": ")",   # ）
+        "\u3000": " ",   # 全角空格
+        "\u00a0": " ",   # Non-breaking space
+        "\u200b": "",    # Zero-width space
+        "\ufeff": "",    # BOM
+    }
+    for old, new in replacements.items():
+        s = s.replace(old, new)
+    
+    return s.strip()
 
 
 def _is_plausible_k6_script(script_text: str) -> bool:
@@ -94,13 +128,14 @@ def _build_system_prompt() -> str:
             "1) 脚本必须使用：import http from 'k6/http'；并包含 export const options 与 export default function。",
             "2) BASE_URL 使用 __ENV.BASE_URL 优先，其次使用用户给的 baseUrl 作为默认值。",
             "3) VUS 与 DURATION 使用 __ENV.VUS 与 __ENV.DURATION 优先，其次使用用户给的 vus/duration 作为默认值。",
-            "4) 自动为每个接口构造请求：",
+            "4) 核心要求：根据用户指令（instruction）筛选接口。如果指令提到了具体的接口名称、路径、功能或模块，则只生成对应接口的脚本；如果指令未明确指定或包含“全部”字样，则为所有提供的接口构造请求。",
+            "5) 构造请求：",
             "   - GET：把 params 作为 query 参数（如果 params 里包含 path 参数，也要替换到 URL）。",
             "   - POST/PUT/PATCH：默认 JSON body；如果 params 不是对象则按字符串发。",
             "   - headers：合并接口 headers，并允许从 __ENV.TOKEN 注入 Authorization: Bearer ${TOKEN}（如果接口需要鉴权）。",
-            "5) 对每次请求做 check：状态码为 2xx，或者候选的 expectedStatusCode。",
-            "6) 使用 group() 对接口按 feature 或 name 组织；加入 sleep()。",
-            "7) 尽量避免让脚本依赖外部库（只能使用 k6 内置模块）。",
+            "6) 对每次请求做 check：状态码为 2xx，或者候选的 expectedStatusCode。",
+            "7) 使用 group() 对接口按 feature 或 name 组织；加入 sleep()。",
+            "8) 尽量避免让脚本依赖外部库（只能使用 k6 内置模块）。",
         ]
     )
 
@@ -336,4 +371,4 @@ def generate_k6_script_heuristic(
             "",
         ]
     )
-    return script
+    return _sanitize_script(script)

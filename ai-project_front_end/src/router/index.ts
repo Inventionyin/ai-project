@@ -14,6 +14,7 @@ import SuiteDetailPanel from '@/components/figma/ai-testing-platform/SuiteDetail
 import ReportsPanel from '@/components/figma/ai-testing-platform/ReportsPanel.vue'
 import AllureReportPanel from '@/components/figma/ai-testing-platform/AllureReportPanel.vue'
 import TestCaseDetailPanel from '@/components/figma/ai-testing-platform/TestCaseDetailPanel.vue'
+import AiAssistantPanel from '@/components/figma/ai-testing-platform/AiAssistantPanel.vue'
 import AiTestingPlatform16_3 from '@/views/figma/AiTestingPlatform16_3.vue'
 
 function createProjectShellPage(activeAssetChild: string, Content: Parameters<typeof h>[0]) {
@@ -65,6 +66,7 @@ const ProjectRuns = createProjectShellPage('运行记录', RunsPanel)
 const ProjectWorkers = createProjectShellPage('Worker 管理', WorkersPanel)
 const ProjectReports = createProjectShellPage('', ReportsPanel)
 const ProjectAllureReport = createProjectShellPage('', AllureReportPanel)
+const ProjectAiAssistant = createProjectShellPage('AI 助手', AiAssistantPanel)
 
 const router = createRouter({
   history: createWebHistory(),
@@ -146,6 +148,10 @@ const router = createRouter({
     {
       path: '/projects/:projectId/reports/allure',
       component: ProjectAllureReport
+    },
+    {
+      path: '/projects/:projectId/ai-assistant',
+      component: ProjectAiAssistant
     },
     {
       path: '/projects/:projectId/settings/environments',

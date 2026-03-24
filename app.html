@@ -1,0 +1,735 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>智能体工坊 · 接口测试与性能脚本生成器</title>
+    <!-- 引入 js-yaml 用于解析 YAML 格式的 OpenAPI 文档 -->
+    <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
+    <!-- Font Awesome 6 (免费图标库) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <!-- 优雅字体与基础样式重置 -->
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: linear-gradient(145deg, #f6f9fc 0%, #eef2f5 100%);
+            font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            padding: 2rem 1.5rem;
+            color: #1a2c3e;
+        }
+
+        /* 引入 Inter 字体 */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&display=swap');
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        /* 头部区域 */
+        .header {
+            text-align: center;
+            margin-bottom: 2.5rem;
+        }
+        .header h1 {
+            font-size: 2.2rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #1E3C5C, #2B5B8B);
+            background-clip: text;
+            -webkit-background-clip: text;
+            color: transparent;
+            letter-spacing: -0.01em;
+        }
+        .header p {
+            color: #4a627a;
+            margin-top: 0.6rem;
+            font-size: 1rem;
+            max-width: 680px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        /* 双栏布局: 左侧配置区 / 右侧结果区 */
+        .dashboard {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1.8rem;
+        }
+        .config-card {
+            flex: 1.2;
+            min-width: 320px;
+            background: white;
+            border-radius: 1.5rem;
+            box-shadow: 0 12px 28px rgba(0, 0, 0, 0.08);
+            overflow: hidden;
+            transition: all 0.2s;
+        }
+        .result-card {
+            flex: 1.8;
+            min-width: 480px;
+            background: white;
+            border-radius: 1.5rem;
+            box-shadow: 0 12px 28px rgba(0, 0, 0, 0.08);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .card-header {
+            padding: 1.2rem 1.8rem;
+            border-bottom: 1px solid #e9edf2;
+            background: #fefefe;
+            font-weight: 600;
+            font-size: 1.1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .card-header i {
+            color: #2c7da0;
+            font-size: 1.2rem;
+        }
+        .card-body {
+            padding: 1.5rem 1.8rem;
+        }
+
+        /* 表单组件 */
+        .upload-area {
+            margin-bottom: 1.6rem;
+        }
+        .file-label {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            background: #f0f4f9;
+            padding: 0.7rem 1rem;
+            border-radius: 1rem;
+            cursor: pointer;
+            border: 1px solid #dce3ec;
+            transition: 0.2s;
+            font-weight: 500;
+        }
+        .file-label:hover {
+            background: #e6edf4;
+            border-color: #b9c4d4;
+        }
+        .file-label i {
+            font-size: 1.1rem;
+            color: #2c7da0;
+        }
+        input[type="file"] {
+            display: none;
+        }
+        .doc-textarea {
+            width: 100%;
+            border: 1px solid #dce3ec;
+            border-radius: 1rem;
+            padding: 1rem;
+            font-family: 'Monaco', 'Menlo', 'Cascadia Code', monospace;
+            font-size: 0.85rem;
+            resize: vertical;
+            background: #fefefe;
+            transition: 0.2s;
+        }
+        .doc-textarea:focus {
+            outline: none;
+            border-color: #2c7da0;
+            box-shadow: 0 0 0 3px rgba(44,125,160,0.1);
+        }
+        .helper-buttons {
+            display: flex;
+            justify-content: flex-end;
+            gap: 0.8rem;
+            margin-top: 0.6rem;
+        }
+        .btn-icon {
+            background: none;
+            border: none;
+            font-size: 0.8rem;
+            color: #4a627a;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
+            padding: 0.3rem 0.8rem;
+            border-radius: 2rem;
+            transition: 0.2s;
+        }
+        .btn-icon:hover {
+            background: #eef2f7;
+            color: #1e3c5c;
+        }
+        .agent-selector {
+            margin: 1.8rem 0 1.2rem 0;
+        }
+        .agent-options {
+            display: flex;
+            gap: 1.2rem;
+            margin-top: 0.6rem;
+            flex-wrap: wrap;
+        }
+        .agent-card {
+            flex: 1;
+            border: 1.5px solid #e2e8f0;
+            border-radius: 1rem;
+            padding: 0.9rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            background: #fafcff;
+            text-align: center;
+        }
+        .agent-card.selected {
+            border-color: #2c7da0;
+            background: #eef6fc;
+            box-shadow: 0 4px 12px rgba(44,125,160,0.12);
+        }
+        .agent-card i {
+            font-size: 1.5rem;
+            color: #2c7da0;
+            margin-bottom: 0.3rem;
+            display: block;
+        }
+        .agent-card h4 {
+            font-weight: 600;
+            margin-bottom: 0.2rem;
+        }
+        .agent-card p {
+            font-size: 0.75rem;
+            color: #5e6f8d;
+        }
+        /* 动态参数区域 */
+        .params-area {
+            background: #f8fafd;
+            border-radius: 1rem;
+            padding: 1rem;
+            margin: 1rem 0 1.5rem;
+            border: 1px solid #e9edf2;
+        }
+        .param-row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 0.8rem;
+        }
+        .param-row label {
+            width: 110px;
+            font-weight: 500;
+            font-size: 0.85rem;
+        }
+        .param-row input, .param-row select {
+            flex: 1;
+            padding: 0.5rem 0.8rem;
+            border-radius: 0.8rem;
+            border: 1px solid #cbd5e1;
+            background: white;
+        }
+        .generate-btn {
+            width: 100%;
+            background: #1e3c5c;
+            border: none;
+            padding: 0.9rem;
+            border-radius: 2rem;
+            font-weight: 700;
+            font-size: 1rem;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            cursor: pointer;
+            transition: 0.2s;
+            margin-top: 0.5rem;
+        }
+        .generate-btn:hover {
+            background: #0f2b44;
+            transform: translateY(-1px);
+        }
+        .generate-btn:disabled {
+            background: #9fb0c2;
+            cursor: not-allowed;
+            transform: none;
+        }
+        /* 结果区域 */
+        .result-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+        .action-buttons {
+            display: flex;
+            gap: 0.8rem;
+        }
+        .action-btn {
+            background: #f1f5f9;
+            border: none;
+            padding: 0.4rem 0.9rem;
+            border-radius: 2rem;
+            font-size: 0.8rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+        .action-btn:hover {
+            background: #e2e8f0;
+        }
+        pre {
+            background: #0f172a;
+            color: #e2e8f0;
+            padding: 1.2rem;
+            border-radius: 1rem;
+            overflow-x: auto;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 0.8rem;
+            line-height: 1.5;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            max-height: 520px;
+            overflow-y: auto;
+        }
+        .loading-spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .info-badge {
+            background: #eef2ff;
+            border-radius: 1rem;
+            padding: 0.3rem 0.8rem;
+            font-size: 0.7rem;
+            color: #1e4a76;
+        }
+        .footer-note {
+            margin-top: 2rem;
+            text-align: center;
+            font-size: 0.8rem;
+            color: #6c86a3;
+            border-top: 1px solid #dce5ef;
+            padding-top: 1.5rem;
+        }
+        @media (max-width: 780px) {
+            .dashboard { flex-direction: column; }
+            .result-card { min-width: auto; }
+            .card-body { padding: 1rem; }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <h1><i class="fas fa-robot"></i> 双智能体工坊</h1>
+        <p>基于接口文档（OpenAPI / Swagger）自动生成专业的接口测试用例 或 性能测试脚本。<br>上传文档，选择智能体，一键生成，高效赋能质量工程。</p>
+    </div>
+
+    <div class="dashboard">
+        <!-- 左侧配置面板 -->
+        <div class="config-card">
+            <div class="card-header">
+                <i class="fas fa-sliders-h"></i> 生成配置
+            </div>
+            <div class="card-body">
+                <!-- 文档输入区 -->
+                <div class="upload-area">
+                    <label class="file-label" for="apiFile">
+                        <i class="fas fa-cloud-upload-alt"></i> 上传 OpenAPI 文件 (JSON / YAML)
+                    </label>
+                    <input type="file" id="apiFile" accept=".json,.yaml,.yml,application/json,application/yaml">
+                    <textarea id="apiDocInput" rows="8" class="doc-textarea" placeholder="粘贴接口文档内容（支持 OpenAPI JSON 或 YAML 格式）..."></textarea>
+                    <div class="helper-buttons">
+                        <button id="loadExampleBtn" class="btn-icon"><i class="fas fa-code-branch"></i> 加载示例(Petstore)</button>
+                        <button id="clearDocBtn" class="btn-icon"><i class="fas fa-eraser"></i> 清空</button>
+                    </div>
+                    <div id="docStatus" class="info-badge" style="margin-top: 8px; display: inline-block;"><i class="fas fa-info-circle"></i> 未解析文档</div>
+                </div>
+
+                <!-- 智能体选择区 -->
+                <div class="agent-selector">
+                    <label style="font-weight: 600;"><i class="fas fa-brain"></i> 选择智能体</label>
+                    <div class="agent-options" id="agentOptions">
+                        <div class="agent-card" data-agent="testcase">
+                            <i class="fas fa-vial"></i>
+                            <h4>测试用例智能体</h4>
+                            <p>生成接口测试用例 (pytest + requests)</p>
+                        </div>
+                        <div class="agent-card" data-agent="perf">
+                            <i class="fas fa-tachometer-alt"></i>
+                            <h4>性能脚本智能体</h4>
+                            <p>生成 Locust 性能压测脚本</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 动态参数面板 (根据智能体变化) -->
+                <div id="dynamicParams" class="params-area">
+                    <!-- 由js动态渲染 -->
+                </div>
+
+                <!-- 生成按钮 -->
+                <button id="generateBtn" class="generate-btn"><i class="fas fa-cogs"></i> 立即生成</button>
+            </div>
+        </div>
+
+        <!-- 右侧结果面板 -->
+        <div class="result-card">
+            <div class="card-header">
+                <i class="fas fa-file-alt"></i> 生成结果
+                <span style="flex:1"></span>
+                <span id="resultAgentBadge" class="info-badge">未生成</span>
+            </div>
+            <div class="card-body" style="flex:1; display: flex; flex-direction: column;">
+                <div class="result-header">
+                    <div></div>
+                    <div class="action-buttons">
+                        <button id="copyBtn" class="action-btn" disabled><i class="far fa-copy"></i> 复制</button>
+                        <button id="downloadBtn" class="action-btn" disabled><i class="fas fa-download"></i> 下载文件</button>
+                    </div>
+                </div>
+                <div id="resultContainer" style="background: #0f172a; border-radius: 1rem; overflow: auto;">
+                    <pre id="resultPre" style="margin:0; min-height: 300px;">✨ 等待生成指令...\n请配置接口文档并点击「立即生成」</pre>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="footer-note">
+        <i class="fas fa-lightbulb"></i> 说明：当前为完整前端演示，内建智能体仿真逻辑（基于OpenAPI解析生成真实感测试脚本）。实际对接后端时，只需修改 generateWithBackend 函数即可。
+    </div>
+</div>
+
+<script>
+    // ----------------------------- 全局状态 -------------------------
+    let currentAgent = "testcase";   // 'testcase' or 'perf'
+    let currentGeneratedText = "";
+    let currentApiSpecObj = null;     // 存储解析后的 openapi 对象
+    let currentApiList = [];           // 提取的接口列表 { path, method, summary }
+
+    // DOM 元素
+    const apiDocInput = document.getElementById('apiDocInput');
+    const apiFileInput = document.getElementById('apiFile');
+    const loadExampleBtn = document.getElementById('loadExampleBtn');
+    const clearDocBtn = document.getElementById('clearDocBtn');
+    const agentCards = document.querySelectorAll('.agent-card');
+    const generateBtn = document.getElementById('generateBtn');
+    const copyBtn = document.getElementById('copyBtn');
+    const downloadBtn = document.getElementById('downloadBtn');
+    const resultPre = document.getElementById('resultPre');
+    const docStatusSpan = document.getElementById('docStatus');
+    const resultAgentBadge = document.getElementById('resultAgentBadge');
+    const dynamicParamsDiv = document.getElementById('dynamicParams');
+
+    // 参数值 (性能专用)
+    let perfUsers = 50;
+    let perfSpawnRate = 10;
+    let perfRunTime = 60;
+    let testFramework = "pytest";  // 测试用例框架选项
+
+    // 提取OpenAPI中的接口列表 (支持json/yaml)
+    function parseAndExtractApis(docContent) {
+        try {
+            let parsed = null;
+            // 尝试 JSON 解析
+            try {
+                parsed = JSON.parse(docContent);
+            } catch(e) {
+                // 尝试 YAML 解析
+                parsed = jsyaml.load(docContent);
+            }
+            if (!parsed) throw new Error("文档格式无效");
+            // 简单校验 openapi 或 swagger 字段
+            if (!parsed.openapi && !parsed.swagger && !parsed.paths) {
+                throw new Error("文档不是有效的 OpenAPI/Swagger 格式，缺少 paths 字段");
+            }
+            const paths = parsed.paths || {};
+            const apiList = [];
+            for (const [path, methods] of Object.entries(paths)) {
+                if (typeof methods === 'object') {
+                    for (const [method, detail] of Object.entries(methods)) {
+                        if (['get', 'post', 'put', 'delete', 'patch', 'head', 'options'].includes(method.toLowerCase())) {
+                            const summary = detail?.summary || detail?.description || `${method.toUpperCase()} ${path}`;
+                            apiList.push({
+                                path,
+                                method: method.toUpperCase(),
+                                summary: summary.length > 80 ? summary.slice(0,80)+'...' : summary,
+                                fullDetail: detail
+                            });
+                        }
+                    }
+                }
+            }
+            if (apiList.length === 0) throw new Error("未检测到任何 API 路径，请检查文档");
+            return { apiList, specObj: parsed };
+        } catch (err) {
+            console.warn(err);
+            return { apiList: [], specObj: null, error: err.message };
+        }
+    }
+
+    // 更新文档状态显示和全局对象
+    function updateDocStatus() {
+        const content = apiDocInput.value.trim();
+        if (!content) {
+            docStatusSpan.innerHTML = `<i class="fas fa-exclamation-triangle"></i> 文档内容为空`;
+            currentApiList = [];
+            currentApiSpecObj = null;
+            return;
+        }
+        const result = parseAndExtractApis(content);
+        if (result.error || result.apiList.length === 0) {
+            docStatusSpan.innerHTML = `<i class="fas fa-times-circle"></i> 解析失败: ${result.error || '无有效API'}`;
+            currentApiList = [];
+            currentApiSpecObj = null;
+        } else {
+            currentApiList = result.apiList;
+            currentApiSpecObj = result.specObj;
+            docStatusSpan.innerHTML = `<i class="fas fa-check-circle"></i> 解析成功 | 发现 ${currentApiList.length} 个接口`;
+        }
+    }
+
+    // 动态渲染参数面板 (根据智能体)
+    function renderParamsPanel() {
+        if (currentAgent === 'testcase') {
+            dynamicParamsDiv.innerHTML = `
+                <div class="param-row">
+                    <label><i class="fas fa-code"></i> 测试框架</label>
+                    <select id="testFrameworkSelect">
+                        <option value="pytest">pytest + requests</option>
+                        <option value="unittest">unittest + requests</option>
+                    </select>
+                </div>
+                <div class="param-row">
+                    <label><i class="fas fa-info-circle"></i> 断言风格</label>
+                    <span style="font-size:0.8rem; color:#4b6b8f;">自动根据响应断言状态码 & 结构</span>
+                </div>
+            `;
+            const selectEl = document.getElementById('testFrameworkSelect');
+            if(selectEl) selectEl.value = testFramework;
+            if(selectEl) selectEl.addEventListener('change', (e) => { testFramework = e.target.value; });
+        } else {
+            dynamicParamsDiv.innerHTML = `
+                <div class="param-row">
+                    <label><i class="fas fa-users"></i> 并发用户数</label>
+                    <input type="number" id="perfUsers" value="${perfUsers}" min="1" step="1">
+                </div>
+                <div class="param-row">
+                    <label><i class="fas fa-chart-line"></i>  spawn 速率</label>
+                    <input type="number" id="perfSpawnRate" value="${perfSpawnRate}" min="1" step="1">
+                </div>
+                <div class="param-row">
+                    <label><i class="fas fa-hourglass-half"></i> 运行时间(秒)</label>
+                    <input type="number" id="perfRunTime" value="${perfRunTime}" min="5" step="5">
+                </div>
+            `;
+            const usersInp = document.getElementById('perfUsers');
+            const rateInp = document.getElementById('perfSpawnRate');
+            const timeInp = document.getElementById('perfRunTime');
+            if(usersInp) usersInp.addEventListener('change', (e) => { perfUsers = parseInt(e.target.value) || 50; });
+            if(rateInp) rateInp.addEventListener('change', (e) => { perfSpawnRate = parseInt(e.target.value) || 10; });
+            if(timeInp) timeInp.addEventListener('change', (e) => { perfRunTime = parseInt(e.target.value) || 60; });
+        }
+    }
+
+    // ---------- 智能体核心生成函数 (前端模拟，基于提取的接口列表生成真实内容) ----------
+    function generateTestCases(apiList, framework) {
+        if(!apiList.length) return "# 没有检测到有效接口，无法生成测试用例\n# 请提供正确的 OpenAPI 文档";
+        let imports = (framework === 'pytest') ? 
+            "import pytest\nimport requests\n\n" : 
+            "import unittest\nimport requests\n\n";
+        let testClass = "";
+        if(framework === 'unittest') {
+            testClass = "class APITestCase(unittest.TestCase):\n\n";
+        }
+        let functions = "";
+        apiList.forEach((api, idx) => {
+            const funcName = `test_${api.method.toLowerCase()}_${api.path.replace(/[\/\{\}-]/g, '_')}`.slice(0, 60);
+            const urlPlaceholder = `"https://api.example.com${api.path}"`;
+            const method = api.method.toLowerCase();
+            let codeBlock = "";
+            if(framework === 'pytest') {
+                codeBlock = `def ${funcName}():\n    """${api.summary}"""\n    url = ${urlPlaceholder}\n    resp = requests.${method}(url)\n    assert resp.status_code in [200, 201, 204], f"Unexpected status {resp.status_code}"\n    # 可根据文档增加 json schema 校验\n    print(f"✅ {api.method} ${api.path} 测试通过")\n\n`;
+            } else {
+                codeBlock = `    def test_${funcName}(self):\n        """${api.summary}"""\n        url = ${urlPlaceholder}\n        resp = requests.${method}(url)\n        self.assertIn(resp.status_code, [200,201,204], f"状态码异常: {resp.status_code}")\n\n`;
+            }
+            functions += codeBlock;
+        });
+        let footer = (framework === 'pytest') ? "\nif __name__ == '__main__':\n    pytest.main([__file__, '-v'])" : "\nif __name__ == '__main__':\n    unittest.main()";
+        return imports + testClass + functions + footer;
+    }
+
+    function generatePerfScript(apiList, users, spawnRate, runTime) {
+        if(!apiList.length) return "# 未检测到接口，无法生成性能脚本";
+        let tasks = "";
+        apiList.forEach(api => {
+            const method = api.method.toLowerCase();
+            const urlPath = api.path;
+            const name = `${method}_${urlPath.replace(/\//g, '_')}`.slice(0, 40);
+            tasks += `    @task\n    def ${name}(self):\n        self.client.${method}("${urlPath}", name="${method.uppercase()} ${urlPath}")\n\n`;
+        });
+        const locustScript = `from locust import HttpUser, task, between\nimport random\n\nclass APIUser(HttpUser):
+    wait_time = between(1, 2.5)
+    host = "https://api.example.com"
+    
+${tasks}
+    def on_start(self):
+        """初始化逻辑，可在此添加认证"""
+        pass
+`;
+        const header = `# Locust 性能脚本 - 并发用户: ${users}, 孵化速率: ${spawnRate}/s, 运行时间: ${runTime}s\n# 启动命令: locust -f this_file.py --headless -u ${users} -r ${spawnRate} --run-time ${runTime}s\n\n`;
+        return header + locustScript;
+    }
+
+    async function runGeneration() {
+        const docContent = apiDocInput.value.trim();
+        if (!docContent) {
+            resultPre.innerText = "❌ 请先提供接口文档（上传或粘贴）";
+            return;
+        }
+        // 重新解析确保最新
+        const parseRes = parseAndExtractApis(docContent);
+        if (parseRes.error || parseRes.apiList.length === 0) {
+            resultPre.innerText = `文档解析失败: ${parseRes.error || "未找到有效API"}\n请提供正确的 OpenAPI JSON/YAML 格式。`;
+            return;
+        }
+        const apiList = parseRes.apiList;
+        // 显示生成中
+        generateBtn.disabled = true;
+        generateBtn.innerHTML = '<span class="loading-spinner"></span> 智能体生成中...';
+        resultPre.innerText = "🤖 智能体正在分析接口文档并生成内容...";
+        
+        // 模拟异步延迟 (实际可替换为后端调用)
+        await new Promise(resolve => setTimeout(resolve, 800));
+        
+        let generated = "";
+        if (currentAgent === "testcase") {
+            generated = generateTestCases(apiList, testFramework);
+            resultAgentBadge.innerHTML = '<i class="fas fa-vial"></i> 测试用例 (pytest)';
+        } else {
+            generated = generatePerfScript(apiList, perfUsers, perfSpawnRate, perfRunTime);
+            resultAgentBadge.innerHTML = '<i class="fas fa-tachometer-alt"></i> 性能脚本 (Locust)';
+        }
+        currentGeneratedText = generated;
+        resultPre.innerText = generated;
+        
+        generateBtn.disabled = false;
+        generateBtn.innerHTML = '<i class="fas fa-cogs"></i> 立即生成';
+        copyBtn.disabled = false;
+        downloadBtn.disabled = false;
+    }
+
+    // 复制功能
+    function copyToClipboard() {
+        if (!currentGeneratedText) return;
+        navigator.clipboard.writeText(currentGeneratedText).then(() => {
+            const original = copyBtn.innerHTML;
+            copyBtn.innerHTML = '<i class="fas fa-check"></i> 已复制';
+            setTimeout(() => copyBtn.innerHTML = original, 1500);
+        }).catch(() => alert("复制失败，可手动选择"));
+    }
+
+    // 下载功能
+    function downloadFile() {
+        if (!currentGeneratedText) return;
+        let ext = ".py";
+        let mime = "text/x-python";
+        let filename = currentAgent === "testcase" ? "test_api_cases.py" : "locustfile.py";
+        const blob = new Blob([currentGeneratedText], {type: mime});
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = filename;
+        link.click();
+        URL.revokeObjectURL(link.href);
+    }
+
+    // 加载示例 (PetStore简化版 OpenAPI JSON)
+    function loadExample() {
+        const exampleDoc = {
+            "openapi": "3.0.0",
+            "info": {"title": "Petstore API", "version": "1.0.0"},
+            "paths": {
+                "/pets": {
+                    "get": {"summary": "列出所有宠物", "description": "返回宠物列表"},
+                    "post": {"summary": "创建新宠物", "description": "添加宠物"}
+                },
+                "/pets/{petId}": {
+                    "get": {"summary": "获取单个宠物信息"},
+                    "delete": {"summary": "删除宠物"}
+                }
+            }
+        };
+        apiDocInput.value = JSON.stringify(exampleDoc, null, 2);
+        updateDocStatus();
+    }
+
+    // 清空文档
+    function clearDoc() {
+        apiDocInput.value = "";
+        updateDocStatus();
+        currentGeneratedText = "";
+        resultPre.innerText = "✨ 已清空文档，等待新文档并重新生成";
+        copyBtn.disabled = true;
+        downloadBtn.disabled = true;
+        resultAgentBadge.innerHTML = "未生成";
+    }
+
+    // 智能体选择UI
+    function setAgent(agentType) {
+        currentAgent = agentType;
+        agentCards.forEach(card => {
+            const agentVal = card.getAttribute('data-agent');
+            if (agentVal === agentType) card.classList.add('selected');
+            else card.classList.remove('selected');
+        });
+        renderParamsPanel();
+    }
+
+    // 事件绑定与初始化
+    function bindEvents() {
+        agentCards.forEach(card => {
+            card.addEventListener('click', () => {
+                const agent = card.getAttribute('data-agent');
+                setAgent(agent);
+            });
+        });
+        generateBtn.addEventListener('click', runGeneration);
+        copyBtn.addEventListener('click', copyToClipboard);
+        downloadBtn.addEventListener('click', downloadFile);
+        loadExampleBtn.addEventListener('click', () => { loadExample(); });
+        clearDocBtn.addEventListener('click', () => { clearDoc(); });
+        apiDocInput.addEventListener('input', updateDocStatus);
+        apiFileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+                apiDocInput.value = ev.target.result;
+                updateDocStatus();
+            };
+            reader.readAsText(file);
+        });
+    }
+
+    // 初始化界面
+    function init() {
+        setAgent('testcase');
+        bindEvents();
+        // 默认展示一个简单的示例但不自动填充，为了让用户知道可以点击加载示例
+        updateDocStatus();
+        renderParamsPanel();
+    }
+    init();
+</script>
+</body>
+</html>

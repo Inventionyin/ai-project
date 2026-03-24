@@ -363,6 +363,7 @@ export async function generateDocCsv(payload: {
   caseGenMode?: 'OFF' | 'SUGGEST' | 'AUTO'
   skillId?: string
   maxCases?: number
+  baseUrl?: string
 }) {
   if (!payload?.file) throw new Error('请选择文件')
   const form = new FormData()
@@ -375,6 +376,9 @@ export async function generateDocCsv(payload: {
   form.append('skillId', String(payload.skillId || '').trim())
   if (typeof payload.maxCases === 'number' && Number.isFinite(payload.maxCases)) {
     form.append('maxCases', String(Math.max(1, Math.floor(payload.maxCases))))
+  }
+  if (payload.baseUrl) {
+    form.append('baseUrl', payload.baseUrl)
   }
   form.append('file', payload.file, payload.file.name)
   return requestFormData<{ fileName: string; csvText: string; itemCount: number; status: string }>('/api/doc-ingest/generate-csv', {
@@ -396,6 +400,7 @@ export async function generateDocAndImport(payload: {
   caseGenMode?: 'OFF' | 'SUGGEST' | 'AUTO'
   skillId?: string
   maxCases?: number
+  baseUrl?: string
 }) {
   const pid = String(payload.projectId || '').trim()
   if (!pid) throw new Error('项目 ID 不能为空')
@@ -413,8 +418,56 @@ export async function generateDocAndImport(payload: {
   if (Array.isArray(payload.candidateIds)) {
     form.append('candidateIds', JSON.stringify(payload.candidateIds))
   }
+  if (payload.baseUrl) {
+    form.append('baseUrl', payload.baseUrl)
+  }
   form.append('file', payload.file, payload.file.name)
   return requestFormData<TestCaseImportData>('/api/doc-ingest/generate-import', {
+    method: 'POST',
+    headers: {
+      Authorization: resolveAuthHeader()
+    },
+    body: form
+  })
+}
+
+export async function generateK6(payload: {
+  file: File
+  llmMode?: 'OFF' | 'SUGGEST' | 'AUTO'
+  k6GenMode?: 'LLM' | 'HEURISTIC'
+  baseUrl?: string
+  vus?: number
+  duration?: string
+  candidateIds?: string[]
+  instruction?: string
+}) {
+  if (!payload?.file) throw new Error('请选择文件')
+  const form = new FormData()
+  form.append('llmMode', payload.llmMode || 'OFF')
+  form.append('k6GenMode', payload.k6GenMode || 'LLM')
+  form.append('baseUrl', String(payload.baseUrl || '').trim())
+  form.append('vus', String(payload.vus || 10))
+  form.append('duration', String(payload.duration || '30s'))
+  form.append('instruction', String(payload.instruction || '').trim())
+  if (Array.isArray(payload.candidateIds)) {
+    form.append('candidateIds', JSON.stringify(payload.candidateIds))
+  }
+  form.append('file', payload.file, payload.file.name)
+  return requestFormData<{ fileName: string; scriptText: string; status: string; llm?: any }>('/api/doc-ingest/generate-k6', {
+    method: 'POST',
+    headers: {
+      Authorization: resolveAuthHeader()
+    },
+    body: form
+  })
+}
+
+export async function executeK6(scriptText: string, vus?: number, duration?: string) {
+  const form = new FormData()
+  form.append('scriptText', scriptText)
+  if (vus) form.append('vus', String(vus))
+  if (duration) form.append('duration', duration)
+  return requestFormData<{ stdout: string; stderr: string; exitCode: number; status: string }>('/api/doc-ingest/execute-k6', {
     method: 'POST',
     headers: {
       Authorization: resolveAuthHeader()

@@ -34,6 +34,13 @@ class Settings(BaseSettings):
     runner_allure_command: str = "allure"
     runner_allure_runs_root: str = ""
 
+    # LLM Configuration
+    llm_provider: str = "deepseek"
+    llm_api_key: str = ""
+    llm_base_url: str = "https://api.deepseek.com"
+    llm_model: str = "deepseek-chat"
+    llm_timeout_seconds: float = 60.0
+
 
 @lru_cache
 def get_settings() -> Settings:
