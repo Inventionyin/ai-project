@@ -12,10 +12,22 @@ if not exist "%ROOT%ai-project_front_end\" (
   exit /b 1
 )
 
-start "Backend - AI Project" cmd /k "cd /d ""%ROOT%ai-project-back-end"" && if exist "".venv\Scripts\activate.bat"" (call "".venv\Scripts\activate.bat"") && (py -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 || python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000)"
-start "Frontend - AI Project" cmd /k "cd /d ""%ROOT%ai-project_front_end"" && npm run dev"
+echo.
+echo ==========================================================
+echo [System] Starting AI Project - Development Mode
+echo [System] All logs (Backend, Frontend, k6) will show below.
+echo [System] Backend:  http://127.0.0.1:8000
+echo [System] Frontend: http://127.0.0.1:5173
+echo ==========================================================
+echo.
 
-echo Backend and frontend windows started.
-echo Backend: http://127.0.0.1:8000
-echo Frontend: http://127.0.0.1:5173
+echo [Backend] Starting background process...
+:: 使用 start /b 在当前窗口后台运行后端
+start /b cmd /c "cd /d ""%ROOT%ai-project-back-end"" && if exist "".venv\Scripts\activate.bat"" (call "".venv\Scripts\activate.bat"") && (py -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 --log-level info || python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 --log-level info)"
+
+echo [Frontend] Starting frontend in foreground...
+:: 前端在当前窗口前台运行，其日志将直接打印到此处
+cd /d "%ROOT%ai-project_front_end"
+npm run dev
+
 endlocal

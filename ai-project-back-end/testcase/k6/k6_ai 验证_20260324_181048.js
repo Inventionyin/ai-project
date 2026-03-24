@@ -2,7 +2,7 @@ import http from 'k6/http';
 import { check, group, sleep } from 'k6';
 
 const BASE_URL = __ENV.BASE_URL || 'http://127.0.0.1:8000';
-const VUS = __ENV.VUS || 10;
+const VUS = __ENV.VUS ? parseInt(__ENV.VUS) : 10;
 const DURATION = __ENV.DURATION || '60s';
 
 export const options = {
@@ -13,10 +13,10 @@ export const options = {
 let authToken = __ENV.TOKEN || null;
 
 export default function () {
-  group('Authentication', function () {
+  group('Auth', function () {
     const loginPayload = JSON.stringify({
-      username: 'test_user',
-      password: 'test_password',
+      username: 'momo',
+      password: 'ab123456',
     });
 
     const loginHeaders = {
@@ -27,13 +27,12 @@ export default function () {
 
     check(loginRes, {
       'login status is 200': (r) => r.status === 200,
-      'login response code is 0': (r) => r.json().code === 0,
+      'login response code is 0': (r) => r.json('code') === 0,
     });
 
-    if (loginRes.json().data && loginRes.json().data.token) {
-      authToken = loginRes.json().data.token;
-    } else if (loginRes.json().token) {
-      authToken = loginRes.json().token;
+    const token = loginRes.json('data.token');
+    if (token) {
+      authToken = token;
     }
 
     sleep(1);

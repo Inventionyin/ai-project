@@ -86,35 +86,43 @@ def _extract_instruction_keywords(instruction: str | None) -> list[str]:
     if not raw:
         return []
     keywords: list[str] = []
-    if not keywords:
-        # 1. 提取模块/module 后面的内容
-        module_matches = re.findall(r"(?:模块|module)\s*[：:]\s*([^\n;；]+)", raw, flags=re.IGNORECASE)
-        for m in module_matches:
-            keywords.extend(re.split(r"[,，、|/ ]+", m))
     
-    if not keywords:
-        # 2. 提取引号中的内容（如果有“只生成/仅生成”等限制词）
-        quoted = re.findall(r"[“\"'‘]([^”\"'’]{1,32})[”\"'’]", raw)
-        if quoted and re.search(r"(只生成|仅生成|只要|模块|module)", raw):
-            keywords.extend(quoted)
+    # 1. 提取模块/module 后面的内容
+    module_matches = re.findall(r"(?:模块|module)\s*[：:]\s*([^\n;；。!！?？]+)", raw, flags=re.IGNORECASE)
+    for m in module_matches:
+        keywords.extend(re.split(r"[,，、|/ \s]+", m))
+    
+    # 2. 提取引号中的内容（如果有“只生成/仅生成”等限制词）
+    quoted = re.findall(r"[“\"'‘]([^”\"'’]{1,32})[”\"'’]", raw)
+    if quoted and re.search(r"(只生成|仅生成|只要|模块|module|生成)", raw):
+        keywords.extend(quoted)
             
-    if not keywords:
-        # 3. 模式：(生成/输出/导出等) (词) 接口/api
-        pattern_matches = re.findall(r"(?:生成|输出|导出|只要|仅|只)\s*([^\s,，、|/ 接口api]{1,16})(?:接口|api)", raw, flags=re.IGNORECASE)
-        if pattern_matches:
-            keywords.extend(pattern_matches)
+    # 3. 模式：(生成/输出/导出等) (词) 接口/api
+    pattern_matches = re.findall(r"(?:生成|输出|导出|只要|仅|只)\s*([^\s,，、|/ 接口api]{1,16})(?:接口|api)", raw, flags=re.IGNORECASE)
+    if pattern_matches:
+        keywords.extend(pattern_matches)
             
-    if not keywords:
-        # 4. 模式：(词) 接口/api （限制长度避免匹配到整句）
-        api_matches = re.findall(r"([^\s,，、|/ 我要求输出生成导出只要仅]{2,10})(?:接口|api)", raw, flags=re.IGNORECASE)
-        if api_matches:
-            keywords.extend(api_matches)
+    # 4. 模式：(词) 接口/api （限制长度避免匹配到整句）
+    api_matches = re.findall(r"([^\s,，、|/ 我要求输出生成导出只要仅]{2,10})(?:接口|api)", raw, flags=re.IGNORECASE)
+    if api_matches:
+        keywords.extend(api_matches)
             
+    # 5. 提取“只生成/仅生成/只要/生成”等动词后面的具体内容
+    # 特别处理“生成 登录 Logout 测试用例”这种场景
     if not keywords:
-        # 5. 提取“只生成/仅生成/只要”后面的词
-        only_matches = re.findall(r"(?:只生成|仅生成|只要|仅输出)\s*([^\s,，、|/ 接口api]{1,16})", raw, flags=re.IGNORECASE)
-        if only_matches:
-            keywords.extend(only_matches)
+        verb_matches = re.findall(r"(?:生成|只生成|仅生成|只要|仅输出|导出|针对|对于)\s*([^\n;；。!！?？]+)", raw, flags=re.IGNORECASE)
+        for m in verb_matches:
+            # 移除结尾的常见后缀
+            m_cleaned = re.sub(r"(?:测试用例|用例|接口|api|的内容|的所有内容|的全部内容)$", "", m.strip(), flags=re.IGNORECASE).strip()
+            # 进一步移除“模块”和“的”前缀/后缀
+            m_cleaned = re.sub(r"模块的?$", "", m_cleaned).strip()
+            # 如果还有内容，则按分隔符拆分
+            if m_cleaned:
+                parts = re.split(r"[,，、|/ \s]+", m_cleaned)
+                for p in parts:
+                    p = p.strip()
+                    if p:
+                        keywords.append(p)
     
     cleaned: list[str] = []
     seen: set[str] = set()
@@ -123,7 +131,7 @@ def _extract_instruction_keywords(instruction: str | None) -> list[str]:
         if not k2:
             continue
         key = k2.lower()
-        if key in ["全部", "所有", "all", "全部接口", "所有接口"]:
+        if key in ["全部", "所有", "all", "全部接口", "所有接口", "全部内容", "所有内容"]:
             return []
         if key in seen:
             continue

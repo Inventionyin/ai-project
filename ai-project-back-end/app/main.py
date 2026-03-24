@@ -33,6 +33,25 @@ from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
+# Request logging middleware
+async def log_requests(request: Request, call_next):
+    request_id = await get_request_id(request)
+    path = request.url.path
+    if request.query_params:
+        path += f"?{request.query_params}"
+    
+    logger.info(f"[{request_id}] Incoming request: {request.method} {path}")
+    
+    import time
+    start_time = time.time()
+    
+    response = await call_next(request)
+    
+    process_time = (time.time() - start_time) * 1000
+    logger.info(f"[{request_id}] Completed request: {request.method} {path} - Status: {response.status_code} - Time: {process_time:.2f}ms")
+    
+    return response
+
 
 def _run_migrations() -> None:
     alembic_ini = Path(__file__).resolve().parents[1] / "alembic.ini"
@@ -44,6 +63,9 @@ def create_app() -> FastAPI:
     settings = get_settings()
 
     application = FastAPI(title=settings.app_name, debug=settings.debug)
+
+    # Add request logging middleware
+    application.middleware("http")(log_requests)
 
     @application.on_event("startup")
     async def run_startup_migrations() -> None:

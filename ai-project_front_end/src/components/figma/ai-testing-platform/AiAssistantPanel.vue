@@ -244,11 +244,25 @@ function copyResult() {
 
 function downloadResult() {
   if (!resultText.value) return
-  const blob = new Blob([resultText.value], { type: 'text/plain' })
+  
+  const isCase = selectedAgent.value === 'CASE'
+  // 根据不同智能体类型设置正确的 MIME 类型和默认扩展名
+  const mimeType = isCase ? 'text/csv' : 'application/javascript'
+  const defaultExt = isCase ? '.csv' : '.js'
+  
+  let fileName = resultFileName.value
+  if (!fileName) {
+    const timestamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)
+    fileName = isCase ? `api_test_cases_${timestamp}.csv` : `k6_script_${timestamp}.js`
+  } else if (!fileName.includes('.')) {
+    fileName += defaultExt
+  }
+
+  const blob = new Blob([resultText.value], { type: mimeType })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = resultFileName.value
+  a.download = fileName
   a.click()
   URL.revokeObjectURL(url)
 }

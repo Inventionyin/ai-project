@@ -134,7 +134,7 @@ def _build_system_prompt() -> str:
             "   - POST/PUT/PATCH：默认 JSON body，并自动添加 headers: {'Content-Type': 'application/json'}。",
             "   - headers：合并接口 headers。",
             "6) 处理接口依赖与参数化：",
-            "   - 识别登录/认证接口（如 /login, /token 等），从其响应中提取 token（通常在 res.json().token 或 res.json().data.token）。",
+            "   - 识别登录/认证接口（如 /login, /token 等），从其响应中提取 token（通常在 res.json().data.accessToken 或 res.json().accessToken，其次考虑 res.json().data.token 或 res.json().token）。",
             "   - 在后续需要鉴权的请求中，自动添加 headers: {'Authorization': `Bearer ${token}`}，使用提取到的变量。",
             "   - 如果无法提取到动态 token，则允许从 __ENV.TOKEN 注入。",
             "7) 对每次请求做 check：状态码为 2xx，或者候选的 expectedStatusCode。",
@@ -308,7 +308,7 @@ def generate_k6_script_heuristic(
         if is_login:
             case_lines.append("    if (res.status >= 200 && res.status < 300) {")
             case_lines.append("      const body = res.json();")
-            case_lines.append("      const newToken = body.token || (body.data && body.data.token) || body.access_token || (body.data && body.data.access_token);")
+            case_lines.append("      const newToken = (body.data && (body.data.accessToken || body.data.token || body.data.access_token)) || body.accessToken || body.token || body.access_token;")
             case_lines.append("      if (newToken) { token = newToken; }")
             case_lines.append("    }")
 

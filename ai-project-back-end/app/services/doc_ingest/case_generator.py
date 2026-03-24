@@ -613,12 +613,13 @@ def _maybe_add_exports(post: dict, *, method: str, url: str, title: str, expecte
     t = str(title or "")
     er = str(expected_result or "").lower()
     if "/login" in u or "/auth/login" in u or "登录" in t:
-        if "accesstoken" in er:
-            path = "$.data.accessToken"
-        elif "data" in er and "token" in er:
-            path = "$.data.token"
+        if "accesstoken" in er or "accessToken" in er:
+            path = "$.data.accessToken" if "data" in er else "$.accessToken"
+        elif "token" in er:
+            path = "$.data.token" if "data" in er else "$.token"
         else:
-            path = "$.token"
+            # 默认兜底尝试 data.accessToken -> accessToken -> data.token -> token
+            path = "$.data.accessToken"
         post["exports"] = {"token": {"json": path}}
         return post
     if method == "POST" and ("id" in er or '"id"' in er):
