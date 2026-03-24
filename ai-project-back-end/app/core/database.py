@@ -4,12 +4,15 @@ from functools import lru_cache
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import get_settings
+from app.core.db_monitor import setup_db_monitoring
 
 
 @lru_cache
 def get_engine() -> AsyncEngine:
     settings = get_settings()
-    return create_async_engine(settings.database_url, pool_pre_ping=True)
+    engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+    setup_db_monitoring(engine.sync_engine)
+    return engine
 
 
 @lru_cache

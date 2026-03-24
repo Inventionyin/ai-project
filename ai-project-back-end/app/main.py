@@ -1,7 +1,19 @@
-import logging
-from pathlib import Path
+import sys
 import asyncio
 
+# 兼容 Windows 平台的 asyncio 子进程调用 (NotImplementedError 修复)
+# 必须在任何异步操作（如 asyncpg, uvicorn 循环启动）之前设置
+if sys.platform == 'win32':
+    # 强制设置 ProactorEventLoopPolicy
+    try:
+        if not isinstance(asyncio.get_event_loop_policy(), asyncio.WindowsProactorEventLoopPolicy):
+            asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+    except Exception as e:
+        # 如果策略设置失败，通常是因为循环已经运行，但至少我们尝试了
+        print(f"Warning: Failed to set ProactorEventLoopPolicy: {e}")
+
+import logging
+from pathlib import Path
 import asyncpg
 
 from alembic import command

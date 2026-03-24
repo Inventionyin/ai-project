@@ -125,3 +125,5 @@ class K6ScriptGenerateData(BaseSchema):
     scriptText: str
     status: str = Field(min_length=4, max_length=6)
     llm: LlmDemoData | None = None
+    testcaseId: str | None = Field(default=None, max_length=64)
+    testcaseTitle: str | None = Field(default=None, max_length=100)

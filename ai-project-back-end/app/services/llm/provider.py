@@ -11,6 +11,7 @@ from app.core.config import get_settings
 from app.schemas.doc_ingest import ApiCandidate
 from app.schemas.testcase_gen import GeneratedTestCaseRow
 from app.services.llm.skills.api_doc_test_generator import build_system_prompt
+from app.services.llm.skills.api_extractor import build_extractor_system_prompt
 
 
 class LlmProvider:
@@ -18,7 +19,7 @@ class LlmProvider:
     def is_configured(self) -> bool:
         return False
 
-    def enhance(self, items: Iterable[ApiCandidate]) -> list[ApiCandidate]:
+    def enhance(self, items: Iterable[ApiCandidate], *, doc_text: str = "") -> list[ApiCandidate]:
         return list(items)
 
     def chat(
@@ -94,6 +95,34 @@ class OpenAICompatibleProvider(LlmProvider):
     @property
     def is_configured(self) -> bool:
         return bool(self._api_key)
+
+    def enhance(self, items: Iterable[ApiCandidate], *, doc_text: str = "") -> list[ApiCandidate]:
+        if not self._api_key:
+            return list(items)
+        
+        system_prompt = build_extractor_system_prompt()
+        payload = {
+            "apiCandidates": [c.model_dump() for c in items],
+            "docText": (doc_text or "")[:12000]
+        }
+        
+        try:
+            data = self._post_chat_completions(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+                ],
+                temperature=0.1,
+                max_tokens=None,
+            )
+            content = (((data or {}).get("choices") or [{}])[0].get("message") or {}).get("content")
+            items_raw = _extract_json_array(str(content or ""))
+            out: list[ApiCandidate] = []
+            for it in items_raw:
+                out.append(ApiCandidate.model_validate(it))
+            return out
+        except Exception:
+            return list(items)
 
     def _post_chat_completions(
         self,

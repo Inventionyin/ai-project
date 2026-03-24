@@ -131,11 +131,15 @@ def _build_system_prompt() -> str:
             "4) 核心要求：根据用户指令（instruction）筛选接口。如果指令提到了具体的接口名称、路径、功能或模块，则只生成对应接口的脚本；如果指令未明确指定或包含“全部”字样，则为所有提供的接口构造请求。",
             "5) 构造请求：",
             "   - GET：把 params 作为 query 参数（如果 params 里包含 path 参数，也要替换到 URL）。",
-            "   - POST/PUT/PATCH：默认 JSON body；如果 params 不是对象则按字符串发。",
-            "   - headers：合并接口 headers，并允许从 __ENV.TOKEN 注入 Authorization: Bearer ${TOKEN}（如果接口需要鉴权）。",
-            "6) 对每次请求做 check：状态码为 2xx，或者候选的 expectedStatusCode。",
-            "7) 使用 group() 对接口按 feature 或 name 组织；加入 sleep()。",
-            "8) 尽量避免让脚本依赖外部库（只能使用 k6 内置模块）。",
+            "   - POST/PUT/PATCH：默认 JSON body，并自动添加 headers: {'Content-Type': 'application/json'}。",
+            "   - headers：合并接口 headers。",
+            "6) 处理接口依赖与参数化：",
+            "   - 识别登录/认证接口（如 /login, /token 等），从其响应中提取 token（通常在 res.json().token 或 res.json().data.token）。",
+            "   - 在后续需要鉴权的请求中，自动添加 headers: {'Authorization': `Bearer ${token}`}，使用提取到的变量。",
+            "   - 如果无法提取到动态 token，则允许从 __ENV.TOKEN 注入。",
+            "7) 对每次请求做 check：状态码为 2xx，或者候选的 expectedStatusCode。",
+            "8) 使用 group() 对接口按 feature 或 name 组织；加入 sleep()。",
+            "9) 尽量避免让脚本依赖外部库（只能使用 k6 内置模块）。",
         ]
     )
 
@@ -270,37 +274,55 @@ def generate_k6_script_heuristic(
     candidates = [c for c in (api_candidates or []) if (c.method and c.url)]
     candidates = candidates[:20]
     endpoint_cases: list[str] = []
+
+    # 辅助函数：判断是否为登录/认证类接口
+    def _is_login_api(c: ApiCandidate) -> bool:
+        name = (c.name or "").lower()
+        url = (c.url or "").lower()
+        tags = [str(t or "").lower() for t in (c.tags or [])]
+        return any(w in (name + " " + url) for w in ["login", "signin", "auth", "token", "登录"]) or \
+               any(t in {"auth", "login", "token"} for t in tags)
+
     for idx, c in enumerate(candidates, start=1):
         method = str(c.method or "GET").upper()
         url = str(c.url or "/").strip() or "/"
         expected = int(c.expectedStatusCode or 0)
         needs_auth = _infer_needs_auth(c)
+        is_login = _is_login_api(c)
         group_name = (c.feature or c.name or f"api_{idx}").strip()[:60]
         headers_json = json.dumps({k: v for k, v in (c.headers or {}).items() if v is not None}, ensure_ascii=False)
         params_json = json.dumps(c.params or {}, ensure_ascii=False)
-        endpoint_cases.append(
-            "\n".join(
-                [
-                    f"  group({json.dumps(group_name, ensure_ascii=False)}, () => {{",
-                    f"    const method = {json.dumps(method)};",
-                    f"    const pathTemplate = {json.dumps(url)};",
-                    f"    const params = {params_json};",
-                    f"    const baseHeaders = {headers_json};",
-                    f"    const needsAuth = {str(needs_auth).lower()};",
-                    f"    const expectedStatus = {expected if expected else 'null'};",
-                    "    const request = buildRequest({ baseUrl: BASE_URL, method, pathTemplate, params, baseHeaders, needsAuth });",
-                    "    const res = http.request(request.method, request.url, request.body, { headers: request.headers, tags: request.tags });",
-                    "    check(res, {",
-                    "      'status is expected': (r) => {",
-                    "        if (expectedStatus) return r.status === expectedStatus;",
-                    "        return r.status >= 200 && r.status < 300;",
-                    "      },",
-                    "    });",
-                    "    sleep(0.2);",
-                    "  });",
-                ]
-            )
-        )
+        
+        case_lines = [
+            f"  group({json.dumps(group_name, ensure_ascii=False)}, () => {{",
+            f"    const method = {json.dumps(method)};",
+            f"    const pathTemplate = {json.dumps(url)};",
+            f"    const params = {params_json};",
+            f"    const baseHeaders = {headers_json};",
+            f"    const needsAuth = {str(needs_auth).lower()};",
+            f"    const expectedStatus = {expected if expected else 'null'};",
+            "    const request = buildRequest({ baseUrl: BASE_URL, method, pathTemplate, params, baseHeaders, needsAuth, token });",
+            "    const res = http.request(request.method, request.url, request.body, { headers: request.headers, tags: request.tags });",
+        ]
+        
+        if is_login:
+            case_lines.append("    if (res.status >= 200 && res.status < 300) {")
+            case_lines.append("      const body = res.json();")
+            case_lines.append("      const newToken = body.token || (body.data && body.data.token) || body.access_token || (body.data && body.data.access_token);")
+            case_lines.append("      if (newToken) { token = newToken; }")
+            case_lines.append("    }")
+
+        case_lines.extend([
+            "    check(res, {",
+            "      'status is expected': (r) => {",
+            "        if (expectedStatus) return r.status === expectedStatus;",
+            "        return r.status >= 200 && r.status < 300;",
+            "      },",
+            "    });",
+            "    sleep(0.2);",
+            "  });",
+        ])
+        endpoint_cases.append("\n".join(case_lines))
 
     script = "\n".join(
         [
@@ -343,16 +365,16 @@ def generate_k6_script_heuristic(
             "  return pairs.length ? `?${pairs.join('&')}` : '';",
             "}",
             "",
-            "function buildRequest({ baseUrl, method, pathTemplate, params, baseHeaders, needsAuth }) {",
+            "function buildRequest({ baseUrl, method, pathTemplate, params, baseHeaders, needsAuth, token }) {",
             "  const { path, used } = applyPathParams(pathTemplate, params || {});",
             "  const upper = String(method || 'GET').toUpperCase();",
             "  const qs = upper === 'GET' || upper === 'DELETE' ? buildQuery(params || {}, used) : '';",
             "  const url = `${baseUrl}${path}${qs}`;",
             "  const headers = Object.assign({}, baseHeaders || {});",
             "  if (needsAuth) {",
-            "    const token = __ENV.TOKEN || '';",
-            "    if (token && !headers.Authorization && !headers.authorization) {",
-            "      headers.Authorization = `Bearer ${token}`;",
+            "    const finalToken = token || __ENV.TOKEN || '';",
+            "    if (finalToken && !headers.Authorization && !headers.authorization) {",
+            "      headers.Authorization = `Bearer ${finalToken}`;",
             "    }",
             "  }",
             "  let body = null;",
@@ -366,6 +388,7 @@ def generate_k6_script_heuristic(
             "}",
             "",
             "export default function () {",
+            "  let token = '';",
             *endpoint_cases,
             "}",
             "",

@@ -432,6 +432,7 @@ export async function generateDocAndImport(payload: {
 }
 
 export async function generateK6(payload: {
+  projectId: string
   file: File
   llmMode?: 'OFF' | 'SUGGEST' | 'AUTO'
   k6GenMode?: 'LLM' | 'HEURISTIC'
@@ -441,8 +442,11 @@ export async function generateK6(payload: {
   candidateIds?: string[]
   instruction?: string
 }) {
+  const pid = String(payload.projectId || '').trim()
+  if (!pid) throw new Error('项目 ID 不能为空')
   if (!payload?.file) throw new Error('请选择文件')
   const form = new FormData()
+  form.append('projectId', pid)
   form.append('llmMode', payload.llmMode || 'OFF')
   form.append('k6GenMode', payload.k6GenMode || 'LLM')
   form.append('baseUrl', String(payload.baseUrl || '').trim())

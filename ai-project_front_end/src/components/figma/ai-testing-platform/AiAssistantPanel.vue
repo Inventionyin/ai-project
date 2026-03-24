@@ -5,6 +5,8 @@ import {
   generateDocCsv, 
   generateK6,
   executeK6,
+  importTestcases,
+  generateDocAndImport,
   fetchProjectEnvironments,
   type ProjectEnvironment
 } from '@/lib/aiTestingPlatformApi'
@@ -149,6 +151,7 @@ async function handleGenerate() {
       executionResult.value = ''
     } else {
       const res = await generateK6({
+        projectId: projectId.value,
         file,
         llmMode: llmMode.value,
         k6GenMode: 'LLM',
@@ -169,6 +172,55 @@ async function handleGenerate() {
   }
 }
 
+async function handleImport() {
+  if (!resultText.value || !projectId.value) return
+  isGenerating.value = true
+  try {
+    const blob = new Blob([resultText.value], { type: 'text/csv' })
+    const file = new File([blob], resultFileName.value || 'testcases.csv', { type: 'text/csv' })
+    await importTestcases({
+      projectId: projectId.value,
+      file,
+      mode: 'partial'
+    })
+    showToast('导入成功')
+  } catch (err) {
+    showToast(err instanceof Error ? err.message : '导入失败', 'error')
+  } finally {
+    isGenerating.value = false
+  }
+}
+
+async function handleGenerateAndImport() {
+  if (!docContent.value.trim() && !selectedFile.value) {
+    showToast('请输入接口文档内容或上传文件', 'error')
+    return
+  }
+  if (!projectId.value) return
+
+  isGenerating.value = true
+  try {
+    const file = selectedFile.value || new File([new Blob([docContent.value], { type: 'text/plain' })], 'openapi_doc.yaml')
+    const res = await generateDocAndImport({
+      projectId: projectId.value,
+      file,
+      llmMode: llmMode.value,
+      caseGenMode: 'AUTO',
+      instruction: instruction.value,
+      maxCases: 100,
+      baseUrl: environmentUrl.value
+    })
+    showToast(`成功导入 ${res.importedCount} 条用例`)
+    resultText.value = `[导入结果]\n已成功导入 ${res.importedCount} 条用例${res.failedCount > 0 ? `，失败 ${res.failedCount} 条` : ''}`
+    resultFileName.value = ''
+    executionResult.value = ''
+  } catch (err) {
+    showToast(err instanceof Error ? err.message : '生成或导入失败', 'error')
+  } finally {
+    isGenerating.value = false
+  }
+}
+
 async function handleExecute() {
   if (!resultText.value) return
   isGenerating.value = true
@@ -184,8 +236,9 @@ async function handleExecute() {
 }
 
 function copyResult() {
-  if (!resultText.value) return
-  navigator.clipboard.writeText(resultText.value)
+  const text = executionResult.value || resultText.value
+  if (!text) return
+  navigator.clipboard.writeText(text)
   showToast('已复制到剪贴板')
 }
 
@@ -395,16 +448,28 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
       </div>
 
       <!-- Action Button -->
-      <div class="mt-6">
+      <div class="mt-6 flex flex-col gap-3">
         <button 
           type="button"
           class="flex h-[52px] w-full items-center justify-center gap-3 rounded-full bg-[#0F172A] text-[16px] font-bold text-white shadow-xl transition-all hover:bg-[#1E293B] active:scale-[0.98] disabled:opacity-50"
-          :disabled="!docContent.trim() || isGenerating"
+          :disabled="(!docContent.trim() && !selectedFile) || isGenerating"
           @click="handleGenerate"
         >
           <img v-if="isGenerating" :src="runsStatusRunning" alt="" class="h-5 w-5 animate-spin" />
           <img v-else :src="btnAiGenerate" alt="" class="h-5 w-5 brightness-0 invert" />
-          <span>立即生成</span>
+          <span>{{ selectedAgent === 'CASE' ? '仅生成预览' : '立即生成' }}</span>
+        </button>
+        
+        <button 
+          v-if="selectedAgent === 'CASE'"
+          type="button"
+          class="flex h-[52px] w-full items-center justify-center gap-3 rounded-full bg-[#155DFC] text-[16px] font-bold text-white shadow-xl transition-all hover:bg-[#1048CB] active:scale-[0.98] disabled:opacity-50"
+          :disabled="(!docContent.trim() && !selectedFile) || isGenerating"
+          @click="handleGenerateAndImport"
+        >
+          <img v-if="isGenerating" :src="runsStatusRunning" alt="" class="h-5 w-5 animate-spin" />
+          <img v-else :src="btnAiGenerate" alt="" class="h-5 w-5 brightness-0 invert" />
+          <span>生成并导入到用例列表</span>
         </button>
       </div>
     </div>
@@ -429,7 +494,7 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
               class="flex items-center gap-2 rounded-full bg-white/5 px-5 py-2 text-[12px] font-bold text-white transition-all hover:bg-white/10 active:scale-95"
               @click="executionResult = ''"
             >
-              <span>📄</span> 查看脚本
+              <span>📄</span> 脚本
             </button>
             <button 
               class="flex items-center gap-2 rounded-full bg-white/5 px-5 py-2 text-[12px] font-bold text-white transition-all hover:bg-white/10 active:scale-95" 
@@ -440,15 +505,21 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
             <button class="flex items-center gap-2 rounded-full bg-white/5 px-5 py-2 text-[12px] font-bold text-white transition-all hover:bg-white/10 active:scale-95" @click="copyResult">
               <span>📋</span> 复制
             </button>
+            <button class="flex items-center gap-2 rounded-full bg-[#155DFC] px-5 py-2 text-[12px] font-bold text-white transition-all hover:bg-[#1048CB] active:scale-95 shadow-lg shadow-[#155DFC]/20" @click="downloadResult">
+              <span>📥</span> 下载
+            </button>
             <button 
-              v-if="selectedAgent === 'PERF'"
               class="flex items-center gap-2 rounded-full bg-[#27C93F] px-5 py-2 text-[12px] font-bold text-white transition-all hover:bg-[#1EA835] active:scale-95 shadow-lg shadow-[#27C93F]/20"
               @click="handleExecute"
             >
               <span>⚡</span> 执行
             </button>
-            <button class="flex items-center gap-2 rounded-full bg-[#155DFC] px-5 py-2 text-[12px] font-bold text-white transition-all hover:bg-[#1048CB] active:scale-95 shadow-lg shadow-[#155DFC]/20" @click="downloadResult">
-              <span>📥</span> 下载
+            <button 
+              v-if="selectedAgent === 'CASE' && resultText && !resultText.includes('[导入结果]')"
+              class="flex items-center gap-2 rounded-full bg-[#155DFC] px-5 py-2 text-[12px] font-bold text-white transition-all hover:bg-[#1048CB] active:scale-95 shadow-lg shadow-[#155DFC]/20"
+              @click="handleImport"
+            >
+              <span>📥</span> 导入
             </button>
           </div>
         </div>

@@ -3,10 +3,15 @@ from __future__ import annotations
 import json
 from typing import Iterable
 import re
+import logging
+import shutil
 
 from fastapi import APIRouter, Depends, File, UploadFile, Form, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 import uuid
+import os
+from datetime import datetime
 
 from app.api.deps import CurrentUser, get_current_user, get_request_id
 from app.core.database import get_db
@@ -28,6 +33,11 @@ from app.services.doc_ingest.llm_enhancer import apply_llm_enhancement
 from app.services.doc_ingest.case_generator import generate_testcase_rows, rows_to_csv_dicts
 from app.services.doc_ingest.k6_agent import generate_k6_script_heuristic, generate_k6_script_with_langgraph
 from app.services.llm.provider import get_provider
+from app.models.project import Project
+from app.models.testcase import TestCase
+from app.models.enums import TestCaseType, Priority, TestCaseStatus
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/doc-ingest")
 
@@ -176,7 +186,13 @@ async def generate_csv(
     content = await file.read()
     try:
         result = parse_document(content, file.filename or "unknown", job_id=None)
-        result = apply_llm_enhancement(result, llmMode)
+        
+        # 优化：如果 caseGenMode 为 AUTO/LLM 但 llmMode 为 OFF，自动开启增强模式以提取 API
+        effective_llm_mode = llmMode
+        if str(caseGenMode or "").strip().upper() in ("AUTO", "LLM") and str(llmMode or "").strip().upper() == "OFF":
+            effective_llm_mode = "AUTO"
+            
+        result = apply_llm_enhancement(result, effective_llm_mode)
         selected_ids = _parse_candidate_ids(candidateIds)
         before = len(result.apiCandidates or [])
         result.apiCandidates = _filter_candidates(result.apiCandidates or [], selected_ids)
@@ -220,7 +236,13 @@ async def generate_and_import(
     content = await file.read()
     try:
         result = parse_document(content, file.filename or "unknown", job_id=None)
-        result = apply_llm_enhancement(result, llmMode)
+        
+        # 优化：如果 caseGenMode 为 AUTO/LLM 但 llmMode 为 OFF，自动开启增强模式以提取 API
+        effective_llm_mode = llmMode
+        if str(caseGenMode or "").strip().upper() in ("AUTO", "LLM") and str(llmMode or "").strip().upper() == "OFF":
+            effective_llm_mode = "AUTO"
+            
+        result = apply_llm_enhancement(result, effective_llm_mode)
         selected_ids = _parse_candidate_ids(candidateIds)
         before = len(result.apiCandidates or [])
         result.apiCandidates = _filter_candidates(result.apiCandidates or [], selected_ids)
@@ -295,6 +317,7 @@ async def llm_demo(
 
 @router.post("/generate-k6", response_model=ApiResponse[K6ScriptGenerateData])
 async def generate_k6(
+    projectId: str = Form(...),
     llmMode: str = Form(default="OFF"),
     k6GenMode: str = Form(default="LLM"),
     baseUrl: str = Form(default=""),
@@ -307,10 +330,22 @@ async def generate_k6(
     user: CurrentUser = Depends(get_current_user),
     request_id: str = Depends(get_request_id),
 ) -> ApiResponse[K6ScriptGenerateData]:
+    pid = uuid.UUID(projectId)
+    # 获取项目信息
+    project = await db.get(Project, pid)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
     content = await file.read()
     try:
         result = parse_document(content, file.filename or "unknown", job_id=None)
-        result = apply_llm_enhancement(result, llmMode)
+        
+        # 优化：如果 k6GenMode 为 LLM 但 llmMode 为 OFF，自动开启增强模式以提取 API
+        effective_llm_mode = llmMode
+        if str(k6GenMode or "").strip().upper() == "LLM" and str(llmMode or "").strip().upper() == "OFF":
+            effective_llm_mode = "AUTO"
+            
+        result = apply_llm_enhancement(result, effective_llm_mode)
         selected_ids = _parse_candidate_ids(candidateIds)
         before = len(result.apiCandidates or [])
         result.apiCandidates = _filter_candidates(result.apiCandidates or [], selected_ids)
@@ -377,7 +412,55 @@ async def generate_k6(
                 duration=str(duration or "30s"),
             )
 
-        data = K6ScriptGenerateData(fileName="k6_perf_test.js", scriptText=script_text, status=result.status, llm=llm_data)
+        # 生成文件名
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        # 移除非法字符，保留项目名称
+        safe_project_name = re.sub(r'[\\/:*?"<>|]', '_', project.name)
+        file_name = f"k6_{safe_project_name}_{timestamp}.js"
+        
+        # 保存到物理目录
+        save_dir = os.path.join("testcase", "k6")
+        os.makedirs(save_dir, exist_ok=True)
+        file_path = os.path.join(save_dir, file_name)
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(script_text)
+
+        # 保存到数据库
+        testcase = TestCase(
+            tenant_id=user.tenant_id,
+            project_id=pid,
+            title=f"k6_perf_{safe_project_name}_{timestamp}",
+            type=TestCaseType.PERF,
+            priority=Priority.P1,
+            status=TestCaseStatus.DRAFT,
+            content_md=script_text,
+            ai_meta_json={
+                "vus": vus,
+                "duration": duration,
+                "baseUrl": baseUrl,
+                "instruction": instruction,
+                "fileName": file_name,
+                "k6GenMode": mode
+            },
+            generated_by_ai=True,
+            owner_id=user.id,
+            created_by=user.id
+        )
+        db.add(testcase)
+        await db.commit()
+        await db.refresh(testcase)
+
+        data = K6ScriptGenerateData(
+            fileName=file_name, 
+            scriptText=script_text, 
+            status=result.status, 
+            llm=llm_data,
+            testcaseId=str(testcase.id),
+            testcaseTitle=testcase.title
+        )
+    except Exception:
+        await db.rollback()
+        raise
     finally:
         await file.close()
     return ApiResponse(data=data, requestId=request_id)
@@ -391,76 +474,234 @@ async def execute_k6(
     user: CurrentUser = Depends(get_current_user),
     request_id: str = Depends(get_request_id),
 ) -> ApiResponse[dict]:
-    import subprocess
+    import asyncio
     import tempfile
     import os
+    import re
+    import traceback
+    import sys
+    import subprocess
+    from app.services.doc_ingest.monitor import SystemMonitor
+    
+    # 预检 k6 是否存在
+    k6_path = shutil.which("k6")
+    if not k6_path:
+        return ApiResponse(data={
+            "stdout": "[ERROR] k6 executable not found. Please install k6 and add it to your PATH.",
+            "stderr": "",
+            "exitCode": -1,
+            "status": "FAILED"
+        }, requestId=request_id)
+
+    logger.info(f"[{request_id}] Starting k6 execution for user {user.id}")
     
     with tempfile.NamedTemporaryFile(mode="w", suffix=".js", delete=False, encoding="utf-8") as tmp:
         tmp.write(scriptText)
         tmp_path = tmp.name
         
+    # 计算执行超时时间
+    timeout_sec = 60 # 默认 60s
+    if duration:
+        m = re.match(r"(\d+)([smh])", duration)
+        if m:
+            val, unit = m.groups()
+            val = int(val)
+            if unit == "s":
+                timeout_sec = val
+            elif unit == "m":
+                timeout_sec = val * 60
+            elif unit == "h":
+                timeout_sec = val * 3600
+        else:
+            try:
+                # 尝试直接转为数字
+                timeout_sec = int(duration)
+            except:
+                pass
+                
+    # 给 k6 留出启动和生成报告的时间（30s 缓冲）
+    run_timeout = timeout_sec + 30
+    
+    monitor = SystemMonitor()
+        
     try:
         # 构造 k6 命令
-        cmd = ["k6", "run", tmp_path]
+        cmd = [k6_path, "run", tmp_path]
         if duration:
             cmd.extend(["--duration", duration])
         if vus:
             cmd.extend(["--vus", str(vus)])
         
-        # 尝试执行 k6，如果系统没装 k6 则捕获异常
-        # 默认超时时间增加到 60s
-        process = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=60
-        )
+        logger.info(f"[{request_id}] Command: {' '.join(cmd)}")
+        
+        # 开启系统监控
+        await monitor.start()
+        
+        # 使用 asyncio.create_subprocess_exec 避免阻塞事件循环
+        # 这样后端可以同时处理 k6 发起的 HTTP 请求
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            logger.info(f"[{request_id}] k6 process started with PID {process.pid}")
+        except NotImplementedError:
+            # Windows SelectorEventLoop 兼容性修复 (当 ProactorEventLoop 未能成功设置时)
+            logger.warning(f"[{request_id}] asyncio.create_subprocess_exec not implemented, falling back to sync subprocess in thread")
+            
+            # 在单独线程中同步运行以避免阻塞主循环
+            def run_sync():
+                p = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    encoding='utf-8',
+                    errors='replace'
+                )
+                try:
+                    # 使用 communicate() 等待进程完成并获取输出
+                    out, err = p.communicate(timeout=run_timeout)
+                    return p.returncode, out, err
+                except subprocess.TimeoutExpired:
+                    p.kill()
+                    out, err = p.communicate()
+                    return -1, out + "\n[ERROR] Execution timeout expired", err
+                except Exception as e:
+                    return -1, f"[ERROR] Subprocess error: {str(e)}", ""
+
+            # 启动监控并在线程中执行
+            await monitor.start()
+            returncode, stdout_str, stderr_str = await asyncio.to_thread(run_sync)
+            await monitor.stop()
+            report = monitor.generate_report()
+            
+            report_text = ""
+            if isinstance(report, dict) and "cpu" in report:
+                report_text = (
+                    f"\n\n{'='*20} 服务器性能报告 (Fallback) {'='*20}\n"
+                    f"采样次数: {report['sample_count']}\n"
+                    f"执行时长: {report['duration_seconds']:.2f}s\n"
+                    f"CPU 使用率: 平均 {report['cpu']['avg']:.1f}%, 最大 {report['cpu']['max']:.1f}%\n"
+                    f"内存使用率: 平均 {report['memory']['avg']:.1f}%, 最大 {report['memory']['max']:.1f}%\n"
+                    f"{'='*56}\n"
+                )
+            
+            return ApiResponse(data={
+                "stdout": stdout_str + report_text,
+                "stderr": stderr_str,
+                "exitCode": returncode,
+                "status": "COMPLETED" if returncode == 0 else "FAILED",
+                "monitorReport": report
+            }, requestId=request_id)
+        
+        stdout_chunks = []
+        stderr_chunks = []
+
+        async def read_stream(stream, chunks, prefix="", out_file=None):
+            if out_file is None:
+                out_file = sys.stdout
+            while True:
+                line = await stream.readline()
+                if not line:
+                    break
+                decoded = line.decode("utf-8", errors="replace")
+                chunks.append(decoded)
+                # 同步输出到终端
+                out_file.write(f"{prefix}{decoded}")
+                out_file.flush()
+
+        try:
+            # 并发读取 stdout 和 stderr
+            await asyncio.wait_for(
+                asyncio.gather(
+                    read_stream(process.stdout, stdout_chunks, prefix="[k6-stdout] ", out_file=sys.stdout),
+                    read_stream(process.stderr, stderr_chunks, prefix="[k6-stderr] ", out_file=sys.stderr)
+                ),
+                timeout=run_timeout
+            )
+            await process.wait()
+            
+            # 停止监控并生成报告
+            await monitor.stop()
+            report = monitor.generate_report()
+            
+            logger.info(f"[{request_id}] k6 execution completed with exit code {process.returncode}")
+            
+            report_text = ""
+            if "cpu" in report:
+                report_text = (
+                    f"\n\n{'='*20} 服务器性能报告 {'='*20}\n"
+                    f"采样次数: {report['sample_count']}\n"
+                    f"执行时长: {report['duration_seconds']:.2f}s\n"
+                    f"CPU 使用率: 平均 {report['cpu']['avg']:.1f}%, 最大 {report['cpu']['max']:.1f}%\n"
+                    f"内存使用率: 平均 {report['memory']['avg']:.1f}%, 最大 {report['memory']['max']:.1f}%\n"
+                    f"{'='*56}\n"
+                )
+            
+            return ApiResponse(data={
+                "stdout": "".join(stdout_chunks) + report_text,
+                "stderr": "".join(stderr_chunks),
+                "exitCode": process.returncode,
+                "status": "COMPLETED",
+                "monitorReport": report
+            }, requestId=request_id)
+        except asyncio.TimeoutError:
+            # 如果超时，尝试终止进程
+            await monitor.stop()
+            try:
+                process.kill()
+            except:
+                pass
+            
+            report = monitor.generate_report()
+            report_text = ""
+            if "cpu" in report:
+                report_text = (
+                    f"\n\n{'='*20} 服务器性能报告 (超时) {'='*20}\n"
+                    f"采样次数: {report['sample_count']}\n"
+                    f"执行时长: {report['duration_seconds']:.2f}s\n"
+                    f"CPU 使用率: 平均 {report['cpu']['avg']:.1f}%, 最大 {report['cpu']['max']:.1f}%\n"
+                    f"内存使用率: 平均 {report['memory']['avg']:.1f}%, 最大 {report['memory']['max']:.1f}%\n"
+                    f"{'='*60}\n"
+                )
+                
+            return ApiResponse(data={
+                "stdout": f"[ERROR] Command timed out after {run_timeout}s\n" + "".join(stdout_chunks) + report_text,
+                "stderr": "".join(stderr_chunks),
+                "exitCode": -1,
+                "status": "TIMEOUT",
+                "monitorReport": report
+            }, requestId=request_id)
+            
+    except (FileNotFoundError, NotImplementedError, OSError) as e:
+        await monitor.stop()
+        # NotImplementedError 通常在 Windows 上使用 SelectorEventLoop 时发生
+        # OSError 可能包含具体的系统错误码
+        is_missing = isinstance(e, FileNotFoundError) or \
+                    (isinstance(e, OSError) and getattr(e, 'errno', None) == 2)
+        
+        err_msg = f"k6 executable not found on system. Please install k6 to run performance tests. Error: {str(e)}" if is_missing else f"System error during k6 startup: {str(e)}"
+        
         return ApiResponse(data={
-            "stdout": process.stdout,
-            "stderr": process.stderr,
-            "exitCode": process.returncode,
-            "status": "COMPLETED"
+            "stdout": f"[ERROR] {err_msg}\n{traceback.format_exc()}",
+            "stderr": "",
+            "exitCode": -1,
+            "status": "FAILED"
         }, requestId=request_id)
     except Exception as e:
-        # 如果执行失败或没有 k6，返回模拟输出
-        # 如果是超时或命令错误，在 mock 输出中体现
-        error_msg = f"[SIMULATED] Error running k6: {str(e)}"
-        mock_output = f"""
-          executor: local
-             script: {tmp_path}
-             output: -
-
-          scenarios: (100.00%) 1 scenario, {vus or 1} max VUs, {duration or '10s'} max duration (incl. graceful stop):
-                   * default: 1 iterations for each of {vus or 1} VUs (max duration {duration or '10s'}, graceful stop 30s)
-
-          running (00.1s), 0/{vus or 1} VUs, 1 complete and 0 interrupted iterations
-          default ✓ [======================================] {vus or 1} VUs  00.1s/{duration or '10s'}  1/1 iters, 1 per VU
-
-             data_received..................: 1.2 kB 12 kB/s
-             data_sent......................: 450 B  4.5 kB/s
-             http_req_blocked...............: avg=1.2ms   min=1.2ms   med=1.2ms   max=1.2ms   p(90)=1.2ms   p(95)=1.2ms  
-             http_req_connecting............: avg=0.5ms   min=0.5ms   med=0.5ms   max=0.5ms   p(90)=0.5ms   p(95)=0.5ms  
-             http_req_duration..............: avg=45.2ms  min=45.2ms  med=45.2ms  max=45.2ms  p(90)=45.2ms  p(95)=45.2ms 
-               { '{' } expected_response:true { '}' }.: avg=45.2ms  min=45.2ms  med=45.2ms  max=45.2ms  p(90)=45.2ms  p(95)=45.2ms 
-             http_req_failed................: 0.00%  ✓ 0        ✗ 1      
-             http_req_receiving.............: avg=0.1ms   min=0.1ms   med=0.1ms   max=0.1ms   p(90)=0.1ms   p(95)=0.1ms  
-             http_req_sending...............: avg=0.1ms   min=0.1ms   med=0.1ms   max=0.1ms   p(90)=0.1ms   p(95)=0.1ms  
-             http_req_tls_handshaking.......: avg=0s      min=0s      med=0s      max=0s      p(90)=0s      p(95)=0s     
-             http_req_waiting...............: avg=45ms    min=45ms    med=45ms    max=45ms    p(90)=45ms    p(95)=45ms   
-             http_reqs......................: 1      9.803922/s
-             iteration_duration.............: avg=47.1ms  min=47.1ms  med=47.1ms  max=47.1ms  p(90)=47.1ms  p(95)=47.1ms 
-             iterations.....................: 1      9.803922/s
-             vus............................: {vus or 1}      min={vus or 1}      max={vus or 1}    
-             vus_max........................: {vus or 1}      min={vus or 1}      max={vus or 1}    
-
-        {error_msg}
-        """
+        # 其他异常
         return ApiResponse(data={
-            "stdout": mock_output,
+            "stdout": f"[ERROR] Error running k6: {str(e)} ({type(e).__name__})\n{traceback.format_exc()}",
             "stderr": "",
-            "exitCode": 0,
-            "status": "SIMULATED"
+            "exitCode": -1,
+            "status": "FAILED"
         }, requestId=request_id)
     finally:
+        # 清理临时文件
         if os.path.exists(tmp_path):
-            os.remove(tmp_path)
+            try:
+                os.remove(tmp_path)
+            except:
+                pass

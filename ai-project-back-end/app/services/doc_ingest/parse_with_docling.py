@@ -521,5 +521,5 @@ def parse_document(file_bytes: bytes, filename: str, *, job_id: str | None = Non
         language=None,
         pageCount=None,
     )
-    raw = DocRaw(textDigest=" ".join([s.text[:200] for s in sections])[:2000], attachments=[])
+    raw = DocRaw(textDigest=" ".join([str(s.text or "")[:1000] for s in sections])[:15000], attachments=[])
     return DocParseResult(meta=meta, sections=sections, apiCandidates=candidates, tables=tables, quality=q, raw=raw, status=status)

@@ -9,8 +9,16 @@ def apply_llm_enhancement(result: DocParseResult, mode: str) -> DocParseResult:
     if m == "OFF":
         return result
     provider = get_provider()
+    
+    # 提取文档文本作为增强的上下文
+    doc_text = ""
+    if result.sections:
+        doc_text = "\n\n".join([str(s.text or "") for s in result.sections[:60]]).strip()
+    if not doc_text and result.raw:
+        doc_text = str(result.raw.textDigest or "")
+
     try:
-        items = provider.enhance(result.apiCandidates)
+        items = provider.enhance(result.apiCandidates or [], doc_text=doc_text)
     except Exception as e:
         q = result.quality
         q.issues.append(QualityIssue(code="LLM_ERROR", message=str(e), severity="ERROR"))
