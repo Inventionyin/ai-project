@@ -6,12 +6,18 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:report": "playwright show-report"
   },
   "dependencies": {
-    "vue": "^3.4.0"
+    "lucide-vue-next": "^1.0.0",
+    "vue": "^3.4.0",
+    "vue-router": "^4.4.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.54.2",
     "@types/node": "^25.5.0",
     "@vitejs/plugin-vue": "^5.0.0",
     "autoprefixer": "^10.4.19",
