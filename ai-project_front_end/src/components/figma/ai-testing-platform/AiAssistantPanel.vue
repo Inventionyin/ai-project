@@ -225,7 +225,7 @@ async function handleExecute() {
   if (!resultText.value) return
   isGenerating.value = true
   try {
-    const res = await executeK6(resultText.value, perfVus.value, `${perfDuration.value}s`)
+    const res = await executeK6(resultText.value, perfVus.value, `${perfDuration.value}s`, projectId.value)
     executionResult.value = `[执行结果 - ${res.status}]\n\n${res.stdout}${res.stderr ? '\n\nError:\n' + res.stderr : ''}`
     showToast('执行完成')
   } catch (err) {
