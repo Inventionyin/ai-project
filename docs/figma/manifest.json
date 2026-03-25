@@ -10,7 +10,7 @@
       "nodeId": "12:34",
       "routePath": "/login",
       "envUrl": "http://localhost:5173/login",
-      "pageDoc": "docs/figma/pages/_template.md",
+      "pageDoc": "docs/figma/pages/sample-login-page.md",
       "baselineDir": "ai-project_front_end/tests/ui/baseline/sample-login-page",
       "status": "failed",
       "owner": "REPLACE_OWNER",

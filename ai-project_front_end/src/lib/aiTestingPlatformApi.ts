@@ -228,6 +228,83 @@ export type PerformanceReportDetail = {
   asserts: Array<{ apiName: string; passed: number; failed: number }>
 }
 
+export type UiTestReportSummary = {
+  total: number
+  passed: number
+  failed: number
+  skipped: number
+  durationMs: number
+}
+
+export type UiTestReportListItem = {
+  runId: string
+  projectId: string
+  pageId: string
+  status: string
+  result: string
+  assertLevel: string
+  total: number
+  passed: number
+  failed: number
+  skipped: number
+  durationMs: number
+  reportDir: string
+  reportIndexUrl: string
+  createdAt: number
+  finishedAt: number
+}
+
+export type UiTestFailedCase = {
+  title: string
+  error: string
+  screenshot?: string | null
+  trace?: string | null
+}
+
+export type UiTestReportDetail = {
+  runId: string
+  projectId: string
+  pageId: string
+  status: string
+  result: string
+  assertLevel: string
+  specPath: string
+  reportDir: string
+  reportIndexUrl: string
+  summary: UiTestReportSummary
+  failedCases: UiTestFailedCase[]
+  startedAt: number
+  finishedAt: number
+}
+
+export type UiTestGenerateRunPayload = {
+  projectId: string
+  pageId: string
+  figmaUrl?: string
+  assertLevel?: 'P0' | 'P1' | 'P2'
+  headed?: boolean
+  baseUrl?: string
+  updateManifest?: boolean
+  triggerBy?: string
+  meta?: Record<string, unknown>
+}
+
+export type UiTestGenerateRunData = {
+  runId: string
+  status: string
+  result: string
+  pageId: string
+  assertLevel: string
+  specPath: string
+  reportDir: string
+  reportIndexUrl: string
+  summary: UiTestReportSummary
+  startedAt: number
+  finishedAt: number
+  stdout: string
+  stderr: string
+}
+
 const resolveApiBaseUrl = () => {
   const envBase = String(import.meta.env.VITE_API_BASE_URL || '').trim()
   if (!envBase) return ''
@@ -942,6 +1019,71 @@ export async function fetchPerformanceReportDetail(runId: string) {
     headers: {
       Authorization: resolveAuthHeader()
     }
+  })
+}
+
+export async function fetchProjectUiTestReports(
+  projectId: string,
+  page = 1,
+  pageSize = 50,
+  filters?: { status?: string; result?: string; pageId?: string }
+) {
+  const pid = String(projectId || '').trim()
+  if (!pid) return []
+  const query = new URLSearchParams({
+    projectId: pid,
+    page: String(page),
+    pageSize: String(pageSize)
+  })
+  if (filters?.status) query.set('status', String(filters.status))
+  if (filters?.result) query.set('result', String(filters.result))
+  if (filters?.pageId) query.set('pageId', String(filters.pageId))
+  const data = await requestJson<{ items?: UiTestReportListItem[] } | UiTestReportListItem[]>(
+    `/api/ui-tests/reports?${query.toString()}`,
+    {
+      method: 'GET',
+      headers: {
+        Authorization: resolveAuthHeader()
+      }
+    }
+  )
+  if (Array.isArray(data)) return data
+  return Array.isArray(data?.items) ? data.items : []
+}
+
+export async function fetchUiTestReportDetail(runId: string) {
+  const id = String(runId || '').trim()
+  if (!id) throw new Error('runId 不能为空')
+  return requestJson<UiTestReportDetail>(`/api/ui-tests/reports/${encodeURIComponent(id)}`, {
+    method: 'GET',
+    headers: {
+      Authorization: resolveAuthHeader()
+    }
+  })
+}
+
+export async function generateAndRunUiTest(payload: UiTestGenerateRunPayload) {
+  const pid = String(payload.projectId || '').trim()
+  const pageId = String(payload.pageId || '').trim()
+  if (!pid) throw new Error('项目 ID 不能为空')
+  if (!pageId) throw new Error('pageId 不能为空')
+  return requestJson<UiTestGenerateRunData>('/api/ui-tests/generate-and-run', {
+    method: 'POST',
+    headers: {
+      Authorization: resolveAuthHeader(),
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      projectId: pid,
+      pageId,
+      figmaUrl: String(payload.figmaUrl || '').trim() || undefined,
+      assertLevel: payload.assertLevel || 'P0',
+      headed: Boolean(payload.headed),
+      baseUrl: String(payload.baseUrl || '').trim() || undefined,
+      updateManifest: payload.updateManifest ?? true,
+      triggerBy: String(payload.triggerBy || 'AI_ASSISTANT'),
+      meta: payload.meta || { source: 'ai_assistant_ui_tab' }
+    })
   })
 }
 
