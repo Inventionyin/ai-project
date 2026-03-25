@@ -1,0 +1,32 @@
+{
+  "version": "1.0.0",
+  "updatedAt": "2026-03-25T22:05:00+08:00",
+  "pages": [
+    {
+      "id": "sample-login-page",
+      "bizModule": "auth",
+      "figmaUrl": "https://www.figma.com/file/REPLACE_FILE_KEY/REPLACE_PAGE?node-id=12-34",
+      "fileKey": "REPLACE_FILE_KEY",
+      "nodeId": "12:34",
+      "routePath": "/login",
+      "envUrl": "http://localhost:5173/login",
+      "pageDoc": "docs/figma/pages/_template.md",
+      "baselineDir": "ai-project_front_end/tests/ui/baseline/sample-login-page",
+      "status": "failed",
+      "owner": "REPLACE_OWNER",
+      "lastSyncAt": "2026-03-25T21:41:00+08:00",
+      "syncError": "fileKey 非法：仅支持字母数字，当前为占位值 REPLACE_FILE_KEY",
+      "uiAutomation": {
+        "status": "verified",
+        "specPath": "ai-project_front_end/tests/ui/generated/sample-login-page.spec.ts",
+        "reportDir": "ai-project_front_end/tests/ui/reports/html",
+        "lastRunAt": "2026-03-25T22:05:00+08:00",
+        "lastResult": "1 passed"
+      },
+      "tags": [
+        "P0",
+        "auth"
+      ]
+    }
+  ]
+}
