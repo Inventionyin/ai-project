@@ -12,6 +12,7 @@ from sqlalchemy import select
 import uuid
 import os
 from datetime import datetime
+from pathlib import Path
 
 from app.api.deps import CurrentUser, get_current_user, get_request_id
 from app.core.database import get_db
@@ -34,12 +35,136 @@ from app.services.doc_ingest.case_generator import generate_testcase_rows, rows_
 from app.services.doc_ingest.k6_agent import generate_k6_script_heuristic, generate_k6_script_with_langgraph
 from app.services.llm.provider import get_provider
 from app.models.project import Project
+from app.models.run import Run, Artifact
 from app.models.testcase import TestCase
-from app.models.enums import TestCaseType, Priority, TestCaseStatus
+from app.models.enums import ArtifactType, RunStatus, TriggerType, TestCaseType, Priority, TestCaseStatus
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/doc-ingest")
+_PERF_REPORT_ROOT = Path("reports/performance")
+
+
+def _to_float(value: object, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return default
+
+
+def _parse_time_to_ms(raw: str) -> float:
+    text = str(raw or "").strip().lower()
+    if not text:
+        return 0.0
+    if text.endswith("ms"):
+        return _to_float(text[:-2], 0.0)
+    if text.endswith("s"):
+        return _to_float(text[:-1], 0.0) * 1000.0
+    return _to_float(text, 0.0)
+
+
+def _extract_k6_metrics(stdout_text: str) -> dict:
+    text = str(stdout_text or "")
+    tps = 0.0
+    avg_response_ms = 0.0
+    p95_response_ms = 0.0
+    success_rate = 0.0
+
+    tps_match = re.search(r"http_reqs[^\n]*?([0-9]+(?:\.[0-9]+)?)\s*/s", text, flags=re.IGNORECASE)
+    if tps_match:
+        tps = _to_float(tps_match.group(1), 0.0)
+
+    avg_match = re.search(r"http_req_duration[^\n]*?avg=([0-9.]+(?:ms|s))", text, flags=re.IGNORECASE)
+    if avg_match:
+        avg_response_ms = _parse_time_to_ms(avg_match.group(1))
+
+    p95_match = re.search(r"http_req_duration[^\n]*?p\(95\)=([0-9.]+(?:ms|s))", text, flags=re.IGNORECASE)
+    if p95_match:
+        p95_response_ms = _parse_time_to_ms(p95_match.group(1))
+
+    checks_match = re.search(r"checks[^\n]*?([0-9]+(?:\.[0-9]+)?)%", text, flags=re.IGNORECASE)
+    if checks_match:
+        success_rate = _to_float(checks_match.group(1), 0.0)
+
+    return {
+        "tps": tps,
+        "avgResponseMs": avg_response_ms,
+        "p95ResponseMs": p95_response_ms,
+        "successRate": success_rate,
+    }
+
+
+def _build_latency_distribution(avg_response_ms: float, p95_response_ms: float) -> list[dict]:
+    if avg_response_ms <= 0 and p95_response_ms <= 0:
+        return []
+    pivot = max(avg_response_ms, 1.0)
+    upper = max(p95_response_ms, pivot)
+    return [
+        {"label": "<100ms", "count": 0 if pivot >= 100 else 1},
+        {"label": "100-300ms", "count": 1 if 100 <= pivot < 300 else 0},
+        {"label": "300-500ms", "count": 1 if 300 <= pivot < 500 else 0},
+        {"label": "500ms-1s", "count": 1 if 500 <= pivot < 1000 else 0},
+        {"label": ">1s", "count": 1 if upper >= 1000 else 0},
+    ]
+
+
+def _augment_monitor_report(report: dict, stats: list[dict]) -> dict:
+    payload = dict(report or {})
+    if "cpu" not in payload:
+        payload["cpu"] = {"avg": 0.0, "max": 0.0, "min": 0.0}
+    if "memory" not in payload:
+        payload["memory"] = {"avg": 0.0, "max": 0.0, "min": 0.0}
+
+    read_delta = 0.0
+    write_delta = 0.0
+    if len(stats) >= 2:
+        read_delta = max(0.0, _to_float(stats[-1].get("disk_read_mb")) - _to_float(stats[0].get("disk_read_mb")))
+        write_delta = max(0.0, _to_float(stats[-1].get("disk_write_mb")) - _to_float(stats[0].get("disk_write_mb")))
+    payload["io"] = {"read_mb": read_delta, "write_mb": write_delta}
+    return payload
+
+
+def _build_perf_report_payload(
+    *,
+    run_id: str,
+    name: str,
+    status: str,
+    created_at_ts: int,
+    duration: str,
+    vus: int,
+    stdout_text: str,
+    stderr_text: str,
+    monitor_report: dict,
+) -> dict:
+    metrics = _extract_k6_metrics(stdout_text)
+    latency_distribution = _build_latency_distribution(metrics["avgResponseMs"], metrics["p95ResponseMs"])
+    payload = {
+        "id": run_id,
+        "name": name,
+        "status": status,
+        "createdAt": created_at_ts,
+        "duration": duration,
+        "vus": int(vus or 0),
+        "tps": metrics["tps"],
+        "avgResponseMs": metrics["avgResponseMs"],
+        "p95ResponseMs": metrics["p95ResponseMs"],
+        "successRate": metrics["successRate"],
+        "resources": {
+            "cpuAvg": _to_float((monitor_report.get("cpu") or {}).get("avg"), 0.0),
+            "cpuMax": _to_float((monitor_report.get("cpu") or {}).get("max"), 0.0),
+            "memoryAvg": _to_float((monitor_report.get("memory") or {}).get("avg"), 0.0),
+            "memoryMax": _to_float((monitor_report.get("memory") or {}).get("max"), 0.0),
+            "ioReadMb": _to_float((monitor_report.get("io") or {}).get("read_mb"), 0.0),
+            "ioWriteMb": _to_float((monitor_report.get("io") or {}).get("write_mb"), 0.0),
+        },
+        "trendPoints": [],
+        "latencyDistribution": latency_distribution,
+        "asserts": [],
+        "stdout": stdout_text,
+        "stderr": stderr_text,
+        "monitorReport": monitor_report,
+    }
+    return payload
 
 def _parse_candidate_ids(raw: str | None) -> list[str] | None:
     if raw is None:
@@ -477,8 +602,10 @@ async def generate_k6(
 @router.post("/execute-k6", response_model=ApiResponse[dict])
 async def execute_k6(
     scriptText: str = Form(...),
+    projectId: str | None = Form(default=None),
     vus: int | None = Form(default=None),
     duration: str | None = Form(default=None),
+    db: AsyncSession = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
     request_id: str = Depends(get_request_id),
 ) -> ApiResponse[dict]:
@@ -491,6 +618,16 @@ async def execute_k6(
     import subprocess
     from app.services.doc_ingest.monitor import SystemMonitor
     
+    project_uuid: uuid.UUID | None = None
+    if projectId:
+        try:
+            project_uuid = uuid.UUID(projectId)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid projectId") from exc
+        project = await db.get(Project, project_uuid)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
     # 预检 k6 是否存在
     k6_path = shutil.which("k6")
     if not k6_path:
@@ -531,6 +668,77 @@ async def execute_k6(
     run_timeout = timeout_sec + 30
     
     monitor = SystemMonitor()
+
+    async def persist_report_if_needed(
+        *,
+        stdout_text: str,
+        stderr_text: str,
+        exit_code: int,
+        status_text: str,
+        monitor_report: dict,
+    ) -> str | None:
+        if project_uuid is None:
+            return None
+        now = datetime.utcnow()
+        run = Run(
+            tenant_id=user.tenant_id,
+            project_id=project_uuid,
+            suite_id=None,
+            env_id=None,
+            trigger_type=TriggerType.MANUAL,
+            status=RunStatus.PASSED if exit_code == 0 and status_text == "COMPLETED" else RunStatus.FAILED,
+            start_at=now,
+            end_at=now,
+            summary_json={},
+            created_by=user.id,
+        )
+        db.add(run)
+        await db.flush()
+        run_id = str(run.id)
+        report_name = f"性能测试报告 {now.strftime('%Y-%m-%d %H:%M:%S')}"
+        report_payload = _build_perf_report_payload(
+            run_id=run_id,
+            name=report_name,
+            status=status_text,
+            created_at_ts=int(now.timestamp()),
+            duration=str(duration or ""),
+            vus=int(vus or 0),
+            stdout_text=stdout_text,
+            stderr_text=stderr_text,
+            monitor_report=monitor_report,
+        )
+        run.summary_json = {
+            "executionSource": "K6_PERF",
+            "performanceResult": {
+                "status": status_text,
+                "exitCode": exit_code,
+                "reportName": report_name,
+            },
+        }
+        project_dir = _PERF_REPORT_ROOT / str(project_uuid)
+        project_dir.mkdir(parents=True, exist_ok=True)
+        report_path = project_dir / f"{run_id}.json"
+        report_path.write_text(json.dumps(report_payload, ensure_ascii=False), encoding="utf-8")
+        report_size = report_path.stat().st_size
+        artifact = Artifact(
+            tenant_id=user.tenant_id,
+            run_id=run.id,
+            case_run_id=None,
+            type=ArtifactType.PERF_REPORT,
+            storage_url=str(report_path),
+            size=report_size,
+            meta_json={
+                "kind": "PERF_REPORT",
+                "name": report_name,
+                "status": status_text,
+                "createdAt": int(now.timestamp()),
+                "duration": str(duration or ""),
+                "vus": int(vus or 0),
+            },
+        )
+        db.add(artifact)
+        await db.commit()
+        return run_id
         
     try:
         # 构造 k6 命令
@@ -583,7 +791,20 @@ async def execute_k6(
             await monitor.start()
             returncode, stdout_str, stderr_str = await asyncio.to_thread(run_sync)
             await monitor.stop()
-            report = monitor.generate_report()
+            report = _augment_monitor_report(monitor.generate_report(), monitor.stats)
+            status_text = "COMPLETED" if returncode == 0 else "FAILED"
+            run_id: str | None = None
+            try:
+                run_id = await persist_report_if_needed(
+                    stdout_text=stdout_str,
+                    stderr_text=stderr_str,
+                    exit_code=returncode,
+                    status_text=status_text,
+                    monitor_report=report,
+                )
+            except Exception:
+                await db.rollback()
+                logger.exception(f"[{request_id}] Persist performance report failed")
             
             report_text = ""
             if isinstance(report, dict) and "cpu" in report:
@@ -600,8 +821,9 @@ async def execute_k6(
                 "stdout": stdout_str + report_text,
                 "stderr": stderr_str,
                 "exitCode": returncode,
-                "status": "COMPLETED" if returncode == 0 else "FAILED",
-                "monitorReport": report
+                "status": status_text,
+                "monitorReport": report,
+                "runId": run_id,
             }, requestId=request_id)
         
         stdout_chunks = []
@@ -633,7 +855,22 @@ async def execute_k6(
             
             # 停止监控并生成报告
             await monitor.stop()
-            report = monitor.generate_report()
+            report = _augment_monitor_report(monitor.generate_report(), monitor.stats)
+            status_text = "COMPLETED" if process.returncode == 0 else "FAILED"
+            stdout_text = "".join(stdout_chunks)
+            stderr_text = "".join(stderr_chunks)
+            run_id: str | None = None
+            try:
+                run_id = await persist_report_if_needed(
+                    stdout_text=stdout_text,
+                    stderr_text=stderr_text,
+                    exit_code=process.returncode,
+                    status_text=status_text,
+                    monitor_report=report,
+                )
+            except Exception:
+                await db.rollback()
+                logger.exception(f"[{request_id}] Persist performance report failed")
             
             logger.info(f"[{request_id}] k6 execution completed with exit code {process.returncode}")
             
@@ -649,11 +886,12 @@ async def execute_k6(
                 )
             
             return ApiResponse(data={
-                "stdout": "".join(stdout_chunks) + report_text,
-                "stderr": "".join(stderr_chunks),
+                "stdout": stdout_text + report_text,
+                "stderr": stderr_text,
                 "exitCode": process.returncode,
-                "status": "COMPLETED",
-                "monitorReport": report
+                "status": status_text,
+                "monitorReport": report,
+                "runId": run_id,
             }, requestId=request_id)
         except asyncio.TimeoutError:
             # 如果超时，尝试终止进程
@@ -663,7 +901,21 @@ async def execute_k6(
             except:
                 pass
             
-            report = monitor.generate_report()
+            report = _augment_monitor_report(monitor.generate_report(), monitor.stats)
+            stdout_text = "".join(stdout_chunks)
+            stderr_text = "".join(stderr_chunks)
+            run_id: str | None = None
+            try:
+                run_id = await persist_report_if_needed(
+                    stdout_text=stdout_text,
+                    stderr_text=stderr_text,
+                    exit_code=-1,
+                    status_text="TIMEOUT",
+                    monitor_report=report,
+                )
+            except Exception:
+                await db.rollback()
+                logger.exception(f"[{request_id}] Persist performance report failed")
             report_text = ""
             if "cpu" in report:
                 report_text = (
@@ -676,11 +928,12 @@ async def execute_k6(
                 )
                 
             return ApiResponse(data={
-                "stdout": f"[ERROR] Command timed out after {run_timeout}s\n" + "".join(stdout_chunks) + report_text,
-                "stderr": "".join(stderr_chunks),
+                "stdout": f"[ERROR] Command timed out after {run_timeout}s\n" + stdout_text + report_text,
+                "stderr": stderr_text,
                 "exitCode": -1,
                 "status": "TIMEOUT",
-                "monitorReport": report
+                "monitorReport": report,
+                "runId": run_id,
             }, requestId=request_id)
             
     except (FileNotFoundError, NotImplementedError, OSError) as e:
@@ -713,3 +966,121 @@ async def execute_k6(
                 os.remove(tmp_path)
             except:
                 pass
+
+
+@router.get("/perf-reports", response_model=ApiResponse[dict])
+async def list_perf_reports(
+    projectId: str,
+    page: int = 1,
+    pageSize: int = 20,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    request_id: str = Depends(get_request_id),
+) -> ApiResponse[dict]:
+    pid = str(projectId or "").strip()
+    if not pid:
+        raise HTTPException(status_code=400, detail="projectId_required")
+    try:
+        project_uuid = uuid.UUID(pid)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid projectId") from exc
+
+    query = (
+        select(Artifact, Run)
+        .join(Run, Run.id == Artifact.run_id)
+        .where(
+            (Artifact.tenant_id == user.tenant_id)
+            & (Run.tenant_id == user.tenant_id)
+            & (Run.project_id == project_uuid)
+            & (Artifact.type == ArtifactType.PERF_REPORT)
+            & (Artifact.case_run_id.is_(None))
+        )
+        .order_by(Artifact.created_at.desc())
+    )
+    rows = (await db.execute(query)).all()
+    total = len(rows)
+    start = max(0, (max(1, int(page)) - 1) * max(1, int(pageSize)))
+    end = start + max(1, int(pageSize))
+    items = []
+    for artifact, run in rows[start:end]:
+        meta = artifact.meta_json or {}
+        created_at = artifact.created_at or run.created_at
+        items.append(
+            {
+                "id": str(run.id),
+                "name": str(meta.get("name") or f"性能测试报告 {str(run.id)[:8]}"),
+                "status": str(meta.get("status") or run.status.value),
+                "createdAt": int(created_at.timestamp()) if created_at else int(datetime.utcnow().timestamp()),
+                "duration": str(meta.get("duration") or ""),
+                "vus": int(meta.get("vus") or 0),
+            }
+        )
+    return ApiResponse(
+        data={
+            "page": max(1, int(page)),
+            "pageSize": max(1, int(pageSize)),
+            "total": total,
+            "items": items,
+        },
+        requestId=request_id,
+    )
+
+
+@router.get("/perf-reports/{runId}", response_model=ApiResponse[dict])
+async def get_perf_report_detail(
+    runId: str,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    request_id: str = Depends(get_request_id),
+) -> ApiResponse[dict]:
+    rid = str(runId or "").strip()
+    if not rid:
+        raise HTTPException(status_code=400, detail="runId_required")
+    try:
+        run_uuid = uuid.UUID(rid)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid runId") from exc
+
+    row = (
+        await db.execute(
+            select(Artifact, Run)
+            .join(Run, Run.id == Artifact.run_id)
+            .where(
+                (Artifact.tenant_id == user.tenant_id)
+                & (Run.tenant_id == user.tenant_id)
+                & (Artifact.run_id == run_uuid)
+                & (Artifact.type == ArtifactType.PERF_REPORT)
+                & (Artifact.case_run_id.is_(None))
+            )
+            .order_by(Artifact.created_at.desc())
+            .limit(1)
+        )
+    ).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="perf_report_not_found")
+
+    artifact, run = row
+    payload: dict | None = None
+    report_path = Path(str(artifact.storage_url or "")).resolve()
+    if report_path.exists() and report_path.is_file():
+        try:
+            payload = json.loads(report_path.read_text(encoding="utf-8"))
+        except Exception:
+            payload = None
+
+    if payload is None:
+        meta = artifact.meta_json or {}
+        created_at = artifact.created_at or run.created_at
+        payload = _build_perf_report_payload(
+            run_id=str(run.id),
+            name=str(meta.get("name") or f"性能测试报告 {str(run.id)[:8]}"),
+            status=str(meta.get("status") or run.status.value),
+            created_at_ts=int(created_at.timestamp()) if created_at else int(datetime.utcnow().timestamp()),
+            duration=str(meta.get("duration") or ""),
+            vus=int(meta.get("vus") or 0),
+            stdout_text="",
+            stderr_text="",
+            monitor_report={},
+        )
+
+    return ApiResponse(data=payload, requestId=request_id)

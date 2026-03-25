@@ -195,6 +195,39 @@ export type RunAllureReportDeleteData = {
   deletedDirs: number
 }
 
+export type PerformanceReportListItem = {
+  id: string
+  name: string
+  status: string
+  createdAt: number
+  duration: string
+  vus: number
+}
+
+export type PerformanceReportDetail = {
+  id: string
+  name: string
+  status: string
+  createdAt: number
+  duration: string
+  vus: number
+  tps: number
+  avgResponseMs: number
+  p95ResponseMs: number
+  successRate: number
+  resources: {
+    cpuAvg: number
+    cpuMax: number
+    memoryAvg: number
+    memoryMax: number
+    ioReadMb: number
+    ioWriteMb: number
+  }
+  trendPoints: Array<{ tps: number; avgResponseMs: number }>
+  latencyDistribution: Array<{ label: string; count: number }>
+  asserts: Array<{ apiName: string; passed: number; failed: number }>
+}
+
 const resolveApiBaseUrl = () => {
   const envBase = String(import.meta.env.VITE_API_BASE_URL || '').trim()
   if (!envBase) return ''
@@ -466,12 +499,13 @@ export async function generateK6(payload: {
   })
 }
 
-export async function executeK6(scriptText: string, vus?: number, duration?: string) {
+export async function executeK6(scriptText: string, vus?: number, duration?: string, projectId?: string) {
   const form = new FormData()
   form.append('scriptText', scriptText)
   if (vus) form.append('vus', String(vus))
   if (duration) form.append('duration', duration)
-  return requestFormData<{ stdout: string; stderr: string; exitCode: number; status: string }>('/api/doc-ingest/execute-k6', {
+  if (projectId) form.append('projectId', projectId)
+  return requestFormData<{ stdout: string; stderr: string; exitCode: number; status: string; runId?: string | null }>('/api/doc-ingest/execute-k6', {
     method: 'POST',
     headers: {
       Authorization: resolveAuthHeader()
@@ -873,6 +907,38 @@ export async function generateRunAllureReport(runId: string) {
   }
   return requestJson<RunAllureReportGenerateData>(`/api/runs/${encodeURIComponent(id)}/allure-report/generate`, {
     method: 'POST',
+    headers: {
+      Authorization: resolveAuthHeader()
+    }
+  })
+}
+
+export async function fetchProjectPerformanceReports(projectId: string, page = 1, pageSize = 50) {
+  const pid = String(projectId || '').trim()
+  if (!pid) return []
+  const query = new URLSearchParams({
+    projectId: pid,
+    page: String(page),
+    pageSize: String(pageSize)
+  })
+  const data = await requestJson<{ items?: PerformanceReportListItem[] } | PerformanceReportListItem[]>(
+    `/api/doc-ingest/perf-reports?${query.toString()}`,
+    {
+      method: 'GET',
+      headers: {
+        Authorization: resolveAuthHeader()
+      }
+    }
+  )
+  if (Array.isArray(data)) return data
+  return Array.isArray(data?.items) ? data.items : []
+}
+
+export async function fetchPerformanceReportDetail(runId: string) {
+  const id = String(runId || '').trim()
+  if (!id) throw new Error('runId 不能为空')
+  return requestJson<PerformanceReportDetail>(`/api/doc-ingest/perf-reports/${encodeURIComponent(id)}`, {
+    method: 'GET',
     headers: {
       Authorization: resolveAuthHeader()
     }
