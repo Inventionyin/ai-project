@@ -11,11 +11,17 @@ import ReportsSingleControls from '@/components/figma/ai-testing-platform/Report
 import ReportsSingleReportCard from '@/components/figma/ai-testing-platform/ReportsSingleReportCard.vue'
 import ReportsPerformanceControls from '@/components/figma/ai-testing-platform/ReportsPerformanceControls.vue'
 import ReportsPerformanceReportCard from '@/components/figma/ai-testing-platform/ReportsPerformanceReportCard.vue'
+import ReportsUiTestControls from '@/components/figma/ai-testing-platform/ReportsUiTestControls.vue'
+import ReportsUiTestReportCard from '@/components/figma/ai-testing-platform/ReportsUiTestReportCard.vue'
 import {
   fetchPerformanceReportDetail,
   fetchProjectPerformanceReports,
+  fetchProjectUiTestReports,
+  fetchUiTestReportDetail,
   type PerformanceReportDetail,
-  type PerformanceReportListItem
+  type PerformanceReportListItem,
+  type UiTestReportDetail,
+  type UiTestReportListItem
 } from '@/lib/aiTestingPlatformApi'
 
 const route = useRoute()
@@ -28,10 +34,16 @@ const performanceDetail = ref<PerformanceReportDetail | null>(null)
 const performanceLoading = ref(false)
 const performanceDetailLoading = ref(false)
 const performanceErrorText = ref('')
+const uiReportItems = ref<UiTestReportListItem[]>([])
+const selectedUiReportRunId = ref('')
+const uiReportDetail = ref<UiTestReportDetail | null>(null)
+const uiReportLoading = ref(false)
+const uiReportDetailLoading = ref(false)
+const uiReportErrorText = ref('')
 
 function resolveTabFromRoute(raw: unknown): ReportsViewTab {
   const tab = String(raw || '').trim().toLowerCase()
-  if (tab === 'trend' || tab === 'single' || tab === 'performance') return tab
+  if (tab === 'trend' || tab === 'single' || tab === 'performance' || tab === 'ui') return tab
   return 'single'
 }
 
@@ -39,6 +51,19 @@ watch(
   () => route.query.tab,
   (value) => {
     activeView.value = resolveTabFromRoute(value)
+  },
+  { immediate: true }
+)
+
+watch(
+  () => route.query.uiRunId,
+  (value) => {
+    const runId = String(value || '').trim()
+    if (!runId) return
+    selectedUiReportRunId.value = runId
+    if (activeView.value === 'ui' && !uiReportLoading.value) {
+      void loadUiReportDetail(runId)
+    }
   },
   { immediate: true }
 )
@@ -97,8 +122,58 @@ async function loadPerformanceReportDetail(reportId: string) {
   }
 }
 
+async function loadUiReports() {
+  if (!projectId.value) return
+  uiReportLoading.value = true
+  uiReportErrorText.value = ''
+  try {
+    const runIdFromRoute = String(route.query.uiRunId || '').trim()
+    const items = await fetchProjectUiTestReports(projectId.value, 1, 50)
+    uiReportItems.value = items
+    if (!items.length) {
+      selectedUiReportRunId.value = ''
+      uiReportDetail.value = null
+      return
+    }
+    if (runIdFromRoute && items.some((item) => item.runId === runIdFromRoute)) {
+      selectedUiReportRunId.value = runIdFromRoute
+    } else if (!items.some((item) => item.runId === selectedUiReportRunId.value)) {
+      selectedUiReportRunId.value = items[0].runId
+    }
+    await loadUiReportDetail(selectedUiReportRunId.value)
+  } catch (error) {
+    uiReportItems.value = []
+    uiReportDetail.value = null
+    uiReportErrorText.value = error instanceof Error ? error.message : '加载 UI 测试报告失败'
+  } finally {
+    uiReportLoading.value = false
+  }
+}
+
+async function loadUiReportDetail(runId: string) {
+  const id = String(runId || '').trim()
+  if (!id) {
+    uiReportDetail.value = null
+    return
+  }
+  uiReportDetailLoading.value = true
+  uiReportErrorText.value = ''
+  try {
+    uiReportDetail.value = await fetchUiTestReportDetail(id)
+  } catch (error) {
+    uiReportDetail.value = null
+    uiReportErrorText.value = error instanceof Error ? error.message : '加载 UI 测试报告详情失败'
+  } finally {
+    uiReportDetailLoading.value = false
+  }
+}
+
 watch(selectedPerformanceReportId, (value) => {
   void loadPerformanceReportDetail(value)
+})
+
+watch(selectedUiReportRunId, (value) => {
+  void loadUiReportDetail(value)
 })
 
 watch(
@@ -106,6 +181,9 @@ watch(
   (value) => {
     if (value === 'performance' && !performanceItems.value.length && !performanceLoading.value) {
       void loadPerformanceReports()
+    }
+    if (value === 'ui' && !uiReportItems.value.length && !uiReportLoading.value) {
+      void loadUiReports()
     }
   },
   { immediate: true }
@@ -133,7 +211,7 @@ watch(
         <ReportsSingleReportCard />
       </div>
 
-      <div v-else class="flex flex-col gap-[16px]">
+      <div v-else-if="activeView === 'performance'" class="flex flex-col gap-[16px]">
         <ReportsPerformanceControls
           v-model="selectedPerformanceReportId"
           :items="performanceItems"
@@ -144,6 +222,20 @@ watch(
           :report="performanceDetail"
           :loading="performanceLoading || performanceDetailLoading"
           :error-text="performanceErrorText"
+        />
+      </div>
+
+      <div v-else class="flex flex-col gap-[16px]">
+        <ReportsUiTestControls
+          v-model="selectedUiReportRunId"
+          :items="uiReportItems"
+          :loading="uiReportLoading"
+          @refresh="loadUiReports"
+        />
+        <ReportsUiTestReportCard
+          :report="uiReportDetail"
+          :loading="uiReportLoading || uiReportDetailLoading"
+          :error-text="uiReportErrorText"
         />
       </div>
     </div>

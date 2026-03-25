@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { 
   generateDocCsv, 
   generateK6,
+  generateAndRunUiTest,
   executeK6,
   importTestcases,
   generateDocAndImport,
@@ -19,19 +20,25 @@ import apiRowRemove from '@/assets/figma/ai-testing-platform/api-row-remove-1.sv
 import filterChevron from '@/assets/figma/ai-testing-platform/filter-chevron.svg'
 
 const route = useRoute()
+const router = useRouter()
 const projectId = computed(() => String(route.params.projectId || ''))
 
 // Form State
 const docContent = ref('')
 const selectedFile = ref<File | null>(null)
 const instruction = ref('')
-const selectedAgent = ref<'CASE' | 'PERF'>('CASE')
+const selectedAgent = ref<'CASE' | 'PERF' | 'UI'>('CASE')
 const testFramework = ref('pytest + requests')
 const perfVus = ref(50)
 const perfSpawnRate = ref(10)
 const perfDuration = ref(60)
 const environmentUrl = ref('')
 const environments = ref<ProjectEnvironment[]>([])
+const uiPageId = ref('')
+const uiFigmaUrl = ref('')
+const uiAssertLevel = ref<'P0' | 'P1' | 'P2'>('P0')
+const uiHeaded = ref(false)
+const lastUiRunId = ref('')
 
 onMounted(async () => {
   if (projectId.value) {
@@ -82,6 +89,13 @@ const parsedCsv = computed(() => {
   }
 })
 
+const canGenerate = computed(() => {
+  if (selectedAgent.value === 'UI') {
+    return Boolean(uiPageId.value.trim()) && Boolean(projectId.value)
+  }
+  return Boolean(docContent.value.trim() || selectedFile.value)
+})
+
 function getMethodColor(method: string) {
   const m = String(method || '').toUpperCase()
   if (m === 'GET') return 'bg-[#27C93F]'
@@ -128,13 +142,52 @@ function clearContent() {
 }
 
 async function handleGenerate() {
-  if (!docContent.value.trim() && !selectedFile.value) {
+  if (selectedAgent.value === 'UI' && !uiPageId.value.trim()) {
+    showToast('请输入 pageId', 'error')
+    return
+  }
+
+  if (selectedAgent.value !== 'UI' && !docContent.value.trim() && !selectedFile.value) {
     showToast('请输入接口文档内容或上传文件', 'error')
     return
   }
 
   isGenerating.value = true
   try {
+    if (selectedAgent.value === 'UI') {
+      if (!projectId.value) {
+        showToast('项目 ID 缺失', 'error')
+        return
+      }
+      const res = await generateAndRunUiTest({
+        projectId: projectId.value,
+        pageId: uiPageId.value.trim(),
+        figmaUrl: uiFigmaUrl.value.trim() || undefined,
+        assertLevel: uiAssertLevel.value,
+        headed: uiHeaded.value,
+        baseUrl: environmentUrl.value,
+        updateManifest: true,
+        triggerBy: 'AI_ASSISTANT',
+        meta: { source: 'ai_assistant_ui_tab' }
+      })
+      lastUiRunId.value = res.runId
+      resultFileName.value = `${res.pageId}.spec.ts`
+      resultText.value = [
+        `[UI测试执行结果 - ${res.status}]`,
+        `runId: ${res.runId}`,
+        `pageId: ${res.pageId}`,
+        `assertLevel: ${res.assertLevel}`,
+        `specPath: ${res.specPath}`,
+        `reportDir: ${res.reportDir}`,
+        `passed/total: ${res.summary.passed}/${res.summary.total}`,
+        `failed: ${res.summary.failed}`,
+        `durationMs: ${res.summary.durationMs}`
+      ].join('\n')
+      executionResult.value = `${res.stdout || ''}${res.stderr ? `\n\n${res.stderr}` : ''}`.trim()
+      showToast('UI测试执行完成')
+      return
+    }
+
     const file = selectedFile.value || new File([new Blob([docContent.value], { type: 'text/plain' })], 'openapi_doc.yaml')
 
     if (selectedAgent.value === 'CASE') {
@@ -222,6 +275,7 @@ async function handleGenerateAndImport() {
 }
 
 async function handleExecute() {
+  if (selectedAgent.value !== 'PERF') return
   if (!resultText.value) return
   isGenerating.value = true
   try {
@@ -233,6 +287,18 @@ async function handleExecute() {
   } finally {
     isGenerating.value = false
   }
+}
+
+function goToUiReports() {
+  if (!projectId.value) return
+  const query: Record<string, string> = { tab: 'ui' }
+  if (lastUiRunId.value) {
+    query.uiRunId = lastUiRunId.value
+  }
+  router.push({
+    path: `/projects/${projectId.value}/reports`,
+    query
+  })
 }
 
 function copyResult() {
@@ -279,13 +345,15 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
       <div class="flex flex-1 flex-col gap-6 overflow-y-auto pr-2 custom-scrollbar-light">
         <!-- Document Input Section -->
         <div class="flex flex-col gap-3">
-          <div class="flex items-center justify-between">
-            <label class="flex items-center gap-2 rounded-[10px] bg-[#E8F0FE] px-4 py-2 text-sm font-semibold text-[#155DFC] cursor-pointer hover:bg-[#D8E6FD] transition-all group">
-              <img :src="navApiCollection" alt="" class="h-4 w-4" />
-              <span>上传接口文档 / Swagger / OpenAPI</span>
-              <input type="file" class="hidden" @change="onFileChange" accept=".md,.json,.yaml,.yml,.pdf,.docx,.txt" />
-            </label>
-          </div>
+          <template v-if="selectedAgent !== 'UI'">
+            <div class="flex items-center justify-between">
+              <label class="flex items-center gap-2 rounded-[10px] bg-[#E8F0FE] px-4 py-2 text-sm font-semibold text-[#155DFC] cursor-pointer hover:bg-[#D8E6FD] transition-all group">
+                <img :src="navApiCollection" alt="" class="h-4 w-4" />
+                <span>上传接口文档 / Swagger / OpenAPI</span>
+                <input type="file" class="hidden" @change="onFileChange" accept=".md,.json,.yaml,.yml,.pdf,.docx,.txt" />
+              </label>
+            </div>
+          </template>
           
           <!-- Environment Selection -->
           <div class="flex flex-col gap-2">
@@ -318,7 +386,7 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
             />
           </div>
           
-          <div v-if="selectedFile" class="flex items-center justify-between rounded-[12px] border border-[#155DFC]/20 bg-[#F0F7FF] px-4 py-3">
+          <div v-if="selectedAgent !== 'UI' && selectedFile" class="flex items-center justify-between rounded-[12px] border border-[#155DFC]/20 bg-[#F0F7FF] px-4 py-3">
             <div class="flex items-center gap-3">
               <span class="text-xl">📄</span>
               <div class="flex flex-col">
@@ -331,7 +399,7 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
             </button>
           </div>
 
-          <div v-else class="relative group">
+          <div v-else-if="selectedAgent !== 'UI'" class="relative group">
             <textarea 
               v-model="docContent"
               placeholder="粘贴接口文档内容（支持 Markdown / OpenAPI JSON 或 YAML）..."
@@ -344,6 +412,31 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
               <button class="flex items-center gap-1 text-[#717182] hover:text-[#FB2C36] font-medium" @click="clearContent">
                 <img :src="apiRowRemove" alt="" class="h-3.5 w-3.5 opacity-60" /> 清空
               </button>
+            </div>
+          </div>
+
+          <div v-else class="grid grid-cols-1 gap-3">
+            <div class="flex flex-col gap-2">
+              <div class="flex items-center gap-2 text-sm font-bold text-[#0A0A0A]">
+                <span class="w-1 h-4 bg-[#155DFC] rounded-full"></span>
+                <span>页面标识 pageId</span>
+              </div>
+              <input
+                v-model="uiPageId"
+                placeholder="例如：sample-login-page"
+                class="h-12 w-full rounded-[12px] border border-black/10 bg-white px-4 text-sm outline-none transition-all focus:border-[#155DFC] focus:ring-4 focus:ring-[#155DFC]/5"
+              />
+            </div>
+            <div class="flex flex-col gap-2">
+              <div class="flex items-center gap-2 text-sm font-bold text-[#0A0A0A]">
+                <span class="w-1 h-4 bg-[#155DFC] rounded-full"></span>
+                <span>Figma 链接（可选）</span>
+              </div>
+              <input
+                v-model="uiFigmaUrl"
+                placeholder="https://www.figma.com/..."
+                class="h-12 w-full rounded-[12px] border border-black/10 bg-white px-4 text-sm outline-none transition-all focus:border-[#155DFC] focus:ring-4 focus:ring-[#155DFC]/5"
+              />
             </div>
           </div>
 
@@ -360,8 +453,11 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
             />
           </div>
 
-          <div v-if="!docContent.trim() && !selectedFile" class="flex items-center gap-2 rounded-[8px] bg-[#F8FAFC] border border-black/5 px-3 py-2 text-xs text-[#64748B]">
+          <div v-if="selectedAgent !== 'UI' && !docContent.trim() && !selectedFile" class="flex items-center gap-2 rounded-[8px] bg-[#F8FAFC] border border-black/5 px-3 py-2 text-xs text-[#64748B]">
             <span class="text-blue-500">ℹ️</span> 请提供文档内容或上传文件
+          </div>
+          <div v-else-if="selectedAgent === 'UI' && !uiPageId.trim()" class="flex items-center gap-2 rounded-[8px] bg-[#F8FAFC] border border-black/5 px-3 py-2 text-xs text-[#64748B]">
+            <span class="text-blue-500">ℹ️</span> 请输入 pageId 后即可执行 UI 测试
           </div>
         </div>
 
@@ -375,7 +471,7 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
             <img :src="filterChevron" alt="" class="h-4 w-4 opacity-40" />
           </div>
 
-          <div class="grid grid-cols-2 gap-4">
+          <div class="grid grid-cols-3 gap-4">
             <!-- Case Agent Card -->
             <div 
               class="group relative flex cursor-pointer flex-col gap-3 rounded-[16px] border-2 p-5 transition-all duration-200"
@@ -415,6 +511,25 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
                 <div class="text-[11px] leading-relaxed text-[#717182] mt-1">生成 K6 性能压测脚本</div>
               </div>
             </div>
+
+            <div 
+              class="group relative flex cursor-pointer flex-col gap-3 rounded-[16px] border-2 p-5 transition-all duration-200"
+              :class="selectedAgent === 'UI' ? 'border-[#155DFC] bg-[#F0F7FF] shadow-sm' : 'border-black/5 bg-white hover:border-black/10'"
+              @click="selectedAgent = 'UI'"
+            >
+              <div class="flex items-center justify-between">
+                <div class="flex h-10 w-10 items-center justify-center rounded-[12px] bg-[#E0E7FF] text-[#155DFC]">
+                  <img :src="navExecution" alt="" class="h-5 w-5 text-[#155DFC]" />
+                </div>
+                <div v-if="selectedAgent === 'UI'" class="flex h-5 w-5 items-center justify-center rounded-full bg-[#155DFC]">
+                  <span class="text-white text-[10px]">✓</span>
+                </div>
+              </div>
+              <div>
+                <div class="text-[15px] font-bold text-[#0A0A0A]">UI测试智能体</div>
+                <div class="text-[11px] leading-relaxed text-[#717182] mt-1">按 pageId 生成并执行 Playwright</div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -438,7 +553,7 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
             </div>
           </template>
 
-          <template v-else>
+          <template v-else-if="selectedAgent === 'PERF'">
             <div class="flex items-center justify-between">
               <div class="flex items-center gap-2.5 text-[13px] font-medium text-[#475569]">
                 <span class="text-lg">👥</span> 并发用户数
@@ -458,6 +573,31 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
               <input v-model.number="perfDuration" type="number" class="h-9 w-[100px] rounded-[8px] border border-black/10 bg-[#F8FAFC] px-3 text-[13px] font-bold outline-none focus:border-[#155DFC]" />
             </div>
           </template>
+
+          <template v-else>
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2.5 text-[13px] font-medium text-[#475569]">
+                <span class="text-lg">🎯</span> 断言等级
+              </div>
+              <select v-model="uiAssertLevel" class="h-9 w-[120px] rounded-[8px] border border-black/10 bg-[#F8FAFC] px-3 text-[13px] font-medium outline-none focus:border-[#155DFC]">
+                <option value="P0">P0</option>
+                <option value="P1">P1</option>
+                <option value="P2">P2</option>
+              </select>
+            </div>
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2.5 text-[13px] font-medium text-[#475569]">
+                <span class="text-lg">🖥️</span> 有头执行
+              </div>
+              <label class="inline-flex cursor-pointer items-center gap-2 text-[13px] font-medium text-[#475569]">
+                <input v-model="uiHeaded" type="checkbox" class="h-4 w-4 rounded border-black/20 text-[#155DFC] focus:ring-[#155DFC]" />
+                <span>{{ uiHeaded ? '开启' : '关闭' }}</span>
+              </label>
+            </div>
+            <div class="text-[13px] text-[#64748B]">
+              将直接调用后端生成并执行接口，完成后可一键跳转报告中心“UI测试报告”。
+            </div>
+          </template>
         </div>
       </div>
 
@@ -466,12 +606,12 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
         <button 
           type="button"
           class="flex h-[52px] w-full items-center justify-center gap-3 rounded-full bg-[#0F172A] text-[16px] font-bold text-white shadow-xl transition-all hover:bg-[#1E293B] active:scale-[0.98] disabled:opacity-50"
-          :disabled="(!docContent.trim() && !selectedFile) || isGenerating"
+          :disabled="!canGenerate || isGenerating"
           @click="handleGenerate"
         >
           <img v-if="isGenerating" :src="runsStatusRunning" alt="" class="h-5 w-5 animate-spin" />
           <img v-else :src="btnAiGenerate" alt="" class="h-5 w-5 brightness-0 invert" />
-          <span>{{ selectedAgent === 'CASE' ? '仅生成预览' : '立即生成' }}</span>
+          <span>{{ selectedAgent === 'CASE' ? '仅生成预览' : selectedAgent === 'PERF' ? '立即生成' : '生成并执行UI测试' }}</span>
         </button>
         
         <button 
@@ -484,6 +624,15 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
           <img v-if="isGenerating" :src="runsStatusRunning" alt="" class="h-5 w-5 animate-spin" />
           <img v-else :src="btnAiGenerate" alt="" class="h-5 w-5 brightness-0 invert" />
           <span>生成并导入到用例列表</span>
+        </button>
+
+        <button
+          v-if="selectedAgent === 'UI' && lastUiRunId"
+          type="button"
+          class="flex h-[52px] w-full items-center justify-center gap-3 rounded-full bg-[#155DFC] text-[16px] font-bold text-white shadow-xl transition-all hover:bg-[#1048CB] active:scale-[0.98]"
+          @click="goToUiReports"
+        >
+          <span>跳转报告中心（UI测试报告）</span>
         </button>
       </div>
     </div>
@@ -523,6 +672,7 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
               <span>📥</span> 下载
             </button>
             <button 
+              v-if="selectedAgent === 'PERF'"
               class="flex items-center gap-2 rounded-full bg-[#27C93F] px-5 py-2 text-[12px] font-bold text-white transition-all hover:bg-[#1EA835] active:scale-95 shadow-lg shadow-[#27C93F]/20"
               @click="handleExecute"
             >
