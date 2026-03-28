@@ -72,13 +72,9 @@ def create_app() -> FastAPI:
         if settings.env != "local":
             return
         try:
-<<<<<<< HEAD
             await asyncio.wait_for(asyncio.to_thread(_run_migrations), timeout=60)
         except asyncio.TimeoutError as exc:
             logger.exception("Startup migrations timed out", exc_info=exc)
-=======
-            await asyncio.to_thread(_run_migrations)
->>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
         except Exception as exc:
             logger.exception("Failed to run startup migrations", exc_info=exc)
 
@@ -146,13 +142,8 @@ def create_app() -> FastAPI:
 
     @application.exception_handler(asyncpg.PostgresError)
     async def asyncpg_exception_handler(request: Request, exc: asyncpg.PostgresError) -> JSONResponse:
-<<<<<<< HEAD
         request_id = await get_request_id(request)
         logger.exception(f"[{request_id}] Database error", exc_info=exc)
-=======
-        logger.exception("Database error", exc_info=exc)
-        request_id = await get_request_id(request)
->>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
         return JSONResponse(
             status_code=200,
             content={
@@ -165,13 +156,8 @@ def create_app() -> FastAPI:
 
     @application.exception_handler(SQLAlchemyError)
     async def sqlalchemy_exception_handler(request: Request, exc: SQLAlchemyError) -> JSONResponse:
-<<<<<<< HEAD
         request_id = await get_request_id(request)
         logger.exception(f"[{request_id}] Database error", exc_info=exc)
-=======
-        logger.exception("Database error", exc_info=exc)
-        request_id = await get_request_id(request)
->>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
         return JSONResponse(
             status_code=200,
             content={
@@ -184,13 +170,8 @@ def create_app() -> FastAPI:
 
     @application.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-<<<<<<< HEAD
         request_id = await get_request_id(request)
         logger.exception(f"[{request_id}] Unhandled exception", exc_info=exc)
-=======
-        logger.exception("Unhandled exception", exc_info=exc)
-        request_id = await get_request_id(request)
->>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
         return JSONResponse(
             status_code=200,
             content={

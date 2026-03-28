@@ -4,18 +4,12 @@ import asyncio
 import json
 import os
 import re
-<<<<<<< HEAD
 import shutil
-=======
->>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-<<<<<<< HEAD
 from urllib.parse import urlparse
-=======
->>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
@@ -28,7 +22,6 @@ from app.models.project import Project
 from app.models.run import Artifact, Run
 from app.schemas.common import ApiResponse, PageData
 from app.schemas.ui_test import (
-<<<<<<< HEAD
     UiBaselineBindImagesData,
     UiBaselineBindImagesRequest,
     UiBaselineInitData,
@@ -38,9 +31,6 @@ from app.schemas.ui_test import (
     UiTestFailedCase,
     UiTestGeneratePytestPoData,
     UiTestGeneratePytestPoRequest,
-=======
-    UiTestFailedCase,
->>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
     UiTestGenerateRunData,
     UiTestGenerateRunRequest,
     UiTestReportDetailData,
@@ -56,15 +46,12 @@ _FRONTEND_ROOT = _WORKSPACE_ROOT / "ai-project_front_end"
 _MANIFEST_PATH = _WORKSPACE_ROOT / "docs" / "figma" / "manifest.json"
 _GENERATED_SPEC_DIR = _FRONTEND_ROOT / "tests" / "ui" / "generated"
 _REPORT_DIR = _FRONTEND_ROOT / "tests" / "ui" / "reports" / "html"
-<<<<<<< HEAD
 _CAPTURE_DIR = _FRONTEND_ROOT / "tests" / "ui" / "capture"
 _AUTOMATION_ROOT = _WORKSPACE_ROOT / "automation_pytest"
 _AUTOMATION_PAGES_DIR = _AUTOMATION_ROOT / "pages"
 _AUTOMATION_TESTS_DIR = _AUTOMATION_ROOT / "tests"
 _AUTOMATION_LOCATORS_DIR = _AUTOMATION_ROOT / "locators"
 _SUITE_TYPES = {"smoke", "regression"}
-=======
->>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
 
 
 def _now_ms() -> int:
@@ -84,7 +71,6 @@ def _normalize_assert_level(raw: str) -> str:
     return value
 
 
-<<<<<<< HEAD
 def _normalize_suite_type(raw: str) -> str:
     value = str(raw or "").strip().lower()
     if value not in _SUITE_TYPES:
@@ -113,8 +99,6 @@ def _derive_page_id(raw_page_id: str | None, page_url: str) -> str:
     return _slugify_page_id(candidate or "ui-page")
 
 
-=======
->>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
 def _load_manifest() -> dict[str, Any]:
     if not _MANIFEST_PATH.exists():
         raise HTTPException(status_code=404, detail="manifest_not_found")
@@ -174,7 +158,6 @@ def _extract_p0_texts(page_doc_text: str) -> list[str]:
     return cleaned
 
 
-<<<<<<< HEAD
 def _extract_p1_targets(page_doc_text: str) -> list[dict[str, Any]]:
     section = _extract_section_text(page_doc_text, "关键区域视觉（P1）")
     if not section:
@@ -392,19 +375,6 @@ def _build_ui_spec(
                     "    }",
                 ]
             )
-=======
-def _build_ui_spec(*, page_id: str, route_path: str, assert_level: str, p0_texts: list[str]) -> str:
-    escaped_route = route_path.replace("\\", "\\\\").replace("/", "\\/")
-    lines = [
-        "import { expect, test } from '@playwright/test'",
-        "",
-        f"test.describe('{page_id} {assert_level} 验证', () => {{",
-        "  test('页面关键元素校验', async ({ page }) => {",
-        f"    await page.goto('{route_path}')",
-        "",
-        f"    await expect(page).toHaveURL(/^{escaped_route}$/)",
-    ]
->>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
     for text in p0_texts:
         escaped = text.replace("\\", "\\\\").replace("'", "\\'")
         lines.append(f"    await expect(page.getByText('{escaped}', {{ exact: true }})).toBeVisible()")
@@ -442,7 +412,6 @@ def _parse_playwright_summary(output_text: str) -> UiTestSummary:
     return UiTestSummary(total=total, passed=passed, failed=failed, skipped=skipped, durationMs=max(0, duration_ms))
 
 
-<<<<<<< HEAD
 def _resolve_playwright_cmd(*, spec_relative_path: str, headed: bool) -> list[str]:
     spec_arg = str(spec_relative_path or "").replace("\\", "/")
     npm_from_env = str(os.environ.get("UI_TEST_NPM") or os.environ.get("NPM_BIN") or "").strip() or None
@@ -545,22 +514,10 @@ async def _run_capture_script(*, page_url: str, page_id: str, headed: bool, capt
     except OSError as exc:
         detail = str(exc.strerror or exc).strip() or "capture_runtime_unavailable"
         raise HTTPException(status_code=503, detail=f"capture_runtime_unavailable: {detail}"[:2000]) from exc
-=======
-async def _run_playwright(*, spec_relative_path: str, headed: bool) -> tuple[int, str, str]:
-    script_name = "test:e2e:headed" if headed else "test:e2e"
-    cmd = ["npm", "run", script_name, "--", spec_relative_path]
-    process = await asyncio.create_subprocess_exec(
-        *cmd,
-        cwd=str(_FRONTEND_ROOT),
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
->>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
     stdout_b, stderr_b = await process.communicate()
     return process.returncode, stdout_b.decode("utf-8", errors="replace"), stderr_b.decode("utf-8", errors="replace")
 
 
-<<<<<<< HEAD
 def _build_locator(item: dict[str, Any]) -> dict[str, str]:
     test_id = str(item.get("dataTestId") or "").strip()
     role = str(item.get("role") or "").strip()
@@ -666,8 +623,6 @@ def _build_test_py(page_id: str, suite_type: str, assert_level: str, page_path: 
     return "\n".join(lines)
 
 
-=======
->>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
 def _update_manifest_ui_automation(
     *,
     manifest: dict[str, Any],
@@ -726,7 +681,6 @@ def _build_report_index_url(run_id: str) -> str:
     return f"/api/ui-tests/reports/{run_id}/index.html"
 
 
-<<<<<<< HEAD
 def _clean_figma_url(raw: str) -> str:
     text = str(raw or "").strip()
     if not text:
@@ -956,8 +910,6 @@ def _render_page_doc_template(
     return rendered
 
 
-=======
->>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
 async def _persist_run(
     *,
     db: AsyncSession,
@@ -995,16 +947,12 @@ async def _persist_run(
     db.add(run)
     await db.flush()
     report_index = _REPORT_DIR / "index.html"
-<<<<<<< HEAD
     report_size = None
     if report_index.exists():
         try:
             report_size = report_index.stat().st_size
         except OSError:
             report_size = None
-=======
-    report_size = report_index.stat().st_size if report_index.exists() else None
->>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
     artifact = Artifact(
         tenant_id=user.tenant_id,
         run_id=run.id,
@@ -1024,7 +972,6 @@ async def _persist_run(
     return str(run.id)
 
 
-<<<<<<< HEAD
 @router.post("/baseline/init", response_model=ApiResponse[UiBaselineInitData])
 async def init_ui_baseline_config(
     payload: UiBaselineInitRequest,
@@ -1338,8 +1285,6 @@ async def generate_pytest_po_from_url(
         raise HTTPException(status_code=503, detail=f"generate_pytest_po_failed: {type(exc).__name__}") from exc
 
 
-=======
->>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
 @router.post("/generate-and-run", response_model=ApiResponse[UiTestGenerateRunData])
 async def generate_and_run_ui_test(
     payload: UiTestGenerateRunRequest,
@@ -1364,17 +1309,13 @@ async def generate_and_run_ui_test(
     route_path = str(page.get("routePath") or "").strip()
     if not route_path.startswith("/"):
         raise HTTPException(status_code=422, detail="routePath_invalid")
-<<<<<<< HEAD
     baseline_version = str(page.get("baselineVersion") or "v1").strip() or "v1"
     selectors = page.get("selectors") if isinstance(page.get("selectors"), dict) else {}
     thresholds = page.get("thresholds") if isinstance(page.get("thresholds"), dict) else {}
-=======
->>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
 
     page_doc = _resolve_page_doc(page)
     page_doc_text = page_doc.read_text(encoding="utf-8")
     p0_texts = _extract_p0_texts(page_doc_text)
-<<<<<<< HEAD
     if assert_level == "P0" and not p0_texts:
         raise HTTPException(status_code=422, detail="p0_texts_missing")
     p1_targets = _extract_p1_targets(page_doc_text)
@@ -1384,20 +1325,11 @@ async def generate_and_run_ui_test(
     spec_relative = Path("tests") / "ui" / "generated" / f"{payload.pageId}.spec.ts"
     spec_relative_path = spec_relative.as_posix()
     spec_full_path = _FRONTEND_ROOT / spec_relative
-=======
-    if not p0_texts:
-        raise HTTPException(status_code=422, detail="p0_texts_missing")
-
-    _GENERATED_SPEC_DIR.mkdir(parents=True, exist_ok=True)
-    spec_relative_path = str(Path("tests/ui/generated") / f"{payload.pageId}.spec.ts")
-    spec_full_path = _FRONTEND_ROOT / spec_relative_path
->>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
     spec_content = _build_ui_spec(
         page_id=payload.pageId,
         route_path=route_path,
         assert_level=assert_level,
         p0_texts=p0_texts,
-<<<<<<< HEAD
         p1_targets=p1_targets,
         baseline_version=baseline_version,
         selectors=selectors,
@@ -1408,21 +1340,14 @@ async def generate_and_run_ui_test(
         spec_full_path.write_text(spec_content, encoding="utf-8")
     except OSError as exc:
         raise HTTPException(status_code=503, detail=f"spec_write_failed: {type(exc).__name__}") from exc
-=======
-    )
-    spec_full_path.write_text(spec_content, encoding="utf-8")
->>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
 
     try:
         return_code, stdout_text, stderr_text = await _run_playwright(
             spec_relative_path=spec_relative_path,
             headed=payload.headed,
         )
-<<<<<<< HEAD
     except NotImplementedError as exc:
         raise HTTPException(status_code=503, detail="subprocess_not_supported") from exc
-=======
->>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
     except FileNotFoundError as exc:
         raise HTTPException(status_code=503, detail="npm_not_found") from exc
     except OSError as exc:
@@ -1432,7 +1357,6 @@ async def generate_and_run_ui_test(
     status = "COMPLETED" if return_code == 0 else "FAILED"
 
     if payload.updateManifest:
-<<<<<<< HEAD
         try:
             _update_manifest_ui_automation(
                 manifest=manifest,
@@ -1442,14 +1366,6 @@ async def generate_and_run_ui_test(
             )
         except OSError as exc:
             raise HTTPException(status_code=503, detail=f"manifest_write_failed: {type(exc).__name__}") from exc
-=======
-        _update_manifest_ui_automation(
-            manifest=manifest,
-            page=page,
-            spec_relative_path=spec_relative_path,
-            run_result=result,
-        )
->>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
 
     try:
         run_id = await _persist_run(

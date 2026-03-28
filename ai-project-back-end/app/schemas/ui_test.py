@@ -42,8 +42,6 @@ class UiTestGenerateRunData(BaseSchema):
     stdout: str = ""
     stderr: str = ""
 
-
-<<<<<<< HEAD
 class UiTestGeneratePytestPoRequest(BaseSchema):
     projectId: str = Field(min_length=1, max_length=64)
     pageUrl: str = Field(min_length=8, max_length=2048)
@@ -70,9 +68,6 @@ class UiTestGeneratePytestPoData(BaseSchema):
     elementCount: int = Field(ge=0)
     reusedCapture: bool = False
 
-
-=======
->>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
 class UiTestReportListItem(BaseSchema):
     runId: str = Field(min_length=1, max_length=64)
     projectId: str = Field(min_length=1, max_length=64)
@@ -112,7 +107,6 @@ class UiTestReportDetailData(BaseSchema):
     failedCases: list[UiTestFailedCase] = Field(default_factory=list)
     startedAt: int = Field(ge=0)
     finishedAt: int = Field(ge=0)
-<<<<<<< HEAD
 
 
 class UiBaselineRenderViewport(BaseSchema):
@@ -193,5 +187,3 @@ class UiBaselineSelectorsRequest(BaseSchema):
 class UiBaselineSelectorsData(BaseSchema):
     pageId: str = Field(min_length=1, max_length=128)
     updatedAt: str = Field(min_length=1, max_length=64)
-=======
->>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b

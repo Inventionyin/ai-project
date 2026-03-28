@@ -1173,11 +1173,7 @@ async def list_runs(
                 ProjectMember.tenant_id == user.tenant_id,
             ),
         )
-<<<<<<< HEAD
         .where(Run.tenant_id == user.tenant_id, Run.suite_id.isnot(None))
-=======
-        .where(Run.tenant_id == user.tenant_id)
->>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
     )
     if not _is_admin(user):
         stmt = stmt.where(

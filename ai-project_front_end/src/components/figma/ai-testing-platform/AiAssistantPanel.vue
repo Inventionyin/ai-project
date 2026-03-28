@@ -1,14 +1,11 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { 
-  generateDocCsv, 
+import {
+  generateDocCsv,
   generateK6,
   generateAndRunUiTest,
-<<<<<<< HEAD
   generatePytestPoFromUrl,
-=======
->>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
   executeK6,
   importTestcases,
   generateDocAndImport,
@@ -21,10 +18,6 @@ import navExecution from '@/assets/figma/ai-testing-platform/nav-execution.svg'
 import runsStatusRunning from '@/assets/figma/ai-testing-platform/runs-status-running.svg'
 import btnAiGenerate from '@/assets/figma/ai-testing-platform/btn-ai-generate.svg'
 import apiRowRemove from '@/assets/figma/ai-testing-platform/api-row-remove-1.svg'
-<<<<<<< HEAD
-=======
-import filterChevron from '@/assets/figma/ai-testing-platform/filter-chevron.svg'
->>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
 
 const route = useRoute()
 const router = useRouter()
@@ -34,18 +27,13 @@ const projectId = computed(() => String(route.params.projectId || ''))
 const docContent = ref('')
 const selectedFile = ref<File | null>(null)
 const instruction = ref('')
-<<<<<<< HEAD
 const selectedAgent = ref<'CASE' | 'PERF' | 'UI_AUTO'>('CASE')
-=======
-const selectedAgent = ref<'CASE' | 'PERF' | 'UI'>('CASE')
->>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
 const testFramework = ref('pytest + requests')
 const perfVus = ref(50)
 const perfSpawnRate = ref(10)
 const perfDuration = ref(60)
 const environmentUrl = ref('')
 const environments = ref<ProjectEnvironment[]>([])
-<<<<<<< HEAD
 const uiAutoMode = ref<'RUN' | 'CODEGEN'>('RUN')
 const uiPageId = ref('')
 const uiPageUrl = ref('')
@@ -54,12 +42,6 @@ const uiAssertLevel = ref<'P0' | 'P1' | 'P2'>('P0')
 const uiSuiteType = ref<'smoke' | 'regression'>('smoke')
 const uiHeaded = ref(false)
 const uiForceRecapture = ref(false)
-=======
-const uiPageId = ref('')
-const uiFigmaUrl = ref('')
-const uiAssertLevel = ref<'P0' | 'P1' | 'P2'>('P0')
-const uiHeaded = ref(false)
->>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
 const lastUiRunId = ref('')
 
 onMounted(async () => {
@@ -86,59 +68,16 @@ const executionResult = ref('')
 const resultFileName = ref('')
 const showPreviewModal = ref(false)
 
-<<<<<<< HEAD
 const canGenerate = computed(() => {
   if (selectedAgent.value === 'UI_AUTO') {
     if (uiAutoMode.value === 'RUN') {
       return Boolean(uiPageId.value.trim()) && Boolean(projectId.value)
     }
     return Boolean(uiPageUrl.value.trim()) && Boolean(projectId.value)
-=======
-const parsedCsv = computed(() => {
-  if (selectedAgent.value !== 'CASE' || !resultText.value) return []
-  try {
-    const lines = resultText.value.split('\n')
-    const headers = lines[0].split(',').map(h => h.trim().toLowerCase())
-    return lines.slice(1).filter(l => l.trim()).map(line => {
-      const values = line.split(',').map(v => v.trim())
-      const obj: any = {}
-      headers.forEach((h, i) => {
-        obj[h] = values[i]
-      })
-      // Map common headers if they have different names
-      return {
-        title: obj.title || obj.test_case_title || '',
-        apiMethod: obj.apimethod || obj.method || '',
-        apiUrl: obj.apiurl || obj.url || '',
-        expectedResult: obj.expectedresult || obj.expected_result || ''
-      }
-    })
-  } catch (e) {
-    console.error('Failed to parse CSV', e)
-    return []
-  }
-})
-
-const canGenerate = computed(() => {
-  if (selectedAgent.value === 'UI') {
-    return Boolean(uiPageId.value.trim()) && Boolean(projectId.value)
->>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
   }
   return Boolean(docContent.value.trim() || selectedFile.value)
 })
 
-<<<<<<< HEAD
-=======
-function getMethodColor(method: string) {
-  const m = String(method || '').toUpperCase()
-  if (m === 'GET') return 'bg-[#27C93F]'
-  if (m === 'POST') return 'bg-[#155DFC]'
-  if (m === 'PUT') return 'bg-[#FFBD2E]'
-  if (m === 'DELETE') return 'bg-[#FF5F56]'
-  return 'bg-[#717182]'
-}
-
->>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
 function onFileChange(e: Event) {
   const target = e.target as HTMLInputElement
   if (target.files && target.files[0]) {
@@ -152,18 +91,26 @@ function onFileChange(e: Event) {
 }
 
 function loadExample() {
-  docContent.value = JSON.stringify({
-    openapi: '3.0.0',
-    info: { title: 'Petstore Example', version: '1.0.0' },
-    paths: {
-      '/pets': {
-        get: { summary: 'List all pets', responses: { '200': { description: 'A paged array of pets' } } }
-      },
-      '/pets/{id}': {
-        get: { summary: 'Get pet by id', parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'A single pet' } } }
+  docContent.value = JSON.stringify(
+    {
+      openapi: '3.0.0',
+      info: { title: 'Petstore Example', version: '1.0.0' },
+      paths: {
+        '/pets': {
+          get: { summary: 'List all pets', responses: { '200': { description: 'A paged array of pets' } } }
+        },
+        '/pets/{id}': {
+          get: {
+            summary: 'Get pet by id',
+            parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+            responses: { '200': { description: 'A single pet' } }
+          }
+        }
       }
-    }
-  }, null, 2)
+    },
+    null,
+    2
+  )
   selectedFile.value = new File([docContent.value], 'petstore_example.json', { type: 'application/json' })
 }
 
@@ -176,32 +123,18 @@ function clearContent() {
 }
 
 async function handleGenerate() {
-<<<<<<< HEAD
   if ((selectedAgent.value === 'CASE' || selectedAgent.value === 'PERF') && !docContent.value.trim() && !selectedFile.value) {
-=======
-  if (selectedAgent.value === 'UI' && !uiPageId.value.trim()) {
-    showToast('请输入 pageId', 'error')
-    return
-  }
-
-  if (selectedAgent.value !== 'UI' && !docContent.value.trim() && !selectedFile.value) {
->>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
     showToast('请输入接口文档内容或上传文件', 'error')
     return
   }
 
   isGenerating.value = true
   try {
-<<<<<<< HEAD
     if (selectedAgent.value === 'UI_AUTO') {
-=======
-    if (selectedAgent.value === 'UI') {
->>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
       if (!projectId.value) {
         showToast('项目 ID 缺失', 'error')
         return
       }
-<<<<<<< HEAD
       if (uiAutoMode.value === 'RUN') {
         if (!uiPageId.value.trim()) {
           showToast('请输入 pageId', 'error')
@@ -270,34 +203,6 @@ async function handleGenerate() {
       ].join('\n')
       executionResult.value = res.commandHint
       showToast('代码生成完成')
-=======
-      const res = await generateAndRunUiTest({
-        projectId: projectId.value,
-        pageId: uiPageId.value.trim(),
-        figmaUrl: uiFigmaUrl.value.trim() || undefined,
-        assertLevel: uiAssertLevel.value,
-        headed: uiHeaded.value,
-        baseUrl: environmentUrl.value,
-        updateManifest: true,
-        triggerBy: 'AI_ASSISTANT',
-        meta: { source: 'ai_assistant_ui_tab' }
-      })
-      lastUiRunId.value = res.runId
-      resultFileName.value = `${res.pageId}.spec.ts`
-      resultText.value = [
-        `[UI测试执行结果 - ${res.status}]`,
-        `runId: ${res.runId}`,
-        `pageId: ${res.pageId}`,
-        `assertLevel: ${res.assertLevel}`,
-        `specPath: ${res.specPath}`,
-        `reportDir: ${res.reportDir}`,
-        `passed/total: ${res.summary.passed}/${res.summary.total}`,
-        `failed: ${res.summary.failed}`,
-        `durationMs: ${res.summary.durationMs}`
-      ].join('\n')
-      executionResult.value = `${res.stdout || ''}${res.stderr ? `\n\n${res.stderr}` : ''}`.trim()
-      showToast('UI测试执行完成')
->>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
       return
     }
 
@@ -423,26 +328,15 @@ function copyResult() {
 
 function downloadResult() {
   if (!resultText.value) return
-  
   const isCase = selectedAgent.value === 'CASE'
-<<<<<<< HEAD
   const isPerf = selectedAgent.value === 'PERF'
   const mimeType = isCase ? 'text/csv' : isPerf ? 'application/javascript' : 'text/plain'
   const defaultExt = isCase ? '.csv' : isPerf ? '.js' : '.txt'
-=======
-  // 根据不同智能体类型设置正确的 MIME 类型和默认扩展名
-  const mimeType = isCase ? 'text/csv' : 'application/javascript'
-  const defaultExt = isCase ? '.csv' : '.js'
->>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
-  
+
   let fileName = resultFileName.value
   if (!fileName) {
     const timestamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)
-<<<<<<< HEAD
     fileName = isCase ? `api_test_cases_${timestamp}.csv` : isPerf ? `k6_script_${timestamp}.js` : `ui_result_${timestamp}.txt`
-=======
-    fileName = isCase ? `api_test_cases_${timestamp}.csv` : `k6_script_${timestamp}.js`
->>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
   } else if (!fileName.includes('.')) {
     fileName += defaultExt
   }
@@ -462,9 +356,7 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
 </script>
 
 <template>
-<<<<<<< HEAD
   <div class="flex flex-col min-h-screen bg-gradient-to-br from-[#F8FAFC] to-[#EFF6FF]">
-    <!-- 顶部导航栏 -->
     <header class="sticky top-0 z-40 bg-white/80 backdrop-blur-md border-b border-slate-100 shadow-sm">
       <div class="max-w-screen-xl mx-auto px-4 py-3 flex items-center justify-between">
         <div class="flex items-center gap-2">
@@ -479,48 +371,31 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
       </div>
     </header>
 
-    <!-- 主要内容区 -->
     <main class="flex-1 w-full py-6 px-4">
       <div class="max-w-screen-xl mx-auto">
-        <!-- 智能体选择 Tab 栏 (修改后的样式) -->
         <div class="mb-6 bg-white rounded-2xl shadow-md border border-slate-100 overflow-hidden">
-          <div class="px-6 py-4 border-b border-slate-100">
-
-          </div>
-          
-          <!-- 重构的 Tab 样式：横向小尺寸 Icon+文字 -->
+          <div class="px-6 py-4 border-b border-slate-100"></div>
           <div class="px-4 py-2">
             <div class="flex flex-row gap-1 bg-slate-50 rounded-lg p-1">
-              <!-- Case Agent Tab -->
-              <div 
+              <div
                 class="flex items-center gap-2 flex-1 justify-center py-2 px-3 rounded-lg cursor-pointer transition-all duration-200"
-                :class="selectedAgent === 'CASE' 
-                  ? 'bg-[#155DFC] text-white shadow-sm' 
-                  : 'hover:bg-slate-100 text-slate-700'"
+                :class="selectedAgent === 'CASE' ? 'bg-[#155DFC] text-white shadow-sm' : 'hover:bg-slate-100 text-slate-700'"
                 @click="selectedAgent = 'CASE'"
               >
                 <img :src="navCases" alt="测试用例" class="h-4 w-4" />
                 <span class="text-sm font-medium">API测试</span>
               </div>
-
-              <!-- Perf Agent Tab -->
-              <div 
+              <div
                 class="flex items-center gap-2 flex-1 justify-center py-2 px-3 rounded-lg cursor-pointer transition-all duration-200"
-                :class="selectedAgent === 'PERF' 
-                  ? 'bg-[#155DFC] text-white shadow-sm' 
-                  : 'hover:bg-slate-100 text-slate-700'"
+                :class="selectedAgent === 'PERF' ? 'bg-[#155DFC] text-white shadow-sm' : 'hover:bg-slate-100 text-slate-700'"
                 @click="selectedAgent = 'PERF'"
               >
                 <img :src="navExecution" alt="性能脚本" class="h-4 w-4" />
                 <span class="text-sm font-medium">性能脚本</span>
               </div>
-
-              <!-- UI Agent Tab -->
-              <div 
+              <div
                 class="flex items-center gap-2 flex-1 justify-center py-2 px-3 rounded-lg cursor-pointer transition-all duration-200"
-                :class="selectedAgent === 'UI_AUTO' 
-                  ? 'bg-[#155DFC] text-white shadow-sm' 
-                  : 'hover:bg-slate-100 text-slate-700'"
+                :class="selectedAgent === 'UI_AUTO' ? 'bg-[#155DFC] text-white shadow-sm' : 'hover:bg-slate-100 text-slate-700'"
                 @click="selectedAgent = 'UI_AUTO'"
               >
                 <img :src="navExecution" alt="UI测试" class="h-4 w-4" />
@@ -530,9 +405,7 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
           </div>
         </div>
 
-        <!-- 配置区域 -->
         <div class="mb-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
-          <!-- 左侧配置 -->
           <div class="lg:col-span-7 bg-white rounded-2xl shadow-md border border-slate-100 overflow-hidden">
             <div class="px-6 py-4 border-b border-slate-100 bg-slate-50">
               <h2 class="text-base font-bold text-slate-800 flex items-center gap-2">
@@ -540,9 +413,7 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
                 {{ selectedAgent === 'CASE' ? '接口文档配置' : selectedAgent === 'PERF' ? '性能测试配置' : 'UI自动化测试配置' }}
               </h2>
             </div>
-            
             <div class="p-6 space-y-6">
-              <!-- 文件上传/UI配置 -->
               <div>
                 <template v-if="selectedAgent === 'CASE' || selectedAgent === 'PERF'">
                   <label class="flex items-center gap-2 rounded-lg bg-[#E8F0FE] px-4 py-2 text-sm font-medium text-[#155DFC] cursor-pointer hover:bg-[#D8E6FD] transition-all group mb-4 block">
@@ -550,7 +421,6 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
                     <span>上传接口文档</span>
                     <input type="file" class="hidden" @change="onFileChange" accept=".md,.json,.yaml,.yml,.pdf,.docx,.txt" />
                   </label>
-
                   <div v-if="selectedFile" class="flex items-center justify-between rounded-lg border border-[#155DFC]/20 bg-[#F0F7FF] px-4 py-3 mb-4">
                     <div class="flex items-center gap-3">
                       <span class="text-xl">📄</span>
@@ -563,9 +433,8 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
                       <img :src="apiRowRemove" alt="" class="h-4 w-4" />
                     </button>
                   </div>
-
                   <div v-else class="relative group mb-4">
-                    <textarea 
+                    <textarea
                       v-model="docContent"
                       placeholder="粘贴接口文档内容（支持OpenAPI/Swagger格式）..."
                       class="h-[140px] w-full resize-none rounded-xl border border-slate-200 bg-white p-4 text-sm leading-relaxed outline-none transition-all focus:border-[#155DFC] focus:ring-2 focus:ring-[#155DFC]/10"
@@ -644,7 +513,6 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
                 </div>
               </div>
 
-              <!-- 提示信息 -->
               <div v-if="(selectedAgent === 'CASE' || selectedAgent === 'PERF') && !docContent.trim() && !selectedFile" class="flex items-center gap-2 rounded-lg bg-slate-50 border border-slate-200 px-4 py-3 text-sm text-slate-600">
                 <span class="text-blue-500 text-lg">ℹ️</span> 请提供接口文档内容或上传文件以生成测试用例/脚本
               </div>
@@ -657,7 +525,6 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
             </div>
           </div>
 
-          <!-- 右侧配置 -->
           <div class="lg:col-span-5 bg-white rounded-2xl shadow-md border border-slate-100 overflow-hidden">
             <div class="px-6 py-4 border-b border-slate-100 bg-slate-50">
               <h2 class="text-base font-bold text-slate-800 flex items-center gap-2">
@@ -665,14 +532,12 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
                 高级配置
               </h2>
             </div>
-            
             <div class="p-6 space-y-6">
-              <!-- 环境选择 -->
               <div class="space-y-2">
                 <label class="text-sm font-medium text-slate-700 block">测试环境 <span class="text-red-500">*</span></label>
                 <div class="flex gap-3">
-                  <select 
-                    v-model="environmentUrl" 
+                  <select
+                    v-model="environmentUrl"
                     class="h-12 flex-1 appearance-none rounded-xl border border-slate-200 bg-white px-4 pr-8 text-sm outline-none transition-all focus:border-[#155DFC] focus:ring-2 focus:ring-[#155DFC]/10 bg-[url('data:image/svg+xml;charset=UTF-8,%3csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%2364748b%27 stroke-width=%272%27 stroke-linecap=%27round%27 stroke-linejoin=%27round%27%3e%3cpolyline points=%276 9 12 15 18 9%27%3e%3c/polyline%3e%3c/svg%3e')] bg-no-repeat bg-right-4 center bg-contain bg-[length:16px]"
                   >
                     <option value="http://localhost:5173">本地环境</option>
@@ -686,17 +551,15 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
                 </div>
               </div>
 
-              <!-- Prompt Input -->
               <div class="space-y-2">
                 <label class="text-sm font-medium text-slate-700 block">智能体提示词（可选）</label>
-                <input 
+                <input
                   v-model="instruction"
                   placeholder="例如：只生成登录模块的测试用例，包含异常场景..."
                   class="h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition-all focus:border-[#155DFC] focus:ring-2 focus:ring-[#155DFC]/10"
                 />
               </div>
 
-              <!-- 动态配置项 -->
               <div class="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-4">
                 <template v-if="selectedAgent === 'CASE'">
                   <div class="flex items-center justify-between">
@@ -751,7 +614,6 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
                         <span>{{ uiHeaded ? '开启' : '关闭' }}</span>
                       </label>
                     </div>
-
                     <template v-if="uiAutoMode === 'CODEGEN'">
                       <div class="flex items-center justify-between">
                         <div class="flex items-center gap-2 text-sm font-medium text-slate-700">
@@ -782,9 +644,8 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
           </div>
         </div>
 
-        <!-- 操作按钮 -->
         <div class="mb-6 flex flex-wrap gap-4 justify-center lg:justify-start">
-          <button 
+          <button
             type="button"
             class="flex items-center justify-center gap-2 rounded-full bg-gradient-to-r from-[#0F172A] to-[#1E293B] text-white font-bold py-3 px-8 shadow-lg transition-all hover:shadow-xl active:scale-95 disabled:opacity-50 disabled:pointer-events-none disabled:shadow-none min-w-[180px]"
             :disabled="!canGenerate || isGenerating"
@@ -794,8 +655,7 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
             <img v-else :src="btnAiGenerate" alt="" class="h-5 w-5 brightness-0 invert" />
             <span>{{ selectedAgent === 'CASE' ? '仅生成预览' : selectedAgent === 'PERF' ? '立即生成' : uiAutoMode === 'RUN' ? '生成并执行UI自动化测试' : '立即生成UI自动化代码' }}</span>
           </button>
-          
-          <button 
+          <button
             v-if="selectedAgent === 'CASE'"
             type="button"
             class="flex items-center justify-center gap-2 rounded-full bg-gradient-to-r from-[#155DFC] to-[#3B82F6] text-white font-bold py-3 px-8 shadow-lg transition-all hover:shadow-xl active:scale-95 disabled:opacity-50 disabled:pointer-events-none disabled:shadow-none min-w-[180px]"
@@ -806,7 +666,6 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
             <img v-else :src="btnAiGenerate" alt="" class="h-5 w-5 brightness-0 invert" />
             <span>生成并导入</span>
           </button>
-
           <button
             v-if="selectedAgent === 'UI_AUTO' && lastUiRunId"
             type="button"
@@ -817,7 +676,6 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
           </button>
         </div>
 
-        <!-- 结果展示区 -->
         <div class="bg-white rounded-2xl shadow-md border border-slate-100 overflow-hidden">
           <div class="px-6 py-4 border-b border-slate-800/10 bg-gradient-to-r from-[#0F172A] to-[#1E293B]">
             <h2 class="text-base font-bold text-white flex items-center gap-2">
@@ -825,8 +683,6 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
               生成结果
             </h2>
           </div>
-          
-          <!-- 结果头部 -->
           <div class="flex h-14 items-center justify-between px-6 border-b border-slate-800/10 bg-slate-900">
             <div class="flex items-center gap-3">
               <div class="flex gap-2">
@@ -836,19 +692,11 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
               </div>
               <span class="ml-4 text-xs font-bold tracking-widest text-white/50 uppercase">Generation Result</span>
             </div>
-
             <div v-if="resultText" class="flex items-center gap-3">
-              <button 
-                v-if="executionResult"
-                class="flex items-center gap-1 rounded-full bg-white/10 px-3 py-1.5 text-xs font-medium text-white transition-all hover:bg-white/20 active:scale-95"
-                @click="executionResult = ''"
-              >
+              <button v-if="executionResult" class="flex items-center gap-1 rounded-full bg-white/10 px-3 py-1.5 text-xs font-medium text-white transition-all hover:bg-white/20 active:scale-95" @click="executionResult = ''">
                 <span>📄</span> 脚本
               </button>
-              <button 
-                class="flex items-center gap-1 rounded-full bg-white/10 px-3 py-1.5 text-xs font-medium text-white transition-all hover:bg-white/20 active:scale-95" 
-                @click="showPreviewModal = true"
-              >
+              <button class="flex items-center gap-1 rounded-full bg-white/10 px-3 py-1.5 text-xs font-medium text-white transition-all hover:bg-white/20 active:scale-95" @click="showPreviewModal = true">
                 <span>👁️</span> 预览
               </button>
               <button class="flex items-center gap-1 rounded-full bg-white/10 px-3 py-1.5 text-xs font-medium text-white transition-all hover:bg-white/20 active:scale-95" @click="copyResult">
@@ -857,99 +705,14 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
               <button class="flex items-center gap-1 rounded-full bg-[#155DFC] px-3 py-1.5 text-xs font-medium text-white transition-all hover:bg-[#1048CB] active:scale-95 shadow-lg shadow-[#155DFC]/20" @click="downloadResult">
                 <span>📥</span> 下载
               </button>
-              <button 
-                v-if="selectedAgent === 'PERF'"
-                class="flex items-center gap-1 rounded-full bg-[#27C93F] px-3 py-1.5 text-xs font-medium text-white transition-all hover:bg-[#1EA835] active:scale-95 shadow-lg shadow-[#27C93F]/20"
-                @click="handleExecute"
-              >
+              <button v-if="selectedAgent === 'PERF'" class="flex items-center gap-1 rounded-full bg-[#27C93F] px-3 py-1.5 text-xs font-medium text-white transition-all hover:bg-[#1EA835] active:scale-95 shadow-lg shadow-[#27C93F]/20" @click="handleExecute">
                 <span>⚡</span> 执行
               </button>
-              <button 
-                v-if="selectedAgent === 'CASE' && resultText && !resultText.includes('[导入结果]')"
-                class="flex items-center gap-1 rounded-full bg-[#155DFC] px-3 py-1.5 text-xs font-medium text-white transition-all hover:bg-[#1048CB] active:scale-95 shadow-lg shadow-[#155DFC]/20"
-                @click="handleImport"
-              >
+              <button v-if="selectedAgent === 'CASE' && resultText && !resultText.includes('[导入结果]')" class="flex items-center gap-1 rounded-full bg-[#155DFC] px-3 py-1.5 text-xs font-medium text-white transition-all hover:bg-[#1048CB] active:scale-95 shadow-lg shadow-[#155DFC]/20" @click="handleImport">
                 <span>📥</span> 导入
-=======
-  <div class="flex h-[calc(100vh-66px)] w-full bg-[#F5F5F7]">
-    <!-- Left Pane -->
-    <div class="flex w-1/2 flex-col border-r border-black/5 p-6 overflow-hidden">
-      <div class="flex flex-1 flex-col gap-6 overflow-y-auto pr-2 custom-scrollbar-light">
-        <!-- Document Input Section -->
-        <div class="flex flex-col gap-3">
-          <template v-if="selectedAgent !== 'UI'">
-            <div class="flex items-center justify-between">
-              <label class="flex items-center gap-2 rounded-[10px] bg-[#E8F0FE] px-4 py-2 text-sm font-semibold text-[#155DFC] cursor-pointer hover:bg-[#D8E6FD] transition-all group">
-                <img :src="navApiCollection" alt="" class="h-4 w-4" />
-                <span>上传接口文档 / Swagger / OpenAPI</span>
-                <input type="file" class="hidden" @change="onFileChange" accept=".md,.json,.yaml,.yml,.pdf,.docx,.txt" />
-              </label>
-            </div>
-          </template>
-          
-          <!-- Environment Selection -->
-          <div class="flex flex-col gap-2">
-            <div class="flex items-center gap-2 text-sm font-bold text-[#0A0A0A]">
-              <span class="w-1 h-4 bg-[#155DFC] rounded-full"></span>
-              <span>选择环境</span>
-            </div>
-            <div class="relative group">
-              <select 
-                v-model="environmentUrl" 
-                class="h-12 w-full appearance-none rounded-[12px] border border-black/10 bg-white px-4 pr-10 text-sm outline-none transition-all focus:border-[#155DFC] focus:ring-4 focus:ring-[#155DFC]/5"
-              >
-                <option value="http://localhost:5173">本地环境 (http://localhost:5173)</option>
-                <option v-for="env in environments" :key="env.id" :value="env.baseUrl">
-                  {{ env.name }} ({{ env.baseUrl }})
-                </option>
-                <option v-if="environmentUrl && !['http://localhost:5173', ...environments.map(e => e.baseUrl)].includes(environmentUrl)" :value="environmentUrl">
-                  自定义 ({{ environmentUrl }})
-                </option>
-              </select>
-              <div class="absolute inset-y-0 right-4 flex items-center pointer-events-none opacity-40">
-                <img :src="filterChevron" alt="" class="h-4 w-4" />
-              </div>
-            </div>
-            <!-- Custom Environment Input -->
-            <input 
-              v-model="environmentUrl"
-              placeholder="或输入自定义环境地址，例如：http://api.example.com"
-              class="h-10 w-full rounded-[10px] border border-black/5 bg-white px-4 text-[12px] outline-none transition-all focus:border-[#155DFC] focus:ring-4 focus:ring-[#155DFC]/5"
-            />
-          </div>
-          
-          <div v-if="selectedAgent !== 'UI' && selectedFile" class="flex items-center justify-between rounded-[12px] border border-[#155DFC]/20 bg-[#F0F7FF] px-4 py-3">
-            <div class="flex items-center gap-3">
-              <span class="text-xl">📄</span>
-              <div class="flex flex-col">
-                <span class="text-sm font-bold text-[#0A0A0A]">{{ selectedFile.name }}</span>
-                <span class="text-[11px] text-[#717182]">{{ (selectedFile.size / 1024).toFixed(1) }} KB</span>
-              </div>
-            </div>
-            <button class="text-[#717182] hover:text-[#FB2C36]" @click="selectedFile = null; docContent = ''">
-              <img :src="apiRowRemove" alt="" class="h-4 w-4" />
-            </button>
-          </div>
-
-          <div v-else-if="selectedAgent !== 'UI'" class="relative group">
-            <textarea 
-              v-model="docContent"
-              placeholder="粘贴接口文档内容（支持 Markdown / OpenAPI JSON 或 YAML）..."
-              class="h-[180px] w-full resize-none rounded-[12px] border border-black/10 bg-white p-4 text-sm leading-relaxed outline-none transition-all focus:border-[#155DFC] focus:ring-4 focus:ring-[#155DFC]/5"
-            ></textarea>
-            <div class="absolute bottom-3 right-4 flex items-center gap-4 text-[12px]">
-              <button class="flex items-center gap-1 text-[#155DFC] hover:underline font-medium" @click="loadExample">
-                <span class="text-[14px]">🔗</span> 加载示例
-              </button>
-              <button class="flex items-center gap-1 text-[#717182] hover:text-[#FB2C36] font-medium" @click="clearContent">
-                <img :src="apiRowRemove" alt="" class="h-3.5 w-3.5 opacity-60" /> 清空
->>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
               </button>
             </div>
           </div>
-
-<<<<<<< HEAD
-          <!-- 结果内容 -->
           <div class="relative bg-slate-900 text-slate-200 font-mono text-sm leading-relaxed p-6 h-[400px] overflow-auto custom-scrollbar-dark">
             <div v-if="!resultText && !isGenerating" class="flex h-full flex-col items-center justify-center gap-6 text-center">
               <div class="text-5xl filter drop-shadow-2xl">✨</div>
@@ -958,7 +721,6 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
                 <p class="text-sm text-white/40">配置完成后点击生成按钮开始创建测试用例/脚本</p>
               </div>
             </div>
-
             <div v-else-if="isGenerating" class="flex h-full flex-col items-center justify-center gap-6">
               <div class="relative">
                 <img :src="runsStatusRunning" alt="" class="h-16 w-16 animate-spin opacity-20" />
@@ -968,11 +730,8 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
               </div>
               <p class="text-base font-medium text-white/60 tracking-wide">AI 正在思考并生成中...</p>
             </div>
-
             <pre v-else class="whitespace-pre-wrap break-all text-[#E2E8F0] selection:bg-[#155DFC]/30">{{ executionResult || resultText }}</pre>
           </div>
-
-          <!-- 结果底部 -->
           <div class="h-10 border-t border-slate-800/20 bg-slate-800 flex items-center px-6 justify-between">
             <span class="text-xs text-white/30 font-medium uppercase tracking-tighter">AI Powered Generation Engine v1.0</span>
             <span class="text-xs text-white/30 font-mono">{{ (executionResult || resultText) ? ((executionResult || resultText).length / 1024).toFixed(2) + ' KB' : '0 KB' }}</span>
@@ -981,14 +740,12 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
       </div>
     </main>
 
-    <!-- 页脚 -->
     <footer class="bg-white border-t border-slate-200 py-4">
       <div class="max-w-screen-xl mx-auto px-4 text-center text-sm text-slate-500">
         AI测试助手 © {{ new Date().getFullYear() }} | 自动化测试解决方案
       </div>
     </footer>
 
-    <!-- Preview Modal -->
     <div v-if="showPreviewModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-6">
       <div class="flex h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
         <div class="flex h-16 items-center justify-between border-b border-slate-200 px-6 bg-slate-50">
@@ -1012,418 +769,3 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
     </div>
   </div>
 </template>
-=======
-          <div v-else class="grid grid-cols-1 gap-3">
-            <div class="flex flex-col gap-2">
-              <div class="flex items-center gap-2 text-sm font-bold text-[#0A0A0A]">
-                <span class="w-1 h-4 bg-[#155DFC] rounded-full"></span>
-                <span>页面标识 pageId</span>
-              </div>
-              <input
-                v-model="uiPageId"
-                placeholder="例如：sample-login-page"
-                class="h-12 w-full rounded-[12px] border border-black/10 bg-white px-4 text-sm outline-none transition-all focus:border-[#155DFC] focus:ring-4 focus:ring-[#155DFC]/5"
-              />
-            </div>
-            <div class="flex flex-col gap-2">
-              <div class="flex items-center gap-2 text-sm font-bold text-[#0A0A0A]">
-                <span class="w-1 h-4 bg-[#155DFC] rounded-full"></span>
-                <span>Figma 链接（可选）</span>
-              </div>
-              <input
-                v-model="uiFigmaUrl"
-                placeholder="https://www.figma.com/..."
-                class="h-12 w-full rounded-[12px] border border-black/10 bg-white px-4 text-sm outline-none transition-all focus:border-[#155DFC] focus:ring-4 focus:ring-[#155DFC]/5"
-              />
-            </div>
-          </div>
-
-          <!-- Prompt Input -->
-          <div class="flex flex-col gap-2 mt-2">
-            <div class="flex items-center gap-2 text-sm font-bold text-[#0A0A0A]">
-              <span class="w-1 h-4 bg-[#155DFC] rounded-full"></span>
-              <span>智能体 Prompt (可选)</span>
-            </div>
-            <input 
-              v-model="instruction"
-              placeholder="例如：只生成登录模块的测试用例，包含异常流..."
-              class="h-12 w-full rounded-[12px] border border-black/10 bg-white px-4 text-sm outline-none transition-all focus:border-[#155DFC] focus:ring-4 focus:ring-[#155DFC]/5"
-            />
-          </div>
-
-          <div v-if="selectedAgent !== 'UI' && !docContent.trim() && !selectedFile" class="flex items-center gap-2 rounded-[8px] bg-[#F8FAFC] border border-black/5 px-3 py-2 text-xs text-[#64748B]">
-            <span class="text-blue-500">ℹ️</span> 请提供文档内容或上传文件
-          </div>
-          <div v-else-if="selectedAgent === 'UI' && !uiPageId.trim()" class="flex items-center gap-2 rounded-[8px] bg-[#F8FAFC] border border-black/5 px-3 py-2 text-xs text-[#64748B]">
-            <span class="text-blue-500">ℹ️</span> 请输入 pageId 后即可执行 UI 测试
-          </div>
-        </div>
-
-        <!-- Agent Selection Section -->
-        <div class="flex flex-col gap-4">
-          <div class="flex items-center justify-between text-sm font-bold text-[#0A0A0A]">
-            <div class="flex items-center gap-2">
-              <span class="w-1.5 h-4 bg-[#155DFC] rounded-full"></span>
-              <span>选择智能体</span>
-            </div>
-            <img :src="filterChevron" alt="" class="h-4 w-4 opacity-40" />
-          </div>
-
-          <div class="grid grid-cols-3 gap-4">
-            <!-- Case Agent Card -->
-            <div 
-              class="group relative flex cursor-pointer flex-col gap-3 rounded-[16px] border-2 p-5 transition-all duration-200"
-              :class="selectedAgent === 'CASE' ? 'border-[#155DFC] bg-[#F0F7FF] shadow-sm' : 'border-black/5 bg-white hover:border-black/10'"
-              @click="selectedAgent = 'CASE'"
-            >
-              <div class="flex items-center justify-between">
-                <div class="flex h-10 w-10 items-center justify-center rounded-[12px] bg-[#E0E7FF] text-[#155DFC]">
-                  <img :src="navCases" alt="" class="h-5 w-5" />
-                </div>
-                <div v-if="selectedAgent === 'CASE'" class="flex h-5 w-5 items-center justify-center rounded-full bg-[#155DFC]">
-                  <span class="text-white text-[10px]">✓</span>
-                </div>
-              </div>
-              <div>
-                <div class="text-[15px] font-bold text-[#0A0A0A]">测试用例智能体</div>
-                <div class="text-[11px] leading-relaxed text-[#717182] mt-1">生成接口测试用例（pytest + requests）</div>
-              </div>
-            </div>
-
-            <!-- Perf Agent Card -->
-            <div 
-              class="group relative flex cursor-pointer flex-col gap-3 rounded-[16px] border-2 p-5 transition-all duration-200"
-              :class="selectedAgent === 'PERF' ? 'border-[#155DFC] bg-[#F0F7FF] shadow-sm' : 'border-black/5 bg-white hover:border-black/10'"
-              @click="selectedAgent = 'PERF'"
-            >
-              <div class="flex items-center justify-between">
-                <div class="flex h-10 w-10 items-center justify-center rounded-[12px] bg-[#E0E7FF] text-[#155DFC]">
-                  <img :src="navExecution" alt="" class="h-5 w-5 text-[#155DFC]" />
-                </div>
-                <div v-if="selectedAgent === 'PERF'" class="flex h-5 w-5 items-center justify-center rounded-full bg-[#155DFC]">
-                  <span class="text-white text-[10px]">✓</span>
-                </div>
-              </div>
-              <div>
-                <div class="text-[15px] font-bold text-[#0A0A0A]">性能脚本智能体</div>
-                <div class="text-[11px] leading-relaxed text-[#717182] mt-1">生成 K6 性能压测脚本</div>
-              </div>
-            </div>
-
-            <div 
-              class="group relative flex cursor-pointer flex-col gap-3 rounded-[16px] border-2 p-5 transition-all duration-200"
-              :class="selectedAgent === 'UI' ? 'border-[#155DFC] bg-[#F0F7FF] shadow-sm' : 'border-black/5 bg-white hover:border-black/10'"
-              @click="selectedAgent = 'UI'"
-            >
-              <div class="flex items-center justify-between">
-                <div class="flex h-10 w-10 items-center justify-center rounded-[12px] bg-[#E0E7FF] text-[#155DFC]">
-                  <img :src="navExecution" alt="" class="h-5 w-5 text-[#155DFC]" />
-                </div>
-                <div v-if="selectedAgent === 'UI'" class="flex h-5 w-5 items-center justify-center rounded-full bg-[#155DFC]">
-                  <span class="text-white text-[10px]">✓</span>
-                </div>
-              </div>
-              <div>
-                <div class="text-[15px] font-bold text-[#0A0A0A]">UI测试智能体</div>
-                <div class="text-[11px] leading-relaxed text-[#717182] mt-1">按 pageId 生成并执行 Playwright</div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Dynamic Form Fields -->
-        <div class="flex flex-col gap-5 rounded-[16px] border border-black/5 bg-white p-6 shadow-sm">
-          <template v-if="selectedAgent === 'CASE'">
-            <div class="flex items-center justify-between">
-              <div class="flex items-center gap-2.5 text-[13px] font-medium text-[#475569]">
-                <span class="text-lg">⌨️</span> 测试框架
-              </div>
-              <select v-model="testFramework" class="h-9 w-[180px] rounded-[8px] border border-black/10 bg-[#F8FAFC] px-3 text-[13px] font-medium outline-none focus:border-[#155DFC]">
-                <option value="pytest + requests">pytest + requests</option>
-                <option value="unittest">unittest</option>
-              </select>
-            </div>
-            <div class="flex items-center justify-between">
-              <div class="flex items-center gap-2.5 text-[13px] font-medium text-[#475569]">
-                <span class="text-lg">ℹ️</span> 断言风格
-              </div>
-              <span class="text-[13px] text-[#64748B] bg-[#F1F5F9] px-3 py-1 rounded-full font-medium">自动根据响应断言状态码 & 结构</span>
-            </div>
-          </template>
-
-          <template v-else-if="selectedAgent === 'PERF'">
-            <div class="flex items-center justify-between">
-              <div class="flex items-center gap-2.5 text-[13px] font-medium text-[#475569]">
-                <span class="text-lg">👥</span> 并发用户数
-              </div>
-              <input v-model.number="perfVus" type="number" class="h-9 w-[100px] rounded-[8px] border border-black/10 bg-[#F8FAFC] px-3 text-[13px] font-bold outline-none focus:border-[#155DFC]" />
-            </div>
-            <div class="flex items-center justify-between">
-              <div class="flex items-center gap-2.5 text-[13px] font-medium text-[#475569]">
-                <span class="text-lg">📈</span> spawn 速率
-              </div>
-              <input v-model.number="perfSpawnRate" type="number" class="h-9 w-[100px] rounded-[8px] border border-black/10 bg-[#F8FAFC] px-3 text-[13px] font-bold outline-none focus:border-[#155DFC]" />
-            </div>
-            <div class="flex items-center justify-between">
-              <div class="flex items-center gap-2.5 text-[13px] font-medium text-[#475569]">
-                <span class="text-lg">⏳</span> 运行时间(秒)
-              </div>
-              <input v-model.number="perfDuration" type="number" class="h-9 w-[100px] rounded-[8px] border border-black/10 bg-[#F8FAFC] px-3 text-[13px] font-bold outline-none focus:border-[#155DFC]" />
-            </div>
-          </template>
-
-          <template v-else>
-            <div class="flex items-center justify-between">
-              <div class="flex items-center gap-2.5 text-[13px] font-medium text-[#475569]">
-                <span class="text-lg">🎯</span> 断言等级
-              </div>
-              <select v-model="uiAssertLevel" class="h-9 w-[120px] rounded-[8px] border border-black/10 bg-[#F8FAFC] px-3 text-[13px] font-medium outline-none focus:border-[#155DFC]">
-                <option value="P0">P0</option>
-                <option value="P1">P1</option>
-                <option value="P2">P2</option>
-              </select>
-            </div>
-            <div class="flex items-center justify-between">
-              <div class="flex items-center gap-2.5 text-[13px] font-medium text-[#475569]">
-                <span class="text-lg">🖥️</span> 有头执行
-              </div>
-              <label class="inline-flex cursor-pointer items-center gap-2 text-[13px] font-medium text-[#475569]">
-                <input v-model="uiHeaded" type="checkbox" class="h-4 w-4 rounded border-black/20 text-[#155DFC] focus:ring-[#155DFC]" />
-                <span>{{ uiHeaded ? '开启' : '关闭' }}</span>
-              </label>
-            </div>
-            <div class="text-[13px] text-[#64748B]">
-              将直接调用后端生成并执行接口，完成后可一键跳转报告中心“UI测试报告”。
-            </div>
-          </template>
-        </div>
-      </div>
-
-      <!-- Action Button -->
-      <div class="mt-6 flex flex-col gap-3">
-        <button 
-          type="button"
-          class="flex h-[52px] w-full items-center justify-center gap-3 rounded-full bg-[#0F172A] text-[16px] font-bold text-white shadow-xl transition-all hover:bg-[#1E293B] active:scale-[0.98] disabled:opacity-50"
-          :disabled="!canGenerate || isGenerating"
-          @click="handleGenerate"
-        >
-          <img v-if="isGenerating" :src="runsStatusRunning" alt="" class="h-5 w-5 animate-spin" />
-          <img v-else :src="btnAiGenerate" alt="" class="h-5 w-5 brightness-0 invert" />
-          <span>{{ selectedAgent === 'CASE' ? '仅生成预览' : selectedAgent === 'PERF' ? '立即生成' : '生成并执行UI测试' }}</span>
-        </button>
-        
-        <button 
-          v-if="selectedAgent === 'CASE'"
-          type="button"
-          class="flex h-[52px] w-full items-center justify-center gap-3 rounded-full bg-[#155DFC] text-[16px] font-bold text-white shadow-xl transition-all hover:bg-[#1048CB] active:scale-[0.98] disabled:opacity-50"
-          :disabled="(!docContent.trim() && !selectedFile) || isGenerating"
-          @click="handleGenerateAndImport"
-        >
-          <img v-if="isGenerating" :src="runsStatusRunning" alt="" class="h-5 w-5 animate-spin" />
-          <img v-else :src="btnAiGenerate" alt="" class="h-5 w-5 brightness-0 invert" />
-          <span>生成并导入到用例列表</span>
-        </button>
-
-        <button
-          v-if="selectedAgent === 'UI' && lastUiRunId"
-          type="button"
-          class="flex h-[52px] w-full items-center justify-center gap-3 rounded-full bg-[#155DFC] text-[16px] font-bold text-white shadow-xl transition-all hover:bg-[#1048CB] active:scale-[0.98]"
-          @click="goToUiReports"
-        >
-          <span>跳转报告中心（UI测试报告）</span>
-        </button>
-      </div>
-    </div>
-
-    <!-- Right Pane -->
-    <div class="flex w-1/2 flex-col bg-[#F5F5F7] p-6 overflow-hidden">
-      <div class="flex flex-1 flex-col overflow-hidden rounded-[24px] border border-black/5 bg-[#0F172A] shadow-2xl relative">
-        <!-- Code Header -->
-        <div class="flex h-[64px] items-center justify-between px-8 border-b border-white/5 bg-white/[0.02]">
-          <div class="flex items-center gap-2">
-            <div class="flex gap-2">
-              <div class="h-3 w-3 rounded-full bg-[#FF5F56]"></div>
-              <div class="h-3 w-3 rounded-full bg-[#FFBD2E]"></div>
-              <div class="h-3 w-3 rounded-full bg-[#27C93F]"></div>
-            </div>
-            <span class="ml-6 text-[12px] font-bold tracking-widest text-white/30 uppercase">Generation Result</span>
-          </div>
-
-          <div v-if="resultText" class="flex items-center gap-3">
-            <button 
-              v-if="executionResult"
-              class="flex items-center gap-2 rounded-full bg-white/5 px-5 py-2 text-[12px] font-bold text-white transition-all hover:bg-white/10 active:scale-95"
-              @click="executionResult = ''"
-            >
-              <span>📄</span> 脚本
-            </button>
-            <button 
-              class="flex items-center gap-2 rounded-full bg-white/5 px-5 py-2 text-[12px] font-bold text-white transition-all hover:bg-white/10 active:scale-95" 
-              @click="showPreviewModal = true"
-            >
-              <span>👁️</span> 预览
-            </button>
-            <button class="flex items-center gap-2 rounded-full bg-white/5 px-5 py-2 text-[12px] font-bold text-white transition-all hover:bg-white/10 active:scale-95" @click="copyResult">
-              <span>📋</span> 复制
-            </button>
-            <button class="flex items-center gap-2 rounded-full bg-[#155DFC] px-5 py-2 text-[12px] font-bold text-white transition-all hover:bg-[#1048CB] active:scale-95 shadow-lg shadow-[#155DFC]/20" @click="downloadResult">
-              <span>📥</span> 下载
-            </button>
-            <button 
-              v-if="selectedAgent === 'PERF'"
-              class="flex items-center gap-2 rounded-full bg-[#27C93F] px-5 py-2 text-[12px] font-bold text-white transition-all hover:bg-[#1EA835] active:scale-95 shadow-lg shadow-[#27C93F]/20"
-              @click="handleExecute"
-            >
-              <span>⚡</span> 执行
-            </button>
-            <button 
-              v-if="selectedAgent === 'CASE' && resultText && !resultText.includes('[导入结果]')"
-              class="flex items-center gap-2 rounded-full bg-[#155DFC] px-5 py-2 text-[12px] font-bold text-white transition-all hover:bg-[#1048CB] active:scale-95 shadow-lg shadow-[#155DFC]/20"
-              @click="handleImport"
-            >
-              <span>📥</span> 导入
-            </button>
-          </div>
-        </div>
-
-        <!-- Code Viewer Area -->
-        <div class="relative flex-1 overflow-auto p-8 font-mono text-[13px] leading-relaxed custom-scrollbar-dark">
-          <div v-if="!resultText && !isGenerating" class="flex h-full flex-col items-center justify-center gap-6">
-            <div class="text-[48px] filter drop-shadow-2xl">✨</div>
-            <div class="flex flex-col items-center gap-2">
-              <p class="text-[15px] font-medium text-white/60">已清空文档</p>
-              <p class="text-[12px] text-white/30">等待新文档并重新生成</p>
-            </div>
-          </div>
-
-          <div v-else-if="isGenerating" class="flex h-full flex-col items-center justify-center gap-6">
-            <div class="relative">
-              <img :src="runsStatusRunning" alt="" class="h-16 w-16 animate-spin opacity-20" />
-              <div class="absolute inset-0 flex items-center justify-center">
-                <span class="text-2xl">🤖</span>
-              </div>
-            </div>
-            <p class="text-[14px] font-medium text-white/40 tracking-wide">AI 正在思考并生成中...</p>
-          </div>
-
-          <pre v-else class="whitespace-pre-wrap break-all text-[#E2E8F0] selection:bg-[#155DFC]/30">{{ executionResult || resultText }}</pre>
-        </div>
-
-        <!-- Watermark/Footer -->
-        <div class="h-10 border-t border-white/5 bg-white/[0.01] flex items-center px-8 justify-between">
-          <span class="text-[10px] text-white/10 font-medium uppercase tracking-tighter">AI Powered Generation Engine v1.0</span>
-          <span class="text-[10px] text-white/10 font-mono">{{ (executionResult || resultText) ? ((executionResult || resultText).length / 1024).toFixed(2) + ' KB' : '0 KB' }}</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- Preview Modal -->
-    <div v-if="showPreviewModal" class="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-8">
-      <div class="flex h-full w-full max-w-6xl flex-col overflow-hidden rounded-[24px] bg-white shadow-2xl">
-        <div class="flex h-16 items-center justify-between border-b border-black/5 px-8">
-          <div class="flex items-center gap-3">
-            <span class="text-2xl">👁️</span>
-            <h3 class="text-lg font-bold text-[#0A0A0A]">预览生成结果: {{ resultFileName }}</h3>
-          </div>
-          <button class="flex h-10 w-10 items-center justify-center rounded-full hover:bg-black/5 transition-colors" @click="showPreviewModal = false">
-            <img :src="apiRowRemove" alt="" class="h-5 w-5 opacity-40" />
-          </button>
-        </div>
-        
-        <div class="flex-1 overflow-auto p-8 custom-scrollbar-light">
-          <template v-if="selectedAgent === 'CASE'">
-            <table class="w-full border-collapse text-left text-[13px]">
-              <thead>
-                <tr class="border-b border-black/10 bg-[#F8FAFC]">
-                  <th class="px-4 py-3 font-bold text-[#475569]">用例标题</th>
-                  <th class="px-4 py-3 font-bold text-[#475569]">方法</th>
-                  <th class="px-4 py-3 font-bold text-[#475569]">URL</th>
-                  <th class="px-4 py-3 font-bold text-[#475569]">预期结果</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="(row, idx) in parsedCsv" :key="idx" class="border-b border-black/5 hover:bg-black/[0.02] transition-colors">
-                  <td class="px-4 py-3 font-medium text-[#0A0A0A]">{{ row.title }}</td>
-                  <td class="px-4 py-3">
-                    <span class="rounded px-2 py-0.5 text-[11px] font-bold text-white uppercase" :class="getMethodColor(row.apiMethod)">
-                      {{ row.apiMethod }}
-                    </span>
-                  </td>
-                  <td class="px-4 py-3 font-mono text-[#717182]">{{ row.apiUrl }}</td>
-                  <td class="px-4 py-3 text-[#717182]">{{ row.expectedResult }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </template>
-          <template v-else>
-            <pre class="rounded-[12px] bg-[#F8FAFC] p-6 font-mono text-[13px] leading-relaxed text-[#1E293B] border border-black/5">{{ resultText }}</pre>
-          </template>
-        </div>
-
-        <div class="flex h-20 items-center justify-end gap-4 border-t border-black/5 bg-[#F8FAFC] px-8">
-          <button class="rounded-full border border-black/10 px-8 py-2.5 text-sm font-bold text-[#475569] transition-all hover:bg-black/5" @click="showPreviewModal = false">关闭</button>
-          <button class="rounded-full bg-[#155DFC] px-8 py-2.5 text-sm font-bold text-white transition-all hover:bg-[#1048CB] shadow-lg shadow-[#155DFC]/20" @click="downloadResult">下载并保存</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Floating Side Widget -->
-    <div class="fixed right-0 top-1/2 -translate-y-1/2 z-50">
-      <div class="flex flex-col items-center gap-4 rounded-l-[16px] bg-[#155DFC] p-3 shadow-2xl border-y border-l border-white/10">
-        <button class="flex h-11 w-11 items-center justify-center rounded-[12px] bg-white/10 text-white transition-all hover:bg-white/20 active:scale-90 group relative">
-          <span class="text-2xl group-hover:scale-110 transition-transform">☁️</span>
-          <div class="absolute right-full mr-4 px-3 py-1.5 rounded-lg bg-[#0F172A] text-white text-[11px] font-bold whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-xl border border-white/5">
-            Cloud Sync
-          </div>
-        </button>
-      </div>
-    </div>
-  </div>
-</template>
-
-<style scoped>
-/* Custom Scrollbar for dark theme */
-.custom-scrollbar-dark::-webkit-scrollbar {
-  width: 8px;
-}
-.custom-scrollbar-dark::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 4px;
-}
-.custom-scrollbar-dark::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.1);
-}
-.custom-scrollbar-dark::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-/* Custom Scrollbar for light theme */
-.custom-scrollbar-light::-webkit-scrollbar {
-  width: 4px;
-}
-.custom-scrollbar-light::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.05);
-  border-radius: 2px;
-}
-.custom-scrollbar-light::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-textarea::-webkit-scrollbar {
-  width: 4px;
-}
-textarea::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.05);
-  border-radius: 2px;
-}
-
-/* Animation */
-@keyframes pulse-soft {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 0.7; }
-}
-.animate-pulse-soft {
-  animation: pulse-soft 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-}
-</style>
->>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
