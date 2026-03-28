@@ -1,0 +1,10 @@
+page_id: projects-v1
+locators:
+  ai_1: { strategy: "testid", value: "auth-header" }
+  element_2: { strategy: "css", value: "button" }
+  element_3: { strategy: "css", value: "button" }
+  element_4: { strategy: "testid", value: "auth-login-form" }
+  element_5: { strategy: "placeholder", value: "请输入用户名" }
+  element_6: { strategy: "placeholder", value: "请输入密码" }
+  button_7: { strategy: "css", value: "button" }
+  element_8: { strategy: "css", value: "button" }

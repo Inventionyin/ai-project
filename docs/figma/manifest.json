@@ -1,0 +1,97 @@
+{
+  "version": "1.0.0",
+  "updatedAt": "2026-03-26T09:37:07.460349+00:00",
+  "pages": [
+    {
+      "id": "sample-login-page",
+      "bizModule": "auth",
+      "figmaUrl": "https://www.figma.com/file/REPLACE_FILE_KEY/REPLACE_PAGE?node-id=12-34",
+      "fileKey": "REPLACE_FILE_KEY",
+      "nodeId": "12:34",
+      "routePath": "/login",
+      "envUrl": "http://localhost:5173/login",
+      "pageDoc": "docs/figma/pages/sample-login-page.md",
+      "baselineDir": "ai-project_front_end/tests/ui/baseline/sample-login-page",
+      "status": "failed",
+      "owner": "REPLACE_OWNER",
+      "lastSyncAt": "2026-03-25T21:41:00+08:00",
+      "syncError": "fileKey 非法：仅支持字母数字，当前为占位值 REPLACE_FILE_KEY",
+      "uiAutomation": {
+        "status": "verified",
+        "specPath": "ai-project_front_end/tests/ui/generated/sample-login-page.spec.ts",
+        "reportDir": "ai-project_front_end/tests/ui/reports/html",
+        "lastRunAt": "2026-03-25T22:05:00+08:00",
+        "lastResult": "1 passed"
+      },
+      "tags": [
+        "P0",
+        "auth"
+      ]
+    },
+    {
+      "id": "login-page",
+      "bizModule": "auth",
+      "figmaUrl": "https://www.figma.com/design/7gp8uybcxpI1wMH5fVGicg/Untitled?node-id=1-2578",
+      "fileKey": "7gp8uybcxpI1wMH5fVGicg",
+      "nodeId": "1:2578",
+      "routePath": "/login",
+      "envUrl": "http://localhost:5173/login",
+      "pageDoc": "docs/figma/pages/login-page.md",
+      "baselineDir": "ai-project_front_end/tests/ui/baseline/login-page",
+      "baselineVersion": "v1",
+      "baselineImages": {
+        "v1": [
+          {
+            "name": "login-form",
+            "type": "region",
+            "baselinePath": "ai-project_front_end/tests/ui/baselines/login-page/v1/login-form.png"
+          },
+          {
+            "name": "full-page",
+            "type": "fullPage",
+            "baselinePath": "ai-project_front_end/tests/ui/baselines/login-page/v1/full-page.png"
+          }
+        ]
+      },
+      "selectors": {
+        "loginForm": {
+          "prefer": "testid",
+          "testid": "login-form",
+          "fallbackCss": ".login-form"
+        },
+        "masks": [
+          ".toast",
+          ".captcha",
+          ".error-msg"
+        ]
+      },
+      "thresholds": {
+        "loginForm": {
+          "maxDiffPixelRatio": 0.003
+        },
+        "fullPage": {
+          "maxDiffPixelRatio": 0.01
+        }
+      },
+      "render": {
+        "viewport": {
+          "width": 1280,
+          "height": 800
+        },
+        "deviceScaleFactor": 2
+      },
+      "status": "pending",
+      "tags": [
+        "P0",
+        "auth"
+      ],
+      "uiAutomation": {
+        "status": "failed",
+        "specPath": "ai-project_front_end/tests/ui/generated/login-page.spec.ts",
+        "reportDir": "ai-project_front_end/tests/ui/reports/html",
+        "lastRunAt": "2026-03-26T09:37:07.460349+00:00",
+        "lastResult": "FAILED"
+      }
+    }
+  ]
+}

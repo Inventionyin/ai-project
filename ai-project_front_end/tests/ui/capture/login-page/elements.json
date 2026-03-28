@@ -1,0 +1,98 @@
+[
+  {
+    "index": 1,
+    "tag": "div",
+    "text": "AI 测试平台智能化测试资产管理与执行编排",
+    "role": "",
+    "dataTestId": "auth-header",
+    "id": "",
+    "name": "",
+    "placeholder": "",
+    "ariaLabel": "",
+    "selector": "[data-testid=\"auth-header\"]"
+  },
+  {
+    "index": 2,
+    "tag": "button",
+    "text": "账号登录",
+    "role": "",
+    "dataTestId": "",
+    "id": "",
+    "name": "",
+    "placeholder": "",
+    "ariaLabel": "",
+    "selector": "button"
+  },
+  {
+    "index": 3,
+    "tag": "button",
+    "text": "注册账号",
+    "role": "",
+    "dataTestId": "",
+    "id": "",
+    "name": "",
+    "placeholder": "",
+    "ariaLabel": "",
+    "selector": "button"
+  },
+  {
+    "index": 4,
+    "tag": "form",
+    "text": "用户名密码登 录",
+    "role": "",
+    "dataTestId": "auth-login-form",
+    "id": "",
+    "name": "",
+    "placeholder": "",
+    "ariaLabel": "",
+    "selector": "[data-testid=\"auth-login-form\"]"
+  },
+  {
+    "index": 5,
+    "tag": "input",
+    "text": "",
+    "role": "",
+    "dataTestId": "",
+    "id": "",
+    "name": "",
+    "placeholder": "请输入用户名",
+    "ariaLabel": "",
+    "selector": "input"
+  },
+  {
+    "index": 6,
+    "tag": "input",
+    "text": "",
+    "role": "",
+    "dataTestId": "",
+    "id": "",
+    "name": "",
+    "placeholder": "请输入密码",
+    "ariaLabel": "",
+    "selector": "input"
+  },
+  {
+    "index": 7,
+    "tag": "button",
+    "text": "",
+    "role": "",
+    "dataTestId": "",
+    "id": "",
+    "name": "",
+    "placeholder": "",
+    "ariaLabel": "",
+    "selector": "button"
+  },
+  {
+    "index": 8,
+    "tag": "button",
+    "text": "登 录",
+    "role": "",
+    "dataTestId": "",
+    "id": "",
+    "name": "",
+    "placeholder": "",
+    "ariaLabel": "",
+    "selector": "button"
+  }
+]
