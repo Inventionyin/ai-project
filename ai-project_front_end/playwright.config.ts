@@ -2,8 +2,11 @@ import { defineConfig, devices } from '@playwright/test'
 
 export default defineConfig({
   testDir: './tests/ui/generated',
+<<<<<<< HEAD
   snapshotDir: './tests/ui/baseline',
   snapshotPathTemplate: '{snapshotDir}/{arg}{ext}',
+=======
+>>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
   timeout: 60_000,
   expect: {
     timeout: 10_000

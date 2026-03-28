@@ -27,6 +27,7 @@
 
 ## 关键区域视觉（P1）
 
+<<<<<<< HEAD
 ```yaml
 targets:
   - name: header
@@ -44,6 +45,14 @@ masks:
   - testId: "REPLACE_BIZ_MODULE-dynamic-time"
   - testId: "REPLACE_BIZ_MODULE-user-name"
 ```
+=======
+- heroSection:
+  - selector: REPLACE_HERO_SELECTOR
+  - baselineImage: REPLACE_PAGE_ID__REPLACE_NODE_ID__v1.png
+- formCard:
+  - selector: REPLACE_FORM_SELECTOR
+  - baselineImage: REPLACE_PAGE_ID__REPLACE_NODE_ID__v1.png
+>>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
 
 ## 全页视觉（P2，可选）
 

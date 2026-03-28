@@ -1,6 +1,10 @@
 {
   "version": "1.0.0",
+<<<<<<< HEAD
   "updatedAt": "2026-03-26T09:37:07.460349+00:00",
+=======
+  "updatedAt": "2026-03-25T22:05:00+08:00",
+>>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
   "pages": [
     {
       "id": "sample-login-page",
@@ -27,6 +31,7 @@
         "P0",
         "auth"
       ]
+<<<<<<< HEAD
     },
     {
       "id": "login-page",
@@ -92,6 +97,8 @@
         "lastRunAt": "2026-03-26T09:37:07.460349+00:00",
         "lastResult": "FAILED"
       }
+=======
+>>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
     }
   ]
 }

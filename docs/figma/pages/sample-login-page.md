@@ -24,6 +24,7 @@
   - text: 密码
   - text: 登 录
 
+<<<<<<< HEAD
 ## 关键区域视觉（P1）
 
 ```yaml
@@ -39,3 +40,5 @@ targets:
     baseline: "loginForm__12-35__v20260325.png"
     maxDiffRatio: 0.01
 ```
+=======
+>>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b

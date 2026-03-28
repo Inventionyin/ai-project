@@ -305,6 +305,7 @@ export type UiTestGenerateRunData = {
   stderr: string
 }
 
+<<<<<<< HEAD
 export type UiTestGeneratePytestPoPayload = {
   projectId: string
   pageUrl: string
@@ -332,6 +333,8 @@ export type UiTestGeneratePytestPoData = {
   reusedCapture: boolean
 }
 
+=======
+>>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
 const resolveApiBaseUrl = () => {
   const envBase = String(import.meta.env.VITE_API_BASE_URL || '').trim()
   if (!envBase) return ''
@@ -1114,6 +1117,7 @@ export async function generateAndRunUiTest(payload: UiTestGenerateRunPayload) {
   })
 }
 
+<<<<<<< HEAD
 export async function generatePytestPoFromUrl(payload: UiTestGeneratePytestPoPayload) {
   const pid = String(payload.projectId || '').trim()
   const pageUrl = String(payload.pageUrl || '').trim()
@@ -1139,3 +1143,5 @@ export async function generatePytestPoFromUrl(payload: UiTestGeneratePytestPoPay
   })
 }
 
+=======
+>>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b

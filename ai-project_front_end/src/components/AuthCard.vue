@@ -276,7 +276,11 @@ const toggleRegisterConfirmPassword = () => {
 <template>
   <div class="flex flex-col items-center gap-8 w-full max-w-[448px]">
     <!-- Header Section -->
+<<<<<<< HEAD
     <div class="flex flex-col items-center gap-4" data-testid="auth-header">
+=======
+    <div class="flex flex-col items-center gap-4">
+>>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
       <!-- Logo -->
       <div class="w-14 h-14 bg-brand-blue rounded-2xl shadow-[0px_4px_6px_-4px_rgba(21,93,252,0.3),0px_10px_15px_-3px_rgba(21,93,252,0.3)] flex items-center justify-center relative overflow-hidden">
          <!-- Simple Logo Shape Placeholder -->
@@ -317,7 +321,11 @@ const toggleRegisterConfirmPassword = () => {
       </div>
 
       <!-- Login Form -->
+<<<<<<< HEAD
       <form v-if="activeTab === 'login'" class="flex flex-col gap-4" data-testid="auth-login-form" @submit.prevent="handleLogin">
+=======
+      <form v-if="activeTab === 'login'" class="flex flex-col gap-4" @submit.prevent="handleLogin">
+>>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
         <!-- Email Input -->
         <div class="flex flex-col gap-1.5">
           <label class="text-sm font-medium text-[#CAD5E2]">用户名</label>

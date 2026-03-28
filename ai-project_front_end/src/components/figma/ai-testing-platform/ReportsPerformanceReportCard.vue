@@ -11,6 +11,7 @@ const props = defineProps<{
 const trendWidth = 760
 const trendHeight = 240
 const trendPadding = 20
+<<<<<<< HEAD
 const maxTrendPoints = 800
 const maxAssertRows = 200
 
@@ -86,6 +87,16 @@ function buildPolyline(values: number[], width: number, height: number, padding:
     if (v > max) max = v
     if (v < min) min = v
   }
+=======
+
+const tpsValues = computed(() => (props.report?.trendPoints || []).map((item) => item.tps))
+const rtValues = computed(() => (props.report?.trendPoints || []).map((item) => item.avgResponseMs))
+
+function buildPolyline(values: number[], width: number, height: number, padding: number) {
+  if (!values.length) return ''
+  const max = Math.max(...values)
+  const min = Math.min(...values)
+>>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
   const innerWidth = width - padding * 2
   const innerHeight = height - padding * 2
   const len = values.length > 1 ? values.length - 1 : 1
@@ -102,6 +113,7 @@ function buildPolyline(values: number[], width: number, height: number, padding:
 const tpsLine = computed(() => buildPolyline(tpsValues.value, trendWidth, trendHeight, trendPadding))
 const rtLine = computed(() => buildPolyline(rtValues.value, trendWidth, trendHeight, trendPadding))
 
+<<<<<<< HEAD
 const latencyBuckets = computed(() => displayReport.value?.latencyDistribution ?? [])
 
 const maxLatencyCount = computed(() => {
@@ -127,18 +139,39 @@ const resourceRows = computed(() => {
 
 const assertsShown = computed(() => (displayReport.value?.asserts ?? []).slice(0, maxAssertRows))
 const assertsHiddenCount = computed(() => Math.max(0, (displayReport.value?.asserts?.length ?? 0) - assertsShown.value.length))
+=======
+const maxLatencyCount = computed(() => {
+  const values = (props.report?.latencyDistribution || []).map((item) => item.count)
+  return values.length ? Math.max(...values) : 1
+})
+
+const resourceRows = computed(() => {
+  if (!props.report) return []
+  return [
+    { label: 'CPU 平均占用', value: props.report.resources.cpuAvg, max: 100, suffix: '%' },
+    { label: 'CPU 峰值占用', value: props.report.resources.cpuMax, max: 100, suffix: '%' },
+    { label: '内存平均占用', value: props.report.resources.memoryAvg, max: 100, suffix: '%' },
+    { label: '内存峰值占用', value: props.report.resources.memoryMax, max: 100, suffix: '%' }
+  ]
+})
+>>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
 </script>
 
 <template>
   <section class="w-full rounded-[14px] border border-black/10 bg-white p-[20px]">
     <div v-if="loading" class="py-[40px] text-center text-[14px] text-[#717182]">性能报告加载中...</div>
     <div v-else-if="errorText" class="py-[40px] text-center text-[14px] text-[#E7000B]">{{ errorText }}</div>
+<<<<<<< HEAD
     <div v-else-if="!displayReport" class="py-[40px] text-center text-[14px] text-[#717182]">暂无可展示的性能报告</div>
+=======
+    <div v-else-if="!report" class="py-[40px] text-center text-[14px] text-[#717182]">暂无可展示的性能报告</div>
+>>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
 
     <div v-else class="flex flex-col gap-[20px]">
       <div class="flex flex-wrap items-start justify-between gap-[12px]">
         <div class="min-w-0">
           <div class="flex items-center gap-[8px]">
+<<<<<<< HEAD
             <div class="text-[16px] font-semibold leading-[24px] text-[#0A0A0A]">{{ displayReport.name }}</div>
             <div
               class="h-[20px] rounded-full px-[8px] text-[12px] leading-[20px]"
@@ -149,6 +182,18 @@ const assertsHiddenCount = computed(() => Math.max(0, (displayReport.value?.asse
           </div>
           <div class="mt-[4px] truncate text-[12px] leading-[16px] text-[#717182]">
             {{ new Date(displayReport.createdAt * 1000).toLocaleString() }} · {{ displayReport.duration }} · {{ displayReport.vus }} VUs
+=======
+            <div class="text-[16px] font-semibold leading-[24px] text-[#0A0A0A]">{{ report.name }}</div>
+            <div
+              class="h-[20px] rounded-full px-[8px] text-[12px] leading-[20px]"
+              :class="report.status === 'PASSED' ? 'bg-[#E8F7EC] text-[#18A058]' : report.status === 'RUNNING' ? 'bg-[#E6F4FF] text-[#155DFC]' : 'bg-[#FFE2E2] text-[#E7000B]'"
+            >
+              {{ report.status }}
+            </div>
+          </div>
+          <div class="mt-[4px] truncate text-[12px] leading-[16px] text-[#717182]">
+            {{ new Date(report.createdAt * 1000).toLocaleString() }} · {{ report.duration }} · {{ report.vus }} VUs
+>>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
           </div>
         </div>
       </div>
@@ -156,6 +201,7 @@ const assertsHiddenCount = computed(() => Math.max(0, (displayReport.value?.asse
       <div class="grid grid-cols-1 gap-[12px] md:grid-cols-5">
         <div class="rounded-[10px] border border-black/10 bg-[#FAFAFA] p-[12px]">
           <div class="text-[12px] text-[#717182]">TPS</div>
+<<<<<<< HEAD
           <div class="mt-[4px] text-[22px] font-semibold text-[#0A0A0A]">{{ displayReport.tps.toFixed(1) }}</div>
         </div>
         <div class="rounded-[10px] border border-black/10 bg-[#FAFAFA] p-[12px]">
@@ -169,11 +215,30 @@ const assertsHiddenCount = computed(() => Math.max(0, (displayReport.value?.asse
         <div class="rounded-[10px] border border-black/10 bg-[#FAFAFA] p-[12px]">
           <div class="text-[12px] text-[#717182]">成功率</div>
           <div class="mt-[4px] text-[22px] font-semibold text-[#18A058]">{{ displayReport.successRate.toFixed(1) }}%</div>
+=======
+          <div class="mt-[4px] text-[22px] font-semibold text-[#0A0A0A]">{{ report.tps.toFixed(1) }}</div>
+        </div>
+        <div class="rounded-[10px] border border-black/10 bg-[#FAFAFA] p-[12px]">
+          <div class="text-[12px] text-[#717182]">平均响应时间</div>
+          <div class="mt-[4px] text-[22px] font-semibold text-[#0A0A0A]">{{ report.avgResponseMs.toFixed(1) }}ms</div>
+        </div>
+        <div class="rounded-[10px] border border-black/10 bg-[#FAFAFA] p-[12px]">
+          <div class="text-[12px] text-[#717182]">P95 响应时间</div>
+          <div class="mt-[4px] text-[22px] font-semibold text-[#0A0A0A]">{{ report.p95ResponseMs.toFixed(1) }}ms</div>
+        </div>
+        <div class="rounded-[10px] border border-black/10 bg-[#FAFAFA] p-[12px]">
+          <div class="text-[12px] text-[#717182]">成功率</div>
+          <div class="mt-[4px] text-[22px] font-semibold text-[#18A058]">{{ report.successRate.toFixed(1) }}%</div>
+>>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
         </div>
         <div class="rounded-[10px] border border-black/10 bg-[#FAFAFA] p-[12px]">
           <div class="text-[12px] text-[#717182]">磁盘 IO</div>
           <div class="mt-[4px] text-[16px] font-semibold text-[#0A0A0A]">
+<<<<<<< HEAD
             R {{ displayReport.resources.ioReadMb.toFixed(1) }}MB / W {{ displayReport.resources.ioWriteMb.toFixed(1) }}MB
+=======
+            R {{ report.resources.ioReadMb.toFixed(1) }}MB / W {{ report.resources.ioWriteMb.toFixed(1) }}MB
+>>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
           </div>
         </div>
       </div>
@@ -200,7 +265,11 @@ const assertsHiddenCount = computed(() => Math.max(0, (displayReport.value?.asse
         <div class="rounded-[12px] border border-black/10 p-[12px]">
           <div class="text-[14px] font-medium text-[#0A0A0A]">响应时间分布</div>
           <div class="mt-[12px] flex flex-col gap-[10px]">
+<<<<<<< HEAD
             <div v-for="bucket in latencyBuckets" :key="bucket.label" class="grid grid-cols-[64px_1fr_60px] items-center gap-[10px]">
+=======
+            <div v-for="bucket in report.latencyDistribution" :key="bucket.label" class="grid grid-cols-[64px_1fr_60px] items-center gap-[10px]">
+>>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
               <div class="text-[12px] text-[#717182]">{{ bucket.label }}</div>
               <div class="h-[8px] rounded-full bg-[#EEF2FF]">
                 <div
@@ -231,7 +300,10 @@ const assertsHiddenCount = computed(() => Math.max(0, (displayReport.value?.asse
 
       <div class="rounded-[12px] border border-black/10 p-[12px]">
         <div class="text-[14px] font-medium text-[#0A0A0A]">单接口断言统计</div>
+<<<<<<< HEAD
         <div v-if="assertsHiddenCount" class="mt-[6px] text-[12px] text-[#717182]">仅展示前 {{ maxAssertRows }} 条，剩余 {{ assertsHiddenCount }} 条已省略</div>
+=======
+>>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
         <div class="mt-[10px] overflow-x-auto">
           <table class="w-full min-w-[520px] border-collapse text-left">
             <thead>
@@ -243,7 +315,11 @@ const assertsHiddenCount = computed(() => Math.max(0, (displayReport.value?.asse
               </tr>
             </thead>
             <tbody>
+<<<<<<< HEAD
               <tr v-for="item in assertsShown" :key="item.apiName" class="border-b border-black/5 text-[13px] text-[#0A0A0A]">
+=======
+              <tr v-for="item in report.asserts" :key="item.apiName" class="border-b border-black/5 text-[13px] text-[#0A0A0A]">
+>>>>>>> 0f64092fd6c7abac3f72736aa6652163d25e1b0b
                 <td class="px-[8px] py-[10px]">{{ item.apiName }}</td>
                 <td class="px-[8px] py-[10px] text-[#18A058]">{{ item.passed }}</td>
                 <td class="px-[8px] py-[10px]" :class="item.failed > 0 ? 'text-[#E7000B]' : 'text-[#717182]'">{{ item.failed }}</td>
