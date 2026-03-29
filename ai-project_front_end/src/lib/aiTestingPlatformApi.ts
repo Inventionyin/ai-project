@@ -879,3 +879,93 @@ export async function generateRunAllureReport(runId: string) {
   })
 }
 
+export type ApiImportJobStatus = 'PENDING' | 'UPLOADED' | 'PARSING' | 'PARSED_PREVIEW' | 'COMMITTED' | 'FAILED'
+
+export type ApiImportPreviewRequest = {
+  method: string
+  url: string
+  name?: string
+  headers?: Record<string, unknown>
+  body?: unknown
+  diffStatus: 'new' | 'updated' | 'unchanged'
+}
+
+export type ApiImportPreviewGroup = {
+  name: string
+  requests: ApiImportPreviewRequest[]
+}
+
+export type ApiImportPreviewResult = {
+  collectionName?: string | null
+  groups: ApiImportPreviewGroup[]
+}
+
+export type ApiImportJobDetail = {
+  id: string
+  status: ApiImportJobStatus
+  warnings?: string[] | null
+  preview?: ApiImportPreviewResult | null
+}
+
+export async function createApiCollectionImportJob(projectId: string) {
+  const pid = String(projectId || '').trim()
+  if (!pid) throw new Error('项目 ID 不能为空')
+  return requestJson<{ id: string }>('/api/collections/import-jobs', {
+    method: 'POST',
+    headers: {
+      Authorization: resolveAuthHeader(),
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ projectId: pid })
+  })
+}
+
+export async function uploadApiCollectionImportFile(jobId: string, file: File) {
+  const id = String(jobId || '').trim()
+  if (!id) throw new Error('任务 ID 不能为空')
+  if (!file) throw new Error('请选择文件')
+  const form = new FormData()
+  form.append('file', file, file.name)
+  return requestFormData<{ status: ApiImportJobStatus }>(`/api/collections/import-jobs/${encodeURIComponent(id)}/file`, {
+    method: 'POST',
+    headers: {
+      Authorization: resolveAuthHeader()
+    },
+    body: form
+  })
+}
+
+export async function fetchApiCollectionImportJob(jobId: string) {
+  const id = String(jobId || '').trim()
+  if (!id) throw new Error('任务 ID 不能为空')
+  return requestJson<ApiImportJobDetail>(`/api/collections/import-jobs/${encodeURIComponent(id)}`, {
+    method: 'GET',
+    headers: {
+      Authorization: resolveAuthHeader()
+    }
+  })
+}
+
+export async function commitApiCollectionImportJob(
+  jobId: string,
+  payload: { selected: Array<{ method: string; url: string }>; overrideExisting?: boolean }
+) {
+  const id = String(jobId || '').trim()
+  if (!id) throw new Error('任务 ID 不能为空')
+  const selected = Array.isArray(payload.selected)
+    ? payload.selected.map((v) => ({ method: String(v.method || '').trim(), url: String(v.url || '').trim() })).filter((v) => v.method && v.url)
+    : []
+  if (!selected.length) throw new Error('未选择任何接口')
+  return requestJson<{ status: ApiImportJobStatus; importedCount?: number; updatedCount?: number }>(
+    `/api/collections/import-jobs/${encodeURIComponent(id)}/commit`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: resolveAuthHeader(),
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ selected, overrideExisting: Boolean(payload.overrideExisting) })
+    }
+  )
+}
+

@@ -13,8 +13,8 @@ from app.models.mixins import CreatedAtMixin, TimestampMixin
 class AiImportJob(Base, TimestampMixin):
     __tablename__ = "ai_import_jobs"
     __table_args__ = (
-        CheckConstraint("source_type IN ('PRD_DOC', 'FIGMA_LINK', 'HTML_DOC')"),
-        CheckConstraint("status IN ('PENDING', 'UPLOADED', 'RUNNING', 'SUCCEEDED', 'FAILED', 'COMMITTED')"),
+        CheckConstraint("source_type IN ('PRD_DOC', 'FIGMA_LINK', 'HTML_DOC', 'API_COLLECTION_DOC')"),
+        CheckConstraint("status IN ('PENDING', 'UPLOADED', 'RUNNING', 'PARSING', 'PARSED_PREVIEW', 'SUCCEEDED', 'FAILED', 'COMMITTED')"),
         Index("ix_ai_import_jobs_tenant_project_created", "tenant_id", "project_id", desc("created_at")),
     )
 
@@ -27,6 +27,8 @@ class AiImportJob(Base, TimestampMixin):
     generate_config_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     skill_config_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     summary_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    warnings_json: Mapped[list[dict]] = mapped_column(JSONB, nullable=False, default=list) # For API import docling/llm parsing warnings
+    preview_data_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict) # For storing intermediate parsed result
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True, index=True)
 

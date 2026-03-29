@@ -93,3 +93,33 @@ class AiImportGetJobData(BaseSchema):
     previewItems: list[AiImportPreviewItem] = Field(default_factory=list)
     createdAt: UnixTs
     updatedAt: UnixTs
+
+
+# API Collection Import Specific Schemas
+class ApiImportPreviewRequest(BaseSchema):
+    method: str = Field(min_length=1, max_length=16)
+    url: str = Field(min_length=1, max_length=1024)
+    name: str = Field(min_length=1, max_length=128)
+    headers: dict = Field(default_factory=dict)
+    body: dict = Field(default_factory=dict)
+    diffStatus: str = Field(min_length=1, max_length=16) # 'new', 'updated', 'unchanged'
+
+
+class ApiImportPreviewGroup(BaseSchema):
+    name: str = Field(min_length=1, max_length=128)
+    requests: list[ApiImportPreviewRequest] = Field(default_factory=list)
+
+
+class ApiImportPreviewResult(BaseSchema):
+    collectionName: str = Field(min_length=1, max_length=128)
+    groups: list[ApiImportPreviewGroup] = Field(default_factory=list)
+
+
+class ApiImportJobDetail(BaseSchema):
+    jobId: IdStr
+    projectId: IdStr
+    status: AiImportJobStatus
+    warnings: list[dict] = Field(default_factory=list)
+    previewData: ApiImportPreviewResult | None = None
+    createdAt: UnixTs
+    updatedAt: UnixTs

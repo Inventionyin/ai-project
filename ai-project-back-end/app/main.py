@@ -26,10 +26,16 @@ from sqlalchemy.exc import SQLAlchemyError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 
-from app.api.deps import get_request_id
-from app.api.router import api_router
-from app.api.health import router as health_router
-from app.core.config import get_settings
+try:
+    from app.api.deps import get_request_id
+    from app.api.router import api_router
+    from app.api.health import router as health_router
+    from app.core.config import get_settings
+except ModuleNotFoundError:
+    from api.deps import get_request_id
+    from api.router import api_router
+    from api.health import router as health_router
+    from core.config import get_settings
 
 logger = logging.getLogger(__name__)
 

@@ -1,15 +1,52 @@
 @echo off
 setlocal
 set "ROOT=%~dp0"
+set "BACKEND_DIR=%ROOT%ai-project-back-end"
+set "FRONTEND_DIR=%ROOT%ai-project_front_end"
+set "BACKEND_VENV=%BACKEND_DIR%\.venv"
+set "BACKEND_PY=%BACKEND_VENV%\Scripts\python.exe"
 
-if not exist "%ROOT%ai-project-back-end\" (
-  echo Backend directory not found: %ROOT%ai-project-back-end
+if not exist "%BACKEND_DIR%\" (
+  echo Backend directory not found: %BACKEND_DIR%
   exit /b 1
 )
 
-if not exist "%ROOT%ai-project_front_end\" (
-  echo Frontend directory not found: %ROOT%ai-project_front_end
+if not exist "%FRONTEND_DIR%\" (
+  echo Frontend directory not found: %FRONTEND_DIR%
   exit /b 1
+)
+
+where python >nul 2>nul
+if errorlevel 1 (
+  echo Python is not installed or not in PATH.
+  exit /b 1
+)
+
+where npm >nul 2>nul
+if errorlevel 1 (
+  echo npm is not installed or not in PATH.
+  exit /b 1
+)
+
+if not exist "%BACKEND_PY%" (
+  echo [Backend] Creating virtual environment...
+  python -m venv "%BACKEND_VENV%"
+  if errorlevel 1 exit /b 1
+)
+
+echo [Backend] Checking Python dependencies...
+"%BACKEND_PY%" -c "import asyncpg, uvicorn" >nul 2>nul
+if errorlevel 1 (
+  echo [Backend] Installing requirements...
+  "%BACKEND_PY%" -m pip install -r "%BACKEND_DIR%\requirements.txt"
+  if errorlevel 1 exit /b 1
+)
+
+if not exist "%FRONTEND_DIR%\node_modules\.bin\vite.cmd" (
+  echo [Frontend] Installing npm dependencies...
+  cd /d "%FRONTEND_DIR%"
+  npm install
+  if errorlevel 1 exit /b 1
 )
 
 echo.
@@ -22,12 +59,10 @@ echo ==========================================================
 echo.
 
 echo [Backend] Starting background process...
-:: 使用 start /b 在当前窗口后台运行后端
-start /b cmd /c "cd /d ""%ROOT%ai-project-back-end"" && if exist "".venv\Scripts\activate.bat"" (call "".venv\Scripts\activate.bat"") && (py -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 --log-level info || python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 --log-level info)"
+start /b powershell -NoProfile -ExecutionPolicy Bypass -Command "$env:PYTHONPATH='%BACKEND_VENV%\Lib\site-packages;%BACKEND_DIR%'; Set-Location '%BACKEND_DIR%\app'; & '%BACKEND_PY%' -m uvicorn main:app --host 0.0.0.0 --port 8000 --log-level info"
 
 echo [Frontend] Starting frontend in foreground...
-:: 前端在当前窗口前台运行，其日志将直接打印到此处
-cd /d "%ROOT%ai-project_front_end"
+cd /d "%FRONTEND_DIR%"
 npm run dev
 
 endlocal
