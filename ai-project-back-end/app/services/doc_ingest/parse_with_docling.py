@@ -207,6 +207,7 @@ def _parse_markdown_api_candidates(text: str, *, default_feature: str) -> list[A
     current_title: str | None = None
 
     last_response_label_line: int | None = None
+    last_request_body_label_line: int | None = None
     in_code = False
     code_lang = ""
     code_start_line = 0
@@ -214,8 +215,13 @@ def _parse_markdown_api_candidates(text: str, *, default_feature: str) -> list[A
     last_candidate_line: int | None = None
 
     request_url_label = re.compile(r"请求\s*URL|Request\s*URL", re.IGNORECASE)
-    response_label = re.compile(r"^\s*\*\*\s*(响应|Response)\s*[:：]\s*\*\*\s*$", re.IGNORECASE)
+    response_label = re.compile(r"(?:响应|Response|返回结果|预期响应)", re.IGNORECASE)
+    request_body_label = re.compile(r"(?:请求体|Request Body)", re.IGNORECASE)
     inline_method_url = re.compile(r"\b(GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD)\b\s+([/][^\s`]+)", re.IGNORECASE)
+
+    pending_method: str | None = None
+    pending_url: str | None = None
+    pending_line_no: int | None = None
 
     def _push_candidate(method: str, url: str, *, source: str, line_no: int) -> None:
         nonlocal last_candidate_line
@@ -264,11 +270,20 @@ def _parse_markdown_api_candidates(text: str, *, default_feature: str) -> list[A
                 continue
             in_code = False
             block = "\n".join(code_buf).strip()
-            if block and last_response_label_line is not None and (code_start_line - last_response_label_line) <= 3:
-                if candidates and last_candidate_line is not None and (code_start_line - last_candidate_line) <= 30:
-                    c = candidates[-1]
+            if block and candidates and last_candidate_line is not None and (code_start_line - last_candidate_line) <= 30:
+                c = candidates[-1]
+                if last_response_label_line is not None and (code_start_line - last_response_label_line) <= 3:
                     if not (c.expectedResult or "").strip():
                         c.expectedResult = block[:5000]
+                elif last_request_body_label_line is not None and (code_start_line - last_request_body_label_line) <= 3:
+                    if not c.params:
+                        import json
+                        try:
+                            parsed_body = json.loads(block)
+                            if isinstance(parsed_body, dict):
+                                c.params = parsed_body
+                        except Exception:
+                            pass
             code_lang = ""
             code_start_line = 0
             code_buf = []
@@ -280,6 +295,12 @@ def _parse_markdown_api_candidates(text: str, *, default_feature: str) -> list[A
 
         hm = re.match(r"^(#{1,6})\s+(.*)$", s)
         if hm:
+            if pending_method and pending_url:
+                _push_candidate(pending_method, pending_url, source="split_labels", line_no=pending_line_no or idx)
+            pending_method = None
+            pending_url = None
+            pending_line_no = None
+
             level = len(hm.group(1))
             title = hm.group(2).strip()
             if level <= 2 and title:
@@ -288,8 +309,28 @@ def _parse_markdown_api_candidates(text: str, *, default_feature: str) -> list[A
                 current_title = title[:100]
             continue
 
-        if response_label.match(s):
+        m_match = re.search(r"(?:方法|Method)\s*\*?\*?\s*[:：]\s*`?([A-Za-z]+)`?", s, re.IGNORECASE)
+        if m_match and m_match.group(1).upper() in _HTTP_METHODS:
+            pending_method = m_match.group(1).upper()
+            pending_line_no = pending_line_no or idx
+
+        p_match = re.search(r"(?:路径|Path|URL|请求\s*URL|Request\s*URL)\s*\*?\*?\s*[:：]\s*`?([A-Za-z]+://[^`\s]+|/[^`\s]+)`?", s, re.IGNORECASE)
+        if p_match:
+            pending_url = p_match.group(1)
+            pending_line_no = pending_line_no or idx
+
+        if pending_method and pending_url:
+            _push_candidate(pending_method, pending_url, source="split_labels", line_no=pending_line_no or idx)
+            pending_method = None
+            pending_url = None
+            pending_line_no = None
+
+        if response_label.search(s):
             last_response_label_line = idx
+            continue
+
+        if request_body_label.search(s):
+            last_request_body_label_line = idx
             continue
 
         if request_url_label.search(s):
@@ -304,6 +345,9 @@ def _parse_markdown_api_candidates(text: str, *, default_feature: str) -> list[A
         if mm:
             _push_candidate(mm.group(1), mm.group(2), source="inline_method_url", line_no=idx)
             continue
+
+    if pending_method and pending_url:
+        _push_candidate(pending_method, pending_url, source="split_labels", line_no=pending_line_no or len(lines))
 
     def _is_table_sep(line: str) -> bool:
         s = str(line or "").strip()
@@ -425,6 +469,22 @@ def _parse_markdown_api_candidates(text: str, *, default_feature: str) -> list[A
                             val = _sample_value(str(r[type_idx] or ""))
                         out_headers[key] = str(val)
                     c.headers = out_headers
+            elif label_idx is not None:
+                out_headers: dict[str, str] = {}
+                for j in range(label_idx + 1, region_end):
+                    line_j = lines[j].strip()
+                    if not line_j:
+                        continue
+                    if not line_j.startswith("-") and not line_j.startswith("*"):
+                        break
+                    parts = line_j.split(":", 1)
+                    if len(parts) == 2:
+                        k = parts[0].strip("-* `")
+                        v = parts[1].strip(" `")
+                        if k:
+                            out_headers[k] = v
+                if out_headers:
+                    c.headers = out_headers
 
         if not c.params and any(x in region_lower for x in ["请求体", "request body", "query", "请求参数", "request params"]):
             label_idx = _find_label_index(["请求体", "request body", "query", "请求参数", "request params"])
@@ -452,10 +512,65 @@ def _parse_markdown_api_candidates(text: str, *, default_feature: str) -> list[A
 
 def _parse_with_docling(file_bytes: bytes, filename: str) -> tuple[list[DocSection], list[ApiCandidate], list[DocTable], list[QualityIssue]]:
     try:
-        import docling  # type: ignore
-    except Exception:
-        return [], [], [], [_make_issue("DOCLING_NOT_AVAILABLE", "docling not installed", "ERROR")]
-    return [], [], [], [_make_issue("DOCLING_NOT_WIRED", "docling pipeline not integrated", "WARN")]
+        from docling.document_converter import DocumentConverter
+    except ImportError:
+        return [], [], [], [_make_issue("DOCLING_NOT_AVAILABLE", "docling not installed", "WARN")]
+
+    import tempfile
+    import os
+    import uuid
+
+    sections: list[DocSection] = []
+    issues: list[QualityIssue] = []
+    
+    ext = os.path.splitext(filename)[1]
+    if not ext:
+        ext = ".txt"
+        
+    with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
+        tmp.write(file_bytes)
+        tmp_path = tmp.name
+
+    try:
+        converter = DocumentConverter()
+        result = converter.convert(tmp_path)
+        doc = result.document
+        
+        # New Docling API: export_to_markdown
+        if hasattr(doc, "export_to_markdown"):
+            md_text = doc.export_to_markdown()
+            if md_text.strip():
+                sections.append(
+                    DocSection(
+                        id=str(uuid.uuid4())[:8],
+                        text=md_text[:50000],
+                        tokensEstimate=len(md_text.split()),
+                        confidence=0.9
+                    )
+                )
+        # Fallback to texts iteration
+        elif hasattr(doc, "texts"):
+            for item in doc.texts:
+                text_val = getattr(item, "text", str(item))
+                if text_val.strip():
+                    sections.append(
+                        DocSection(
+                            id=str(uuid.uuid4())[:8],
+                            text=text_val[:50000],
+                            tokensEstimate=len(text_val.split()),
+                            confidence=0.8
+                        )
+                    )
+    except Exception as e:
+        issues.append(_make_issue("DOCLING_ERROR", str(e), "ERROR"))
+    finally:
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+            
+    return sections, [], [], issues
 
 
 def parse_document(file_bytes: bytes, filename: str, *, job_id: str | None = None) -> DocParseResult:

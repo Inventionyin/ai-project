@@ -647,11 +647,100 @@ export async function updateTestcaseBinding(bindingId: string, payload: { name?:
 export async function deleteTestcaseBinding(bindingId: string) {
   const id = String(bindingId || '').trim()
   if (!id) throw new Error('绑定 ID 不能为空')
-  return requestJson<Record<string, never>>(`/api/testcase-bindings/${encodeURIComponent(id)}`, {
+  return requestJson<void>(`/api/testcase-bindings/${encodeURIComponent(id)}`, {
     method: 'DELETE',
     headers: {
       Authorization: resolveAuthHeader()
     }
+  })
+}
+
+// ==========================================
+// API Collection Import Types & Functions
+// ==========================================
+
+export type ApiImportJobStatus =
+  | 'PENDING'
+  | 'UPLOADED'
+  | 'RUNNING'
+  | 'PARSING'
+  | 'PARSED_PREVIEW'
+  | 'SUCCEEDED'
+  | 'FAILED'
+  | 'COMMITTED'
+
+export interface ApiImportPreviewRequest {
+  method: string
+  url: string
+  name: string
+  headers: Record<string, any>
+  body: Record<string, any>
+  diffStatus: 'new' | 'updated' | 'unchanged'
+}
+
+export interface ApiImportPreviewGroup {
+  name: string
+  requests: ApiImportPreviewRequest[]
+}
+
+export interface ApiImportPreviewResult {
+  collectionName: string
+  groups: ApiImportPreviewGroup[]
+}
+
+export interface ApiImportJobDetail {
+  jobId: string
+  projectId: string
+  status: ApiImportJobStatus
+  warnings: any[]
+  previewData: ApiImportPreviewResult | null
+  createdAt: number
+  updatedAt: number
+}
+
+export async function createApiCollectionImportJob(projectId: string) {
+  return requestJson<{ jobId: string }>('/api/collections/import-jobs', {
+    method: 'POST',
+    headers: {
+      Authorization: resolveAuthHeader(),
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ projectId })
+  })
+}
+
+export async function uploadApiCollectionImportFile(jobId: string, file: File) {
+  const form = new FormData()
+  form.append('file', file)
+  return requestFormData<void>(`/api/collections/import-jobs/${encodeURIComponent(jobId)}/file`, {
+    method: 'POST',
+    headers: {
+      Authorization: resolveAuthHeader()
+    },
+    body: form
+  })
+}
+
+export async function fetchApiCollectionImportJob(jobId: string) {
+  return requestJson<ApiImportJobDetail>(`/api/collections/import-jobs/${encodeURIComponent(jobId)}`, {
+    method: 'GET',
+    headers: {
+      Authorization: resolveAuthHeader()
+    }
+  })
+}
+
+export async function commitApiCollectionImportJob(
+  jobId: string,
+  payload: { selectedRequests: ApiImportPreviewRequest[]; overrideExisting: boolean }
+) {
+  return requestJson<void>(`/api/collections/import-jobs/${encodeURIComponent(jobId)}/commit`, {
+    method: 'POST',
+    headers: {
+      Authorization: resolveAuthHeader(),
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(payload)
   })
 }
 
@@ -879,93 +968,5 @@ export async function generateRunAllureReport(runId: string) {
   })
 }
 
-export type ApiImportJobStatus = 'PENDING' | 'UPLOADED' | 'PARSING' | 'PARSED_PREVIEW' | 'COMMITTED' | 'FAILED'
 
-export type ApiImportPreviewRequest = {
-  method: string
-  url: string
-  name?: string
-  headers?: Record<string, unknown>
-  body?: unknown
-  diffStatus: 'new' | 'updated' | 'unchanged'
-}
-
-export type ApiImportPreviewGroup = {
-  name: string
-  requests: ApiImportPreviewRequest[]
-}
-
-export type ApiImportPreviewResult = {
-  collectionName?: string | null
-  groups: ApiImportPreviewGroup[]
-}
-
-export type ApiImportJobDetail = {
-  id: string
-  status: ApiImportJobStatus
-  warnings?: string[] | null
-  preview?: ApiImportPreviewResult | null
-}
-
-export async function createApiCollectionImportJob(projectId: string) {
-  const pid = String(projectId || '').trim()
-  if (!pid) throw new Error('项目 ID 不能为空')
-  return requestJson<{ id: string }>('/api/collections/import-jobs', {
-    method: 'POST',
-    headers: {
-      Authorization: resolveAuthHeader(),
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({ projectId: pid })
-  })
-}
-
-export async function uploadApiCollectionImportFile(jobId: string, file: File) {
-  const id = String(jobId || '').trim()
-  if (!id) throw new Error('任务 ID 不能为空')
-  if (!file) throw new Error('请选择文件')
-  const form = new FormData()
-  form.append('file', file, file.name)
-  return requestFormData<{ status: ApiImportJobStatus }>(`/api/collections/import-jobs/${encodeURIComponent(id)}/file`, {
-    method: 'POST',
-    headers: {
-      Authorization: resolveAuthHeader()
-    },
-    body: form
-  })
-}
-
-export async function fetchApiCollectionImportJob(jobId: string) {
-  const id = String(jobId || '').trim()
-  if (!id) throw new Error('任务 ID 不能为空')
-  return requestJson<ApiImportJobDetail>(`/api/collections/import-jobs/${encodeURIComponent(id)}`, {
-    method: 'GET',
-    headers: {
-      Authorization: resolveAuthHeader()
-    }
-  })
-}
-
-export async function commitApiCollectionImportJob(
-  jobId: string,
-  payload: { selected: Array<{ method: string; url: string }>; overrideExisting?: boolean }
-) {
-  const id = String(jobId || '').trim()
-  if (!id) throw new Error('任务 ID 不能为空')
-  const selected = Array.isArray(payload.selected)
-    ? payload.selected.map((v) => ({ method: String(v.method || '').trim(), url: String(v.url || '').trim() })).filter((v) => v.method && v.url)
-    : []
-  if (!selected.length) throw new Error('未选择任何接口')
-  return requestJson<{ status: ApiImportJobStatus; importedCount?: number; updatedCount?: number }>(
-    `/api/collections/import-jobs/${encodeURIComponent(id)}/commit`,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: resolveAuthHeader(),
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ selected, overrideExisting: Boolean(payload.overrideExisting) })
-    }
-  )
-}
 

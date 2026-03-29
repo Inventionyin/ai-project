@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, get_current_user, get_request_id, to_unix_ts
@@ -25,6 +25,12 @@ from app.schemas.collection import (
     RunApiRequestRequest,
     RunCollectionRequest,
 )
+from app.schemas.ai_import import (
+    ApiImportCreateJobRequest,
+    ApiImportCreateJobData,
+    ApiImportJobDetail,
+    ApiImportCommitRequest,
+)
 from app.schemas.common import ApiResponse, PageData
 from app.services.collection import (
     create_collection,
@@ -45,6 +51,12 @@ from app.services.collection import (
     update_collection,
     update_group,
     update_request,
+)
+from app.services.ai_import import (
+    create_api_import_job,
+    upload_api_import_file,
+    get_api_import_job,
+    commit_api_import_job,
 )
 
 router = APIRouter(prefix="/collections")
@@ -409,6 +421,92 @@ async def import_(
     groups, reqs = await list_groups_and_requests(db, user=user, collection_id=collection.id)
     detail = await _build_detail(db, user=user, collection_id=collection.id, groups=groups, reqs=reqs)
     return ApiResponse(data=detail, requestId=request_id)
+
+
+@router.post("/import-jobs", response_model=ApiResponse[ApiImportCreateJobData])
+async def create_import_job_(
+    payload: ApiImportCreateJobRequest,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    request_id: str = Depends(get_request_id),
+) -> ApiResponse[ApiImportCreateJobData]:
+    try:
+        job = await create_api_import_job(db, user=user, project_id=uuid.UUID(payload.projectId))
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    return ApiResponse(
+        data=ApiImportCreateJobData(
+            jobId=str(job.id),
+            projectId=str(job.project_id),
+            status=job.status,
+            createdAt=to_unix_ts(job.created_at),
+        ),
+        requestId=request_id,
+    )
+
+
+@router.post("/import-jobs/{jobId}/file", response_model=ApiResponse[dict])
+async def upload_import_job_file_(
+    jobId: uuid.UUID,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    request_id: str = Depends(get_request_id),
+) -> ApiResponse[dict]:
+    try:
+        await upload_api_import_file(db, user=user, job_id=jobId, file=file)
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    return ApiResponse(data={}, requestId=request_id)
+
+
+@router.get("/import-jobs/{jobId}", response_model=ApiResponse[ApiImportJobDetail])
+async def get_import_job_(
+    jobId: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    request_id: str = Depends(get_request_id),
+) -> ApiResponse[ApiImportJobDetail]:
+    job = await get_api_import_job(db, user=user, job_id=jobId)
+    return ApiResponse(
+        data=ApiImportJobDetail(
+            jobId=str(job.id),
+            projectId=str(job.project_id),
+            status=job.status,
+            warnings=job.warnings_json,
+            previewData=job.preview_data_json if job.preview_data_json else None,
+            createdAt=to_unix_ts(job.created_at),
+            updatedAt=to_unix_ts(job.updated_at),
+        ),
+        requestId=request_id,
+    )
+
+
+@router.post("/import-jobs/{jobId}/commit", response_model=ApiResponse[dict])
+async def commit_import_job_(
+    jobId: uuid.UUID,
+    payload: ApiImportCommitRequest,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    request_id: str = Depends(get_request_id),
+) -> ApiResponse[dict]:
+    try:
+        await commit_api_import_job(
+            db, 
+            user=user, 
+            job_id=jobId, 
+            selected_requests=[r.model_dump() for r in payload.selectedRequests],
+            override_existing=payload.overrideExisting,
+        )
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    return ApiResponse(data={}, requestId=request_id)
 
 
 @router.get("/{collectionId}/export", response_model=ApiResponse[ExportCollectionData])

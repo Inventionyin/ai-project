@@ -28,6 +28,22 @@ if errorlevel 1 (
   exit /b 1
 )
 
+echo [System] Checking if PostgreSQL database (port 5432) is running...
+netstat -ano | findstr /R /C:":5432 .*LISTENING" >nul
+if errorlevel 1 (
+  echo [System] Database not running. Attempting to start Docker container...
+  REM 默认尝试启动名为 "postgres" 的容器。如果你的容器名字不同，请修改下方命令中的 "postgres"。
+  docker start ai_test_platform >nul 2>nul
+  if errorlevel 1 (
+    echo [Error] Failed to start Docker container. Please check if Docker is running and the container name is correct.
+    exit /b 1
+  )
+  echo [System] Waiting for database to initialize...
+  timeout /t 3 /nobreak >nul
+) else (
+  echo [System] Database is already running.
+)
+
 if not exist "%BACKEND_PY%" (
   echo [Backend] Creating virtual environment...
   python -m venv "%BACKEND_VENV%"

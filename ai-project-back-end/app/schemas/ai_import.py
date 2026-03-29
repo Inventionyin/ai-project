@@ -96,6 +96,17 @@ class AiImportGetJobData(BaseSchema):
 
 
 # API Collection Import Specific Schemas
+class ApiImportCreateJobRequest(BaseSchema):
+    projectId: IdStr
+
+
+class ApiImportCreateJobData(BaseSchema):
+    jobId: IdStr
+    projectId: IdStr
+    status: AiImportJobStatus
+    createdAt: UnixTs
+
+
 class ApiImportPreviewRequest(BaseSchema):
     method: str = Field(min_length=1, max_length=16)
     url: str = Field(min_length=1, max_length=1024)
@@ -123,3 +134,8 @@ class ApiImportJobDetail(BaseSchema):
     previewData: ApiImportPreviewResult | None = None
     createdAt: UnixTs
     updatedAt: UnixTs
+
+
+class ApiImportCommitRequest(BaseSchema):
+    selectedRequests: list[ApiImportPreviewRequest] = Field(default_factory=list)
+    overrideExisting: bool = Field(default=True)

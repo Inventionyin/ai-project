@@ -12,6 +12,7 @@ import apiAddCollection from '@/assets/figma/ai-testing-platform/api-add-collect
 import CreateApiCollectionModal from '@/components/figma/ai-testing-platform/CreateApiCollectionModal.vue'
 import CreateApiFolderModal from '@/components/figma/ai-testing-platform/CreateApiFolderModal.vue'
 import CreateApiRequestModal from '@/components/figma/ai-testing-platform/CreateApiRequestModal.vue'
+import ImportCollectionModal from '@/components/figma/ai-testing-platform/ImportCollectionModal.vue'
 import {
   createCollection,
   createCollectionGroup,
@@ -73,6 +74,7 @@ const contextMenu = ref<{
 const isCreateCollectionOpen = ref(false)
 const isCreateFolderOpen = ref(false)
 const isCreateRequestOpen = ref(false)
+const isImportCollectionOpen = ref(false)
 const modalCollectionId = ref<string | null>(null)
 const projectId = computed(() => String(route.params.projectId || '').trim())
 
@@ -244,11 +246,6 @@ function closeCreateFolder() {
   modalCollectionId.value = null
 }
 
-function closeCreateRequest() {
-  isCreateRequestOpen.value = false
-  modalCollectionId.value = null
-}
-
 async function handleCreateFolder(payload: { name: string; description: string }) {
   if (!modalCollectionId.value) return
   const collection = findCollection(modalCollectionId.value)
@@ -336,6 +333,24 @@ function closeCreateCollection() {
   isCreateCollectionOpen.value = false
 }
 
+function closeCreateRequest() {
+  isCreateRequestOpen.value = false
+  modalCollectionId.value = null
+}
+
+function openImportCollection() {
+  isImportCollectionOpen.value = true
+}
+
+function closeImportCollection() {
+  isImportCollectionOpen.value = false
+}
+
+function handleImportSuccess() {
+  closeImportCollection()
+  loadCollections()
+}
+
 async function handleCreateCollection(payload: { name: string; description: string; baseUrl: string; defaultAuthType: string }) {
   if (!projectId.value) {
     actionError.value = '项目 ID 不存在'
@@ -409,7 +424,7 @@ watch(projectId, () => {
       <div class="flex flex-col gap-[8px] border-b-[0.6667px] border-black/10 px-[12px] pt-[12px] pb-[0.67px]">
         <div class="flex items-center justify-between">
           <div class="h-[16px] w-[48px] text-[12px] font-semibold leading-[16px] text-[#717182]">接口集合</div>
-          <button type="button" class="relative h-[16px] w-[39px]">
+          <button type="button" class="relative h-[16px] w-[39px]" @click="openImportCollection">
             <img :src="apiImport" alt="" class="absolute left-0 top-[2.5px] h-[11px] w-[11px]" />
             <span class="absolute left-[13px] top-0 h-[16px] w-[28px] text-center text-[12px] font-medium leading-[16px] text-[#155DFC]">
               导入
@@ -518,5 +533,11 @@ watch(projectId, () => {
     :folders="modalFolderOptions"
     @close="closeCreateRequest"
     @create="handleCreateRequest"
+  />
+  <ImportCollectionModal 
+    :is-open="isImportCollectionOpen" 
+    :project-id="projectId" 
+    @close="closeImportCollection" 
+    @success="handleImportSuccess" 
   />
 </template>

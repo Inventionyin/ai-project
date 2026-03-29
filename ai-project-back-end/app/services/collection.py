@@ -130,6 +130,22 @@ async def create_collection(
     return collection
 
 
+async def get_collection_by_name(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+    name: str,
+) -> ApiCollection | None:
+    return await db.scalar(
+        select(ApiCollection).where(
+            ApiCollection.tenant_id == user.tenant_id,
+            ApiCollection.project_id == project_id,
+            ApiCollection.name == name,
+        )
+    )
+
+
 async def get_collection(
     db: AsyncSession,
     *,
