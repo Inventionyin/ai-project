@@ -355,7 +355,11 @@ async def parse_api_collection_async(job_id: uuid.UUID, storage_key: str | None 
             # We use AUTO mode by default to replace the mock and actually invoke LLM
             llm_mode = skill_config.get("llmMode", "AUTO")
             logger.info(f"Starting LLM enhancement with mode: {llm_mode}")
-            parse_result = apply_llm_enhancement(parse_result, llm_mode)
+            try:
+                parse_result = apply_llm_enhancement(parse_result, llm_mode)
+            except Exception as llm_err:
+                logger.error(f"LLM enhancement failed: {llm_err}")
+                # Keep going even if LLM fails, using raw candidates
             
             # Step 3: Map to preview_data_json format
             candidates = parse_result.apiCandidates or []
@@ -466,14 +470,7 @@ async def upload_api_import_file(
     job.status = AiImportJobStatus.PARSING.value
     await db.flush()
 
-    # Trigger background parsing task
-    # Pass storageKey and fileName directly to avoid race conditions with DB commit
-    asyncio.create_task(parse_api_collection_async(
-        job.id, 
-        storage_key=source_ref_json.get("storageKey"),
-        filename=normalized_filename
-    ))
-    
+    # Background parsing is scheduled by the API layer after commit
     return job
 
 
@@ -518,6 +515,7 @@ async def commit_api_import_job(
     collection_name = str(preview_data.get("collectionName", "Imported Collection"))
     
     # Try to find existing collection or create new one
+    from app.services.collection import get_collection_by_name, create_collection, create_group, create_request
     collection = await get_collection_by_name(db, user=user, project_id=project.id, name=collection_name)
     if not collection:
         collection = await create_collection(

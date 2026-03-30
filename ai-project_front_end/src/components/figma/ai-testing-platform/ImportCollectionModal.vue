@@ -129,24 +129,48 @@ async function startUpload() {
 // Polling Handlers
 function startPolling(jobId: string) {
   stopPolling()
+  const startedAt = Date.now()
+  let continuousErrors = 0
   pollTimer = window.setInterval(async () => {
     try {
       const detail = await fetchApiCollectionImportJob(jobId)
-      if (!detail) return
+      if (!detail) {
+        continuousErrors += 1
+        if (continuousErrors >= 3) {
+          stopPolling()
+          loadingMsg.value = ''
+          errorMsg.value = '轮询任务状态失败，请重试'
+          step.value = 1
+        }
+        return
+      }
+      continuousErrors = 0
       
       if (detail.status === 'PARSED_PREVIEW') {
         stopPolling()
-        previewData.value = detail.previewData || null
+        previewData.value = detail.previewData || { collectionName: selectedFile.value?.name || 'Imported Collection', groups: [] }
         warnings.value = detail.warnings || []
         initSelection()
         step.value = 3
       } else if (detail.status === 'FAILED') {
         stopPolling()
         errorMsg.value = '解析失败'
+        loadingMsg.value = ''
+        step.value = 1
+      } else if (Date.now() - startedAt > 180000) {
+        stopPolling()
+        loadingMsg.value = ''
+        errorMsg.value = '解析超时，请重试上传'
         step.value = 1
       }
-    } catch (err) {
-      console.error('Polling error', err)
+    } catch {
+      continuousErrors += 1
+      if (continuousErrors >= 3) {
+        stopPolling()
+        loadingMsg.value = ''
+        errorMsg.value = '无法获取导入状态，请检查网络或重新登录后重试'
+        step.value = 1
+      }
     }
   }, 2000)
 }

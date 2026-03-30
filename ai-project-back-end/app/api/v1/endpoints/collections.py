@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, Query, UploadFile, File
+from fastapi import APIRouter, Depends, Query, UploadFile, File, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, get_current_user, get_request_id, to_unix_ts
@@ -57,6 +57,7 @@ from app.services.ai_import import (
     upload_api_import_file,
     get_api_import_job,
     commit_api_import_job,
+    parse_api_collection_async,
 )
 
 router = APIRouter(prefix="/collections")
@@ -450,6 +451,7 @@ async def create_import_job_(
 @router.post("/import-jobs/{jobId}/file", response_model=ApiResponse[dict])
 async def upload_import_job_file_(
     jobId: uuid.UUID,
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
@@ -461,6 +463,7 @@ async def upload_import_job_file_(
     except Exception:
         await db.rollback()
         raise
+    background_tasks.add_task(parse_api_collection_async, jobId)
     return ApiResponse(data={}, requestId=request_id)
 
 
