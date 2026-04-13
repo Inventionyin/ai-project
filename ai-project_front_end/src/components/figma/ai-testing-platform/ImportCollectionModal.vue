@@ -31,6 +31,7 @@ const isDragging = ref(false)
 
 // Step 2: Polling
 let pollTimer: number | null = null
+let pollBusy = false
 
 // Step 3: Preview
 const previewData = ref<ApiImportPreviewResult | null>(null)
@@ -132,6 +133,8 @@ function startPolling(jobId: string) {
   const startedAt = Date.now()
   let continuousErrors = 0
   pollTimer = window.setInterval(async () => {
+    if (pollBusy) return
+    pollBusy = true
     try {
       const detail = await fetchApiCollectionImportJob(jobId)
       if (!detail) {
@@ -171,6 +174,8 @@ function startPolling(jobId: string) {
         errorMsg.value = '无法获取导入状态，请检查网络或重新登录后重试'
         step.value = 1
       }
+    } finally {
+      pollBusy = false
     }
   }, 2000)
 }
@@ -180,6 +185,7 @@ function stopPolling() {
     clearInterval(pollTimer)
     pollTimer = null
   }
+  pollBusy = false
 }
 
 // Preview Handlers

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query, UploadFile, File, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -475,6 +476,12 @@ async def get_import_job_(
     request_id: str = Depends(get_request_id),
 ) -> ApiResponse[ApiImportJobDetail]:
     job = await get_api_import_job(db, user=user, job_id=jobId)
+    if job.status == "PARSING":
+        age_seconds = (datetime.utcnow() - job.updated_at.replace(tzinfo=None)).total_seconds()
+        if age_seconds > 180:
+            job.status = "FAILED"
+            job.summary_json = {"error": "解析超时，请重新上传后重试"}
+            await db.commit()
     return ApiResponse(
         data=ApiImportJobDetail(
             jobId=str(job.id),
