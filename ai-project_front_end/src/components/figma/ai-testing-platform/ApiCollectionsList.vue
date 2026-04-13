@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
+
+const emit = defineEmits<{
+  (e: 'select', payload: { collectionId: string; requestId: string }): void
+}>()
 import apiImport from '@/assets/figma/ai-testing-platform/api-import.svg'
 import apiSearch from '@/assets/figma/ai-testing-platform/api-search.svg'
 import apiCollection from '@/assets/figma/ai-testing-platform/api-collection.svg'
@@ -209,6 +213,7 @@ function toggleFolder(collection: CollectionNode, folder: FolderNode) {
 function selectEndpoint(collection: CollectionNode, endpoint: ApiEndpoint) {
   activeCollectionId.value = collection.id
   activeEndpointId.value = endpoint.id
+  emit('select', { collectionId: collection.id, requestId: endpoint.id })
 }
 
 function findCollection(collectionId: string) {

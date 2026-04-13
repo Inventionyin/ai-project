@@ -295,82 +295,93 @@ async def get_ai_import_job(
 
 import asyncio
 
-async def parse_api_collection_async(job_id: uuid.UUID, storage_key: str | None = None, filename: str | None = None):
-    import logging
-    import asyncio
-    from app.core.database import get_sessionmaker
+def _run_parse_and_enhance(file_content: bytes, filename: str, job_id: str, llm_mode: str):
+    """Run parse + LLM enhancement in a worker thread (sync, blocking I/O)."""
     from app.services.doc_ingest.parse_with_docling import parse_document
     from app.services.doc_ingest.llm_enhancer import apply_llm_enhancement
 
+    parse_result = parse_document(file_content, filename, job_id=job_id)
+
+    try:
+        parse_result = apply_llm_enhancement(parse_result, llm_mode)
+    except Exception:
+        pass  # Keep raw candidates on LLM failure
+
+    return parse_result
+
+
+async def parse_api_collection_async(job_id: uuid.UUID, storage_key: str | None = None, filename: str | None = None):
+    import logging
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+    from app.core.database import get_sessionmaker
+
     logger = logging.getLogger(__name__)
-    
+
     # Wait a short moment to ensure the main transaction that triggered this task has committed
     await asyncio.sleep(0.5)
-    
+
     sm = get_sessionmaker()
-    
+
     async with sm() as db:
         try:
             job = await db.get(AiImportJob, job_id)
             if not job:
                 logger.error(f"Job {job_id} not found in async task")
                 return
-                
+
             source_ref = job.source_ref_json or {}
             # Use provided values or fallback to DB values
             storage_key = storage_key or source_ref.get("storageKey")
             filename = filename or source_ref.get("fileName", "unknown")
-            
+
             if not storage_key:
                 logger.error(f"Storage key missing for job {job_id}")
                 job.status = AiImportJobStatus.FAILED.value
                 job.summary_json = {"error": "Storage key missing"}
                 await db.commit()
                 return
-                
+
             # Path resolution
-            if "/" in storage_key:
-                # Extracts tenant_id/job_id/filename structure
-                file_path = _UPLOAD_DIR / storage_key
-            else:
-                file_path = _UPLOAD_DIR / storage_key
-                
+            file_path = _UPLOAD_DIR / storage_key
+
             if not file_path.exists():
                 logger.error(f"File not found: {file_path} (storage_key: {storage_key})")
                 job.status = AiImportJobStatus.FAILED.value
                 job.summary_json = {"error": f"File not found: {file_path.name}"}
                 await db.commit()
                 return
-                
+
             file_content = file_path.read_bytes()
-            
-            # Step 1: Parse Document
-            logger.info(f"Starting docling parse for {filename}...")
-            # This calls docling (if installed) or fallback parsers
-            parse_result = parse_document(file_content, filename, job_id=str(job_id))
-            logger.info(f"Docling parse done. Found {len(parse_result.apiCandidates or [])} raw candidates.")
-            
-            # Step 2: LLM Enhancement
+
+            # Read skill_config before releasing the DB session
             skill_config = job.skill_config_json or {}
-            # We use AUTO mode by default to replace the mock and actually invoke LLM
             llm_mode = skill_config.get("llmMode", "AUTO")
-            logger.info(f"Starting LLM enhancement with mode: {llm_mode}")
-            try:
-                parse_result = apply_llm_enhancement(parse_result, llm_mode)
-            except Exception as llm_err:
-                logger.error(f"LLM enhancement failed: {llm_err}")
-                # Keep going even if LLM fails, using raw candidates
-            
+
+            # Run sync blocking I/O (docling parse + LLM enhancement) in a thread pool
+            # so that the async event loop is NOT blocked and polling requests can be served.
+            logger.info(f"Starting docling parse for {filename} (llm_mode={llm_mode})...")
+            loop = asyncio.get_running_loop()
+            parse_result = await loop.run_in_executor(
+                None,
+                _run_parse_and_enhance,
+                file_content, filename, str(job_id), llm_mode,
+            )
+            logger.info(f"Parse done. Found {len(parse_result.apiCandidates or [])} candidates.")
+
+            # Re-fetch job inside same transaction to apply results
+            await db.refresh(job)
+
             # Step 3: Map to preview_data_json format
             candidates = parse_result.apiCandidates or []
             logger.info(f"Final candidates count: {len(candidates)}")
-            
+
             groups_dict = {}
             for cand in candidates:
                 group_name = cand.feature or "Default Group"
                 if group_name not in groups_dict:
                     groups_dict[group_name] = []
-                    
+
                 groups_dict[group_name].append({
                     "method": cand.method or "GET",
                     "url": cand.url or "",
@@ -379,12 +390,12 @@ async def parse_api_collection_async(job_id: uuid.UUID, storage_key: str | None 
                     "body": cand.params or {},
                     "diffStatus": "new"
                 })
-                
+
             groups = [
                 {"name": g_name, "requests": reqs}
                 for g_name, reqs in groups_dict.items()
             ]
-            
+
             job.status = AiImportJobStatus.PARSED_PREVIEW.value
             job.preview_data_json = {
                 "collectionName": filename,
@@ -392,12 +403,17 @@ async def parse_api_collection_async(job_id: uuid.UUID, storage_key: str | None 
             }
             await db.commit()
             logger.info(f"Job {job_id} parse completed successfully.")
-            
+
         except Exception as e:
             logger.exception(f"Error parsing api collection for job {job_id}: {e}")
-            job.status = AiImportJobStatus.FAILED.value
-            job.summary_json = {"error": str(e)}
-            await db.commit()
+            try:
+                job = await db.get(AiImportJob, job_id)
+                if job:
+                    job.status = AiImportJobStatus.FAILED.value
+                    job.summary_json = {"error": str(e)}
+                    await db.commit()
+            except Exception:
+                logger.exception(f"Failed to mark job {job_id} as FAILED")
 
 
 async def create_api_import_job(
@@ -564,7 +580,9 @@ async def commit_api_import_job(
                 method=str(req_data.get("method", "GET")),
                 url=str(req_data.get("url", "")),
                 headers=req_data.get("headers", {}),
+                auth=req_data.get("auth", {}),
                 body=req_data.get("body", {}),
+                asserts=req_data.get("asserts", {}),
             )
             
     job.status = AiImportJobStatus.COMMITTED.value

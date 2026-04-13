@@ -504,6 +504,19 @@ export async function createCollectionGroup(collectionId: string, payload: { nam
   })
 }
 
+export async function fetchCollectionRequest(collectionId: string, requestId: string) {
+  const cid = String(collectionId || '').trim()
+  const rid = String(requestId || '').trim()
+  if (!cid) throw new Error('集合 ID 不能为空')
+  if (!rid) throw new Error('接口 ID 不能为空')
+  return requestJson<CollectionRequest>(`/api/collections/${encodeURIComponent(cid)}/requests/${encodeURIComponent(rid)}`, {
+    method: 'GET',
+    headers: {
+      Authorization: resolveAuthHeader()
+    }
+  })
+}
+
 export async function createCollectionRequest(
   collectionId: string,
   payload: {

@@ -137,6 +137,7 @@ function startPolling(jobId: string) {
     pollBusy = true
     try {
       const detail = await fetchApiCollectionImportJob(jobId)
+      console.log('[ImportCollectionModal] poll result:', detail?.status, detail)
       if (!detail) {
         continuousErrors += 1
         if (continuousErrors >= 3) {
@@ -148,25 +149,33 @@ function startPolling(jobId: string) {
         return
       }
       continuousErrors = 0
-      
-      if (detail.status === 'PARSED_PREVIEW') {
+
+      if (detail.status === 'PARSED_PREVIEW' || detail.status === 'SUCCEEDED') {
         stopPolling()
+        loadingMsg.value = ''
         previewData.value = detail.previewData || { collectionName: selectedFile.value?.name || 'Imported Collection', groups: [] }
         warnings.value = detail.warnings || []
         initSelection()
         step.value = 3
-      } else if (detail.status === 'FAILED') {
+      } else if (detail.status === 'FAILED' || detail.status === 'COMMITTED') {
         stopPolling()
-        errorMsg.value = '解析失败'
-        loadingMsg.value = ''
-        step.value = 1
+        if (detail.status === 'COMMITTED') {
+          // Job already committed (e.g. duplicate tab), treat as done
+          emit('success')
+          handleClose()
+        } else {
+          errorMsg.value = '解析失败'
+          loadingMsg.value = ''
+          step.value = 1
+        }
       } else if (Date.now() - startedAt > 180000) {
         stopPolling()
         loadingMsg.value = ''
         errorMsg.value = '解析超时，请重试上传'
         step.value = 1
       }
-    } catch {
+    } catch (err) {
+      console.error('[ImportCollectionModal] poll error:', err)
       continuousErrors += 1
       if (continuousErrors >= 3) {
         stopPolling()
@@ -253,7 +262,7 @@ const diffBadgeText = (status: string) => {
 
 async function handleCommit() {
   if (!currentJobId.value || !previewData.value) return
-  
+
   const selectedReqsToCommit: ApiImportPreviewRequest[] = []
   previewData.value.groups.forEach(g => {
     g.requests.forEach(r => {
@@ -262,22 +271,26 @@ async function handleCommit() {
       }
     })
   })
-  
+
   if (selectedReqsToCommit.length === 0) {
     errorMsg.value = '请至少选择一个接口导入'
     return
   }
-  
+
   loadingMsg.value = '正在导入入库...'
   errorMsg.value = ''
-  
+
   try {
+    console.log('[ImportCollectionModal] committing', currentJobId.value, selectedReqsToCommit.length, 'requests')
     await commitApiCollectionImportJob(currentJobId.value, {
       selectedRequests: selectedReqsToCommit,
       overrideExisting: overrideExisting.value
     })
+    console.log('[ImportCollectionModal] commit success')
     emit('success')
+    handleClose()
   } catch (err: any) {
+    console.error('[ImportCollectionModal] commit error:', err)
     errorMsg.value = err.message || '导入失败'
   } finally {
     loadingMsg.value = ''
