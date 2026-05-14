@@ -41,6 +41,7 @@ from app.schemas.requirement import (
 )
 from app.services.doc_ingest.parse_with_docling import parse_document
 from app.services.llm.provider import get_provider
+from app.services.platform_record import create_ai_job_record
 
 
 def _is_admin(user: CurrentUser) -> bool:
@@ -477,6 +478,16 @@ async def generate_requirement_analysis(db: AsyncSession, *, user: CurrentUser, 
         summary = f"AI 已从《{doc.title}》v{version.version} 生成结构化需求分析。"
         risk_level = "MEDIUM"
         coverage_score = 0.72
+    ai_job = await create_ai_job_record(
+        db,
+        user=user,
+        project_id=project_id,
+        job_type="REQUIREMENT_ANALYSIS",
+        status="SUCCEEDED",
+        trigger_source="REQUIREMENTS",
+        summary=summary,
+        detail={"docId": str(doc_id), "docVersionId": str(version_id)},
+    )
     row = RequirementAnalysis(
         tenant_id=user.tenant_id,
         project_id=project_id,
@@ -487,7 +498,7 @@ async def generate_requirement_analysis(db: AsyncSession, *, user: CurrentUser, 
         summary=summary,
         risk_level=risk_level,
         coverage_score=coverage_score,
-        ai_task_id=None,
+        ai_task_id=ai_job.id,
         created_by=user.id,
         updated_by=None,
     )

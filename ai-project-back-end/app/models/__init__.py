@@ -12,6 +12,7 @@ from app.models.requirement import (
     RequirementTestPoint,
 )
 from app.models.integration import AiRecord, IssueLink, Notification
+from app.models.platform_record import AiJobRecord
 from app.models.project import Project, ProjectMember
 from app.models.run import Artifact, CaseRun, Job, Run
 from app.models.suite import Suite, SuiteItem
@@ -30,6 +31,7 @@ __all__ = [
     "ApiCollectionGroup",
     "ApiRequest",
     "ApiTarget",
+    "AiJobRecord",
     "Artifact",
     "AuditLog",
     "CaseRun",

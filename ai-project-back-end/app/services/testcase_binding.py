@@ -15,6 +15,7 @@ from app.models.test_data_set import TestDataSet
 from app.models.testcase import TestCase
 from app.models.testcase_binding import TestcaseBinding
 from app.schemas.testcase_binding import TestcaseBindingCreateRequest, TestcaseBindingUpdateRequest
+from app.services.platform_record import create_audit_log
 
 
 def _is_admin(user: CurrentUser) -> bool:
@@ -190,6 +191,17 @@ async def create_testcase_binding(
         await db.flush()
     except IntegrityError as exc:
         raise HTTPException(status_code=409, detail="binding_name_conflict") from exc
+    await create_audit_log(
+        db,
+        user=user,
+        project_id=project.id,
+        module="TESTCASE_BINDING",
+        action="CREATE",
+        resource_type="testcase_binding",
+        resource_id=str(binding.id),
+        summary=f"创建用例绑定：{binding.name}",
+        detail={"testcaseId": str(testcase.id)},
+    )
     return binding
 
 
@@ -223,6 +235,17 @@ async def update_testcase_binding(
         await db.flush()
     except IntegrityError as exc:
         raise HTTPException(status_code=409, detail="binding_name_conflict") from exc
+    await create_audit_log(
+        db,
+        user=user,
+        project_id=project.id,
+        module="TESTCASE_BINDING",
+        action="UPDATE",
+        resource_type="testcase_binding",
+        resource_id=str(binding.id),
+        summary=f"更新用例绑定：{binding.name}",
+        detail={"version": binding.version},
+    )
     return binding
 
 
@@ -235,4 +258,15 @@ async def delete_testcase_binding(
     binding = await get_testcase_binding(db, user=user, binding_id=binding_id)
     project = await _get_project(db, user=user, project_id=binding.project_id)
     await _require_project_write(db, user=user, project=project)
+    await create_audit_log(
+        db,
+        user=user,
+        project_id=project.id,
+        module="TESTCASE_BINDING",
+        action="DELETE",
+        resource_type="testcase_binding",
+        resource_id=str(binding.id),
+        summary=f"删除用例绑定：{binding.name}",
+        detail={"testcaseId": str(binding.testcase_id)},
+    )
     await db.delete(binding)
