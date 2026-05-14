@@ -13,6 +13,7 @@ from app.api.v1.endpoints.collections import router as collections_router
 from app.api.v1.endpoints.worker import router as worker_router
 from app.api.v1.endpoints.doc_ingest import router as doc_ingest_router
 from app.api.v1.endpoints.ui_tests import router as ui_tests_router
+from app.api.v1.endpoints.requirements import router as requirements_router
 
 router = APIRouter()
 router.include_router(auth_router, tags=["auth"])
@@ -28,3 +29,4 @@ router.include_router(dashboard_router, tags=["dashboard"])
 router.include_router(worker_router, tags=["workers"])
 router.include_router(doc_ingest_router, tags=["doc-ingest"])
 router.include_router(ui_tests_router, tags=["ui-tests"])
+router.include_router(requirements_router, tags=["requirements"])

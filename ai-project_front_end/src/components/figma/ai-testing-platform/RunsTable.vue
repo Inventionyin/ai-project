@@ -30,6 +30,10 @@ defineProps<{
   rows: RunRow[]
 }>()
 
+const emit = defineEmits<{
+  (e: 'open-run', runId: string): void
+}>()
+
 function triggerMeta(type: TriggerType) {
   if (type === '手动') return { icon: runsTriggerManual, color: '#155DFC' }
   if (type === 'CI/CD') return { icon: runsTriggerCicd, color: '#9810FA' }
@@ -98,6 +102,7 @@ const rowMinHeight = '104.67px'
               type="button"
               class="w-full truncate text-left text-[12px] font-medium leading-[16px] text-[#155DFC]"
               style="font-family: Consolas"
+              @click="emit('open-run', row.runId)"
             >
               {{ row.runId }}
             </button>

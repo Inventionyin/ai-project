@@ -15,7 +15,13 @@ import ReportsPanel from '@/components/figma/ai-testing-platform/ReportsPanel.vu
 import AllureReportPanel from '@/components/figma/ai-testing-platform/AllureReportPanel.vue'
 import TestCaseDetailPanel from '@/components/figma/ai-testing-platform/TestCaseDetailPanel.vue'
 import AiAssistantPanel from '@/components/figma/ai-testing-platform/AiAssistantPanel.vue'
+import RunDetail from '@/views/runs/RunDetail.vue'
 import AiTestingPlatform16_3 from '@/views/figma/AiTestingPlatform16_3.vue'
+import Environments from '@/views/settings/Environments.vue'
+import CollectionDetail from '@/views/collections/CollectionDetail.vue'
+import RequirementDocs from '@/views/requirements/RequirementDocs.vue'
+import RequirementDocDetail from '@/views/requirements/RequirementDocDetail.vue'
+import RequirementAnalysisDetail from '@/views/requirements/RequirementAnalysisDetail.vue'
 
 function createProjectShellPage(activeAssetChild: string, Content: Parameters<typeof h>[0]) {
   return defineComponent({
@@ -63,10 +69,14 @@ const ProjectSuiteDetail = createProjectShellPage('测试套件', SuiteDetailPan
 const ProjectApis = createProjectShellPage('接口集合', ApiCollectionsPanel)
 const ProjectDataSets = createProjectShellPage('测试数据', DataSetsPanel)
 const ProjectRuns = createProjectShellPage('运行记录', RunsPanel)
+const ProjectRunDetail = createProjectShellPage('运行记录', RunDetail)
 const ProjectWorkers = createProjectShellPage('Worker 管理', WorkersPanel)
 const ProjectReports = createProjectShellPage('', ReportsPanel)
 const ProjectAllureReport = createProjectShellPage('', AllureReportPanel)
 const ProjectAiAssistant = createProjectShellPage('AI 助手', AiAssistantPanel)
+const ProjectRequirementDocs = createProjectShellPage('需求文档中心', RequirementDocs)
+const ProjectRequirementDocDetail = createProjectShellPage('需求文档中心', RequirementDocDetail)
+const ProjectRequirementAnalysisDetail = createProjectShellPage('需求文档中心', RequirementAnalysisDetail)
 
 const router = createRouter({
   history: createWebHistory(),
@@ -123,7 +133,7 @@ const router = createRouter({
     },
     {
       path: '/projects/:projectId/assets/apis/:id',
-      component: createPlaceholderPage('接口集合详情')
+      component: CollectionDetail
     },
     {
       path: '/projects/:projectId/assets/data',
@@ -135,7 +145,7 @@ const router = createRouter({
     },
     {
       path: '/projects/:projectId/runs/:runId',
-      component: createPlaceholderPage('运行详情（实时）')
+      component: ProjectRunDetail
     },
     {
       path: '/projects/:projectId/workers',
@@ -155,7 +165,19 @@ const router = createRouter({
     },
     {
       path: '/projects/:projectId/settings/environments',
-      component: createPlaceholderPage('环境管理')
+      component: createProjectShellPage('环境管理', Environments)
+    },
+    {
+      path: '/projects/:projectId/requirements/docs',
+      component: ProjectRequirementDocs
+    },
+    {
+      path: '/projects/:projectId/requirements/docs/:docId',
+      component: ProjectRequirementDocDetail
+    },
+    {
+      path: '/projects/:projectId/requirements/analyses/:analysisId',
+      component: ProjectRequirementAnalysisDetail
     },
     {
       path: '/settings/integrations',

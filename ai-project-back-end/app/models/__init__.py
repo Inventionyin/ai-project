@@ -3,6 +3,14 @@ from app.models.audit import AuditLog
 from app.models.api import ApiCollection, ApiCollectionGroup, ApiRequest
 from app.models.api_target import ApiTarget
 from app.models.environment import Environment
+from app.models.requirement import (
+    GeneratedCaseDraft,
+    RequirementAnalysis,
+    RequirementCaseLink,
+    RequirementDoc,
+    RequirementDocVersion,
+    RequirementTestPoint,
+)
 from app.models.integration import AiRecord, IssueLink, Notification
 from app.models.project import Project, ProjectMember
 from app.models.run import Artifact, CaseRun, Job, Run
@@ -31,6 +39,12 @@ __all__ = [
     "Notification",
     "Project",
     "ProjectMember",
+    "GeneratedCaseDraft",
+    "RequirementAnalysis",
+    "RequirementCaseLink",
+    "RequirementDoc",
+    "RequirementDocVersion",
+    "RequirementTestPoint",
     "Run",
     "Suite",
     "SuiteItem",
