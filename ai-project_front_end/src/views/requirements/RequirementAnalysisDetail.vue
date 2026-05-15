@@ -4,15 +4,18 @@ import { useRoute, useRouter } from 'vue-router'
 import {
   bulkApproveRequirementCaseDrafts,
   fetchRequirementAnalysis,
+  fetchRequirementAnalysisRevisions,
   fetchRequirementCaseLinks,
   fetchRequirementCaseDrafts,
   fetchRequirementTestPoints,
   generateRequirementCaseDrafts,
+  rollbackRequirementAnalysisRevision,
   syncRequirementTestPoints,
   updateRequirementAnalysis,
   updateRequirementTestPoint,
   type GeneratedCaseDraft,
   type RequirementAnalysis,
+  type RequirementAnalysisRevision,
   type RequirementAnalysisPayload,
   type RequirementCaseLink,
   type RequirementTestPoint,
@@ -35,6 +38,12 @@ const status = ref<'DRAFT' | 'GENERATED' | 'REVIEWED' | 'ARCHIVED'>('GENERATED')
 const riskLevel = ref<'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'>('MEDIUM')
 const coverageScore = ref(0)
 const analysisText = ref('')
+const revisions = ref<RequirementAnalysisRevision[]>([])
+const revisionsLoading = ref(false)
+const revisionsError = ref('')
+const rollingBackRevisionId = ref('')
+let analysisLoadSeq = 0
+let revisionsLoadSeq = 0
 
 const testPoints = ref<RequirementTestPoint[]>([])
 const testPointFilter = ref<'ALL' | RequirementTestPointStatus>('ALL')
@@ -90,25 +99,38 @@ const allSelectableDraftChecked = computed(() => {
 })
 
 async function load() {
-  if (!projectId.value || !analysisId.value) return
+  const pid = projectId.value
+  const aid = analysisId.value
+  if (!pid || !aid) return
+  const seq = ++analysisLoadSeq
   loading.value = true
   error.value = ''
+  revisionsError.value = ''
+  revisions.value = []
   try {
-    fill(await fetchRequirementAnalysis(projectId.value, analysisId.value))
+    const data = await fetchRequirementAnalysis(pid, aid)
     const [points, drafts, links] = await Promise.all([
-      fetchRequirementTestPoints(projectId.value, analysisId.value),
-      fetchRequirementCaseDrafts(projectId.value, analysisId.value),
-      fetchRequirementCaseLinks(projectId.value, analysisId.value)
+      fetchRequirementTestPoints(pid, aid),
+      fetchRequirementCaseDrafts(pid, aid),
+      fetchRequirementCaseLinks(pid, aid)
     ])
+    if (seq !== analysisLoadSeq || pid !== projectId.value || aid !== analysisId.value) return
+    fill(data)
     testPoints.value = points
     caseDrafts.value = drafts
     caseLinks.value = links
     selectedDraftIds.value = []
+    void loadRevisions(pid, aid)
   } catch (e) {
+    if (seq !== analysisLoadSeq) return
     error.value = e instanceof Error ? e.message : '加载需求分析失败'
     detail.value = null
+    testPoints.value = []
+    caseDrafts.value = []
+    caseLinks.value = []
+    selectedDraftIds.value = []
   } finally {
-    loading.value = false
+    if (seq === analysisLoadSeq) loading.value = false
   }
 }
 
@@ -138,6 +160,55 @@ async function save() {
     error.value = e instanceof Error ? e.message : '保存失败'
   } finally {
     saving.value = false
+  }
+}
+
+async function loadRevisions(pid = projectId.value, aid = analysisId.value) {
+  if (!pid || !aid) return
+  const seq = ++revisionsLoadSeq
+  revisionsLoading.value = true
+  revisionsError.value = ''
+  try {
+    const rows = await fetchRequirementAnalysisRevisions(pid, aid)
+    if (seq !== revisionsLoadSeq || pid !== projectId.value || aid !== analysisId.value) return
+    revisions.value = rows
+  } catch (e) {
+    if (seq !== revisionsLoadSeq) return
+    revisionsError.value = e instanceof Error ? e.message : '加载修订历史失败'
+  } finally {
+    if (seq === revisionsLoadSeq) revisionsLoading.value = false
+  }
+}
+
+async function rollbackRevision(revisionId: string) {
+  const pid = projectId.value
+  const aid = analysisId.value
+  if (!pid || !aid || !revisionId) return
+  rollingBackRevisionId.value = revisionId
+  error.value = ''
+  success.value = ''
+  revisionsError.value = ''
+  try {
+    const updated = await rollbackRequirementAnalysisRevision(pid, aid, revisionId)
+    const [points, drafts, links] = await Promise.all([
+      fetchRequirementTestPoints(pid, aid),
+      fetchRequirementCaseDrafts(pid, aid),
+      fetchRequirementCaseLinks(pid, aid)
+    ])
+    if (pid !== projectId.value || aid !== analysisId.value) return
+    fill(updated)
+    testPoints.value = points
+    caseDrafts.value = drafts
+    caseLinks.value = links
+    selectedDraftIds.value = []
+    await loadRevisions(pid, aid)
+    success.value = '已回滚到指定修订'
+  } catch (e) {
+    const message = e instanceof Error ? e.message : '回滚失败'
+    error.value = message
+    revisionsError.value = message
+  } finally {
+    rollingBackRevisionId.value = ''
   }
 }
 
@@ -298,6 +369,37 @@ watch(
         <button class="mt-4 h-9 rounded-[8px] bg-[#155DFC] px-4 text-[13px] text-white disabled:opacity-60" :disabled="saving" @click="save">
           {{ saving ? '保存中...' : '保存分析' }}
         </button>
+
+        <div class="mt-6 border-t border-black/10 pt-4">
+          <div class="mb-2 flex items-center justify-between gap-2">
+            <h3 class="text-[13px] font-semibold text-[#0A0A0A]">修订历史</h3>
+            <button class="h-7 rounded-[6px] border border-black/10 px-2 text-[11px] disabled:opacity-60" :disabled="revisionsLoading" @click="loadRevisions()">
+              {{ revisionsLoading ? '刷新中...' : '刷新' }}
+            </button>
+          </div>
+          <div v-if="revisionsLoading" class="text-[12px] text-[#717182]">修订历史加载中...</div>
+          <div v-else-if="revisionsError" class="text-[12px] text-[#B91C1C]">{{ revisionsError }}</div>
+          <div v-else-if="revisions.length === 0" class="text-[12px] text-[#717182]">暂无修订记录</div>
+          <div v-else class="max-h-[420px] space-y-2 overflow-y-auto pr-1">
+            <div v-for="row in revisions" :key="row.id" class="rounded-[8px] border border-black/10 p-3">
+              <div class="flex items-start justify-between gap-2">
+                <div class="text-[12px] text-[#0A0A0A]">
+                  <div class="font-medium">#{{ row.revisionNo }} · {{ row.changeReason || '-' }}</div>
+                  <div class="mt-1 text-[#717182]">风险: {{ row.riskLevel || '-' }} · 覆盖: {{ row.coverageScore == null ? '-' : row.coverageScore }}</div>
+                  <div class="mt-1 text-[#717182]">时间: {{ formatTime(row.createdAt) }}</div>
+                </div>
+                <button
+                  class="h-7 shrink-0 rounded-[6px] border border-black/10 px-2 text-[11px] text-[#155DFC] disabled:opacity-60"
+                  :disabled="rollingBackRevisionId === row.id"
+                  @click="rollbackRevision(row.id)"
+                >
+                  {{ rollingBackRevisionId === row.id ? '回滚中...' : '回滚到此修订' }}
+                </button>
+              </div>
+              <div class="mt-2 text-[12px] text-[#4A5565]">{{ row.summary || '-' }}</div>
+            </div>
+          </div>
+        </div>
       </section>
 
       <section class="rounded-[12px] border border-black/10 bg-white">

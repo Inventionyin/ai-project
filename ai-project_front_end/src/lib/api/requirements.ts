@@ -49,6 +49,22 @@ export type RequirementAnalysis = {
   updatedAt?: number | null
 }
 
+export type RequirementAnalysisRevision = {
+  id: string
+  projectId: string
+  analysisId: string
+  docId: string
+  docVersionId: string
+  revisionNo: number
+  changeReason?: string | null
+  summary?: string | null
+  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
+  coverageScore?: number | null
+  analysis: RequirementAnalysisPayload
+  createdBy?: string | null
+  createdAt?: number | null
+}
+
 export type RequirementTestPointStatus = 'DRAFT' | 'ACCEPTED' | 'REJECTED' | 'CONVERTED'
 
 export type RequirementTestPoint = {
@@ -313,6 +329,34 @@ export async function updateRequirementAnalysis(projectId: string, analysisId: s
     method: 'PUT',
     headers: { ...authHeader(), 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
+  })
+}
+
+export async function fetchRequirementAnalysisRevisions(projectId: string, analysisId: string) {
+  const pid = String(projectId || '').trim()
+  const aid = String(analysisId || '').trim()
+  if (!pid) throw new Error('项目 ID 不能为空')
+  if (!aid) throw new Error('分析 ID 不能为空')
+  return requestJson<RequirementAnalysisRevision[]>(
+    `/projects/${encodeURIComponent(pid)}/requirements/analyses/${encodeURIComponent(aid)}/revisions`,
+    {
+      method: 'GET',
+      headers: authHeader()
+    }
+  )
+}
+
+export async function rollbackRequirementAnalysisRevision(projectId: string, analysisId: string, revisionId: string) {
+  const pid = String(projectId || '').trim()
+  const aid = String(analysisId || '').trim()
+  const rid = String(revisionId || '').trim()
+  if (!pid) throw new Error('项目 ID 不能为空')
+  if (!aid) throw new Error('分析 ID 不能为空')
+  if (!rid) throw new Error('修订 ID 不能为空')
+  return requestJson<RequirementAnalysis>(`/projects/${encodeURIComponent(pid)}/requirements/analyses/${encodeURIComponent(aid)}/rollback`, {
+    method: 'POST',
+    headers: { ...authHeader(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ revisionId: rid })
   })
 }
 

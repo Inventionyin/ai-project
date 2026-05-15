@@ -23,6 +23,7 @@ import CollectionDetail from '@/views/collections/CollectionDetail.vue'
 import RequirementDocs from '@/views/requirements/RequirementDocs.vue'
 import RequirementDocDetail from '@/views/requirements/RequirementDocDetail.vue'
 import RequirementAnalysisDetail from '@/views/requirements/RequirementAnalysisDetail.vue'
+import RequirementChangeSetDetail from '@/views/requirements/RequirementChangeSetDetail.vue'
 
 function createProjectShellPage(activeAssetChild: string, Content: Parameters<typeof h>[0]) {
   return defineComponent({
@@ -78,6 +79,7 @@ const ProjectAiAssistant = createProjectShellPage('AI 助手', AiAssistantPanel)
 const ProjectRequirementDocs = createProjectShellPage('需求文档中心', RequirementDocs)
 const ProjectRequirementDocDetail = createProjectShellPage('需求文档中心', RequirementDocDetail)
 const ProjectRequirementAnalysisDetail = createProjectShellPage('需求文档中心', RequirementAnalysisDetail)
+const ProjectRequirementChangeSetDetail = createProjectShellPage('需求文档中心', RequirementChangeSetDetail)
 const ProjectPlatformRecords = createProjectShellPage('平台记录', PlatformRecords)
 
 const router = createRouter({
@@ -184,6 +186,10 @@ const router = createRouter({
     {
       path: '/projects/:projectId/requirements/analyses/:analysisId',
       component: ProjectRequirementAnalysisDetail
+    },
+    {
+      path: '/projects/:projectId/requirements/change-sets/:changeSetId',
+      component: ProjectRequirementChangeSetDetail
     },
     {
       path: '/settings/integrations',
