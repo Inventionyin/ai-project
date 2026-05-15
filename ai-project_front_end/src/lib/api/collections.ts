@@ -40,6 +40,27 @@ export type CollectionDetail = {
   updatedAt?: number
 }
 
+export type ApiAssetBinding = {
+  id: string
+  projectId: string
+  testcaseId: string
+  name: string
+  linkType: 'API_TARGET' | 'REQUEST' | 'COLLECTION'
+  datasetId?: string | null
+  apiTargetId?: string | null
+  requestId?: string | null
+  collectionId?: string | null
+  sourceType: 'MANUAL' | 'AI' | 'IMPORT'
+  assertSummary: string
+  lastRunStatus?: string | null
+  lastRunAt?: number | null
+  params?: Record<string, unknown> | null
+  priority?: number | null
+  enabled?: boolean
+  version: number
+  updatedAt: number
+}
+
 export type ApiRequestCreateRequest = {
   groupId?: string | null
   name: string
@@ -156,6 +177,30 @@ export async function runCollectionRequest(collectionId: string, requestId: stri
     },
     body: JSON.stringify({ envId: payload.envId ?? null })
   })
+}
+
+export async function fetchRequestBindings(projectId: string, requestId: string) {
+  const pid = String(projectId || '').trim()
+  const rid = String(requestId || '').trim()
+  if (!pid || !rid) return []
+  const data = await requestJson<ApiAssetBinding[] | { items?: ApiAssetBinding[] }>(
+    `/api/projects/${encodeURIComponent(pid)}/requests/${encodeURIComponent(rid)}/bindings`,
+    { method: 'GET', headers: authHeader() }
+  )
+  if (Array.isArray(data)) return data
+  return Array.isArray(data?.items) ? data.items : []
+}
+
+export async function fetchCollectionBindings(projectId: string, collectionId: string) {
+  const pid = String(projectId || '').trim()
+  const cid = String(collectionId || '').trim()
+  if (!pid || !cid) return []
+  const data = await requestJson<ApiAssetBinding[] | { items?: ApiAssetBinding[] }>(
+    `/api/projects/${encodeURIComponent(pid)}/collections/${encodeURIComponent(cid)}/bindings`,
+    { method: 'GET', headers: authHeader() }
+  )
+  if (Array.isArray(data)) return data
+  return Array.isArray(data?.items) ? data.items : []
 }
 
 export async function exportCollection(collectionId: string, format: 'postman' | 'swagger' | 'curl' = 'postman') {

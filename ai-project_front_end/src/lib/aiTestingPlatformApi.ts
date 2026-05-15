@@ -65,6 +65,7 @@ export type RunMetrics = {
 }
 
 export type {
+  ApiAssetBinding,
   CollectionListItem,
   CollectionRequest,
   CollectionGroup,
@@ -76,19 +77,31 @@ export {
   fetchCollectionDetail,
   createCollection,
   createCollectionGroup,
-  createCollectionRequest
+  createCollectionRequest,
+  fetchCollectionBindings,
+  fetchRequestBindings
 } from '@/lib/api/collections'
 
 export type TestcaseBinding = {
   id: string
+  projectId?: string
+  testcaseId?: string
   name: string
+  linkType?: 'API_TARGET' | 'REQUEST' | 'COLLECTION'
   apiTargetId?: string | null
+  requestId?: string | null
+  collectionId?: string | null
+  sourceType?: 'MANUAL' | 'AI' | 'IMPORT'
+  assertSummary?: string
+  lastRunStatus?: string | null
+  lastRunAt?: number | null
   datasetId?: string | null
   datasetName?: string | null
   params?: Record<string, unknown> | null
   priority?: number | null
   enabled?: boolean
   version?: number
+  updatedAt?: number
 }
 
 export type BatchRunFormItem = {
@@ -628,7 +641,7 @@ export async function fetchBindingsByTestcaseIds(testcaseIds: string[]) {
   }, {})
 }
 
-export async function createTestcaseBinding(testcaseId: string, payload: { name: string; apiTargetId?: string | null; datasetId?: string | null; datasetName?: string | null; params?: Record<string, unknown> | null; priority?: number | null; enabled?: boolean; version?: number }) {
+export async function createTestcaseBinding(testcaseId: string, payload: { name: string; apiTargetId?: string | null; requestId?: string | null; collectionId?: string | null; linkType?: 'API_TARGET' | 'REQUEST' | 'COLLECTION'; sourceType?: 'MANUAL' | 'AI' | 'IMPORT'; assertSummary?: string; datasetId?: string | null; params?: Record<string, unknown> | null; priority?: number | null; enabled?: boolean; version?: number }) {
   const id = String(testcaseId || '').trim()
   if (!id) throw new Error('用例 ID 不能为空')
   return requestJson<TestcaseBinding>(`/api/testcases/${encodeURIComponent(id)}/bindings`, {
@@ -641,7 +654,7 @@ export async function createTestcaseBinding(testcaseId: string, payload: { name:
   })
 }
 
-export async function updateTestcaseBinding(bindingId: string, payload: { name?: string; apiTargetId?: string | null; datasetId?: string | null; datasetName?: string | null; params?: Record<string, unknown> | null; priority?: number | null; enabled?: boolean; version: number }) {
+export async function updateTestcaseBinding(bindingId: string, payload: { name?: string; apiTargetId?: string | null; requestId?: string | null; collectionId?: string | null; linkType?: 'API_TARGET' | 'REQUEST' | 'COLLECTION'; sourceType?: 'MANUAL' | 'AI' | 'IMPORT'; assertSummary?: string; datasetId?: string | null; params?: Record<string, unknown> | null; priority?: number | null; enabled?: boolean; version: number }) {
   const id = String(bindingId || '').trim()
   if (!id) throw new Error('绑定 ID 不能为空')
   return requestJson<TestcaseBinding>(`/api/testcase-bindings/${encodeURIComponent(id)}`, {

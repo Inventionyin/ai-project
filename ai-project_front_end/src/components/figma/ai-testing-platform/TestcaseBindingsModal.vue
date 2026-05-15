@@ -78,7 +78,6 @@ function addBinding() {
     name: '',
     apiTargetId: null,
     datasetId: null,
-    datasetName: null,
     _isNew: true,
     _isSaving: false,
     _isDeleting: false
@@ -106,7 +105,6 @@ async function saveBinding(item: EditableBinding) {
         name,
         apiTargetId: item.apiTargetId || null,
         datasetId: item.datasetId || null,
-        datasetName: item.datasetName || null,
         params: item.params || null,
         priority: Number.isFinite(Number(item.priority)) ? Number(item.priority) : null,
         enabled: item.enabled !== false
@@ -125,7 +123,6 @@ async function saveBinding(item: EditableBinding) {
         name,
         apiTargetId: item.apiTargetId || null,
         datasetId: item.datasetId || null,
-        datasetName: item.datasetName || null,
         params: item.params || null,
         priority: Number.isFinite(Number(item.priority)) ? Number(item.priority) : null,
         enabled: item.enabled !== false,
@@ -242,12 +239,12 @@ const testcaseLabel = computed(() => String(props.testcaseTitle || '').trim() ||
               </div>
 
               <div class="flex flex-col gap-[6px]">
-                <div class="text-[12px] font-medium leading-[16px] text-[#717182]">数据集（可选）</div>
+                <div class="text-[12px] font-medium leading-[16px] text-[#717182]">数据集 ID（可选）</div>
                 <input
-                  v-model="item.datasetName"
+                  v-model="item.datasetId"
                   type="text"
                   class="h-[36px] w-full rounded-[10px] border border-black/10 bg-white px-[12px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
-                  placeholder="例如：用户测试数据集"
+                  placeholder="粘贴 TestDataSet ID"
                 />
               </div>
             </div>

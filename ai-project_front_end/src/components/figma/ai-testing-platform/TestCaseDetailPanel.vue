@@ -7,6 +7,7 @@ import suiteDetailSave from '@/assets/figma/ai-testing-platform/suite-detail-sav
 import chevronDownSmall from '@/assets/figma/ai-testing-platform/chevron-down-small.svg'
 import modalTagsIcon from '@/assets/figma/ai-testing-platform/modal-tags-icon.svg'
 import btnAiGenerate from '@/assets/figma/ai-testing-platform/btn-ai-generate.svg'
+import { fetchTestcaseBindings, type TestcaseBinding } from '@/lib/aiTestingPlatformApi'
 
 type CaseType = 'API' | 'UI' | 'PERF' | 'MIX'
 type CasePriority = 'P0' | 'P1' | 'P2' | 'P3'
@@ -49,6 +50,9 @@ const isLoading = ref(false)
 const isSaving = ref(false)
 const loadError = ref('')
 const currentDetail = ref<TestCaseDetail | null>(null)
+const bindingsLoading = ref(false)
+const bindingsError = ref('')
+const testcaseBindings = ref<TestcaseBinding[]>([])
 
 const projectId = computed(() => {
   const value = route.params.projectId
@@ -113,6 +117,11 @@ const meta = computed(() => ({
   status: form.status
 }))
 
+const apiBindings = computed(() => testcaseBindings.value.filter((item) => {
+  const type = item.linkType || 'API_TARGET'
+  return type === 'REQUEST' || type === 'COLLECTION' || type === 'API_TARGET'
+}))
+
 function tabButtonClass(tab: TabKey) {
   if (activeTab.value === tab) {
     return 'border-[#155DFC] text-[#155DFC]'
@@ -136,6 +145,54 @@ function resolveAuthHeader() {
     throw new Error('登录状态已失效，请重新登录')
   }
   return `Bearer ${accessToken}`
+}
+
+function formatUnixTime(timestamp?: number | null) {
+  if (!timestamp || timestamp <= 0) return '-'
+  const date = new Date(timestamp * 1000)
+  if (Number.isNaN(date.getTime())) return '-'
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }).format(date)
+}
+
+function linkTypeLabel(type?: string | null) {
+  if (type === 'REQUEST') return '请求'
+  if (type === 'COLLECTION') return '集合'
+  return '接口目标'
+}
+
+function runStatusLabel(status?: string | null) {
+  if (status === 'PASSED') return '通过'
+  if (status === 'FAILED') return '失败'
+  if (status === 'RUNNING') return '执行中'
+  return '未执行'
+}
+
+function bindingTargetText(binding: TestcaseBinding) {
+  if (binding.requestId) return binding.requestId
+  if (binding.collectionId) return binding.collectionId
+  return binding.apiTargetId || '-'
+}
+
+function openBindingTarget(binding: TestcaseBinding) {
+  if (binding.collectionId) {
+    const query = binding.requestId ? { requestId: binding.requestId } : undefined
+    void router.push({
+      path: `/projects/${encodeURIComponent(projectId.value)}/assets/apis/${encodeURIComponent(binding.collectionId)}`,
+      query
+    })
+    return
+  }
+  if (binding.requestId) {
+    showToast('该请求绑定缺少 Collection ID，暂不能定位到集合详情', 'error')
+    return
+  }
+  showToast('API Target 暂无独立详情页', 'error')
 }
 
 function parseTags(value: string) {
@@ -351,6 +408,21 @@ async function loadCaseDetail() {
   }
 }
 
+async function loadCaseBindings() {
+  const id = caseId.value
+  if (!id) return
+  bindingsLoading.value = true
+  bindingsError.value = ''
+  try {
+    testcaseBindings.value = await fetchTestcaseBindings(id)
+  } catch (error) {
+    testcaseBindings.value = []
+    bindingsError.value = error instanceof Error ? error.message : '接口绑定加载失败'
+  } finally {
+    bindingsLoading.value = false
+  }
+}
+
 function resolveTabFromRoute(): TabKey {
   const tab = route.query.tab
   if (typeof tab !== 'string') return 'basic'
@@ -361,11 +433,13 @@ function resolveTabFromRoute(): TabKey {
 onMounted(() => {
   activeTab.value = resolveTabFromRoute()
   void loadCaseDetail()
+  void loadCaseBindings()
 })
 
 watch(() => route.params.id, () => {
   activeTab.value = resolveTabFromRoute()
   void loadCaseDetail()
+  void loadCaseBindings()
 })
 
 watch(() => route.query.tab, () => {
@@ -645,6 +719,59 @@ watch(() => route.query.tab, () => {
             />
           </div>
         </form>
+
+        <section class="mt-[16px] rounded-[14px] border border-black/10 bg-white p-[16px]">
+          <div class="flex flex-wrap items-center justify-between gap-[8px]">
+            <div>
+              <div class="text-[14px] font-medium leading-[20px] text-[#0A0A0A]">接口绑定</div>
+              <div class="mt-[2px] text-[12px] leading-[16px] text-[#717182]">
+                {{ bindingsLoading ? '加载中...' : `共 ${apiBindings.length} 个绑定` }}
+              </div>
+            </div>
+            <button
+              type="button"
+              class="h-[30px] rounded-[10px] border border-black/10 px-[12px] text-[12px] leading-[16px] text-[#717182]"
+              @click="loadCaseBindings"
+            >
+              刷新
+            </button>
+          </div>
+
+          <div v-if="bindingsError" class="mt-[12px] text-[12px] leading-[16px] text-[#FB2C36]">{{ bindingsError }}</div>
+          <div v-else-if="apiBindings.length" class="mt-[12px] overflow-hidden rounded-[10px] border border-black/10">
+            <div class="grid grid-cols-[minmax(0,1.1fr)_92px_minmax(0,1fr)_88px] bg-[rgba(236,236,240,0.35)] px-[12px] py-[8px] text-[12px] font-medium leading-[16px] text-[#717182]">
+              <div>名称</div>
+              <div>类型</div>
+              <div>目标</div>
+              <div>状态</div>
+            </div>
+            <div
+              v-for="binding in apiBindings"
+              :key="binding.id"
+              class="grid grid-cols-[minmax(0,1.1fr)_92px_minmax(0,1fr)_88px] items-center border-t border-black/10 px-[12px] py-[10px] text-[12px] leading-[16px]"
+            >
+              <div class="min-w-0">
+                <div class="truncate font-medium text-[#0A0A0A]">{{ binding.name }}</div>
+                <div class="truncate text-[#717182]">{{ binding.assertSummary || '暂无断言摘要' }}</div>
+              </div>
+              <div class="text-[#4A5565]">{{ linkTypeLabel(binding.linkType) }}</div>
+              <div class="min-w-0">
+                <button
+                  type="button"
+                  class="max-w-full truncate text-left font-mono text-[11px] text-[#155DFC] underline-offset-2 hover:underline"
+                  @click="openBindingTarget(binding)"
+                >
+                  {{ bindingTargetText(binding) }}
+                </button>
+                <div class="text-[11px] text-[#717182]">更新：{{ formatUnixTime(binding.updatedAt) }}</div>
+              </div>
+              <div class="text-[#717182]">{{ runStatusLabel(binding.lastRunStatus) }}</div>
+            </div>
+          </div>
+          <div v-else class="mt-[12px] rounded-[10px] bg-[rgba(236,236,240,0.35)] px-[12px] py-[10px] text-[12px] leading-[16px] text-[#717182]">
+            暂无接口绑定。
+          </div>
+        </section>
       </div>
 
       <div v-else-if="activeTab === 'content'" class="w-full max-w-[715.33px]">

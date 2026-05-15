@@ -162,6 +162,20 @@ function openAllureReportPage() {
   })
 }
 
+function openRelatedSuite() {
+  const pid = projectId.value
+  const suiteId = String(runDetail.value?.suiteId || '').trim()
+  if (!pid || !suiteId) return
+  void router.push(`/projects/${encodeURIComponent(pid)}/assets/suites/${encodeURIComponent(suiteId)}`)
+}
+
+function openCaseDetail(testcaseId?: string | null) {
+  const pid = projectId.value
+  const id = String(testcaseId || '').trim()
+  if (!pid || !id) return
+  void router.push(`/projects/${encodeURIComponent(pid)}/assets/testcases/${encodeURIComponent(id)}`)
+}
+
 watch(
   () => [projectId.value, runId.value],
   () => {
@@ -181,6 +195,14 @@ watch(
             <div class="mt-[2px] break-all font-mono text-[12px] leading-[16px] text-[#155DFC]">{{ runId || '-' }}</div>
           </div>
           <div class="flex items-center gap-[8px]">
+            <button
+              type="button"
+              class="h-[32px] rounded-[10px] border border-black/10 px-[12px] text-[13px] leading-[18px] text-[#717182] disabled:cursor-not-allowed disabled:opacity-60"
+              :disabled="!runDetail?.suiteId"
+              @click="openRelatedSuite"
+            >
+              打开关联套件
+            </button>
             <button
               type="button"
               class="h-[32px] rounded-[10px] border border-black/10 px-[12px] text-[13px] leading-[18px] text-[#717182] disabled:cursor-not-allowed disabled:opacity-60"
@@ -280,6 +302,7 @@ watch(
                   <th class="px-[12px] py-[8px] text-left text-[12px] font-medium leading-[16px] text-[#717182]">开始时间</th>
                   <th class="px-[12px] py-[8px] text-left text-[12px] font-medium leading-[16px] text-[#717182]">结束时间</th>
                   <th class="px-[12px] py-[8px] text-left text-[12px] font-medium leading-[16px] text-[#717182]">失败信息</th>
+                  <th class="px-[12px] py-[8px] text-left text-[12px] font-medium leading-[16px] text-[#717182]">关联对象</th>
                 </tr>
               </thead>
               <tbody>
@@ -290,9 +313,19 @@ watch(
                   <td class="px-[12px] py-[8px] text-[12px] leading-[16px] text-[#717182]">{{ formatDateTime(item.startAt ?? null) }}</td>
                   <td class="px-[12px] py-[8px] text-[12px] leading-[16px] text-[#717182]">{{ formatDateTime(item.endAt ?? null) }}</td>
                   <td class="px-[12px] py-[8px] text-[12px] leading-[16px] text-[#E7000B]">{{ item.errorMessage || '-' }}</td>
+                  <td class="px-[12px] py-[8px]">
+                    <button
+                      type="button"
+                      class="h-[28px] rounded-[8px] border border-black/10 px-[10px] text-[12px] leading-[16px] text-[#155DFC] disabled:cursor-not-allowed disabled:text-[#717182] disabled:opacity-60"
+                      :disabled="!item.testcaseId"
+                      @click="openCaseDetail(item.testcaseId)"
+                    >
+                      打开用例
+                    </button>
+                  </td>
                 </tr>
                 <tr v-if="!caseRuns.length">
-                  <td colspan="6" class="px-[12px] py-[16px] text-center text-[12px] leading-[16px] text-[#717182]">暂无 case-runs 数据</td>
+                  <td colspan="7" class="px-[12px] py-[16px] text-center text-[12px] leading-[16px] text-[#717182]">暂无 case-runs 数据</td>
                 </tr>
               </tbody>
             </table>

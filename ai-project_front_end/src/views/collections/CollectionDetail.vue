@@ -1,13 +1,17 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import { createTestcaseBinding } from '@/lib/aiTestingPlatformApi'
 import {
   exportCollection,
+  fetchCollectionBindings,
   fetchCollectionDetail,
   fetchCollectionRequestDetail,
+  fetchRequestBindings,
   importCollection,
   runCollectionRequest,
   updateCollectionRequest,
+  type ApiAssetBinding,
   type CollectionDetail
 } from '@/lib/api/collections'
 
@@ -45,6 +49,21 @@ const exportText = ref('')
 const detail = ref<CollectionDetail | null>(null)
 const selectedRequestId = ref('')
 const requestForm = ref<RequestForm | null>(null)
+const collectionBindings = ref<ApiAssetBinding[]>([])
+const requestBindings = ref<ApiAssetBinding[]>([])
+const collectionBindingsLoading = ref(false)
+const requestBindingsLoading = ref(false)
+const bindingSubmitting = ref(false)
+const collectionBindingsError = ref('')
+const requestBindingsError = ref('')
+const bindingError = ref('')
+const bindingSuccess = ref('')
+
+const bindingForm = reactive({
+  testcaseId: '',
+  name: '',
+  assertSummary: ''
+})
 
 const importFormat = ref<'postman' | 'swagger'>('postman')
 const importContent = ref('')
@@ -59,6 +78,32 @@ const allRequests = computed(() => {
 
 function formatJson(data: unknown) {
   return JSON.stringify(data ?? {}, null, 2)
+}
+
+function formatUnixTime(timestamp?: number | null) {
+  if (!timestamp || timestamp <= 0) return '-'
+  const date = new Date(timestamp * 1000)
+  if (Number.isNaN(date.getTime())) return '-'
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }).format(date)
+}
+
+function linkTypeLabel(type?: string | null) {
+  if (type === 'REQUEST') return '请求'
+  if (type === 'COLLECTION') return '集合'
+  return '接口目标'
+}
+
+function runStatusLabel(status?: string | null) {
+  if (status === 'PASSED') return '通过'
+  if (status === 'FAILED') return '失败'
+  if (status === 'RUNNING') return '执行中'
+  return '未执行'
 }
 
 function parseJsonOrThrow(text: string, label: string) {
@@ -81,6 +126,45 @@ function toMethod(value: string): Method {
   return 'GET'
 }
 
+async function loadCollectionBindings() {
+  const pid = projectId.value
+  const cid = collectionId.value
+  collectionBindings.value = []
+  collectionBindingsError.value = ''
+  if (!pid || !cid) return
+  collectionBindingsLoading.value = true
+  try {
+    collectionBindings.value = await fetchCollectionBindings(pid, cid)
+  } catch (e) {
+    collectionBindingsError.value = e instanceof Error ? e.message : '集合绑定加载失败'
+  } finally {
+    collectionBindingsLoading.value = false
+  }
+}
+
+async function loadRequestBindings(requestId: string) {
+  const pid = projectId.value
+  const rid = String(requestId || '').trim()
+  requestBindings.value = []
+  requestBindingsError.value = ''
+  if (!pid || !rid) return
+  requestBindingsLoading.value = true
+  try {
+    const rows = await fetchRequestBindings(pid, rid)
+    if (selectedRequestId.value === rid) {
+      requestBindings.value = rows
+    }
+  } catch (e) {
+    if (selectedRequestId.value === rid) {
+      requestBindingsError.value = e instanceof Error ? e.message : '请求绑定加载失败'
+    }
+  } finally {
+    if (selectedRequestId.value === rid) {
+      requestBindingsLoading.value = false
+    }
+  }
+}
+
 async function loadCollection() {
   if (!collectionId.value) return
   loading.value = true
@@ -90,12 +174,15 @@ async function loadCollection() {
   try {
     const data = await fetchCollectionDetail(collectionId.value)
     detail.value = data
-    const candidate = requestIdFromQuery.value || selectedRequestId.value || allRequests.value[0]?.id || ''
+    void loadCollectionBindings()
+    const currentRequestStillExists = allRequests.value.some((item) => item.id === selectedRequestId.value)
+    const candidate = requestIdFromQuery.value || (currentRequestStillExists ? selectedRequestId.value : '') || allRequests.value[0]?.id || ''
     selectedRequestId.value = candidate
     if (candidate) {
       await loadRequestDetail(candidate)
     } else {
       requestForm.value = null
+      requestBindings.value = []
     }
   } catch (e) {
     error.value = e instanceof Error ? e.message : '集合加载失败'
@@ -107,6 +194,9 @@ async function loadCollection() {
 async function loadRequestDetail(requestId: string) {
   if (!collectionId.value || !requestId) return
   error.value = ''
+  bindingError.value = ''
+  bindingSuccess.value = ''
+  requestBindingsError.value = ''
   try {
     const data = await fetchCollectionRequestDetail(collectionId.value, requestId)
     requestForm.value = {
@@ -120,6 +210,8 @@ async function loadRequestDetail(requestId: string) {
       bodyText: formatJson(data.body),
       assertsText: formatJson(data.asserts)
     }
+    bindingForm.name = `${data.name}-接口绑定`
+    void loadRequestBindings(data.id)
   } catch (e) {
     error.value = e instanceof Error ? e.message : '请求详情加载失败'
   }
@@ -129,6 +221,8 @@ async function onSelectRequest(requestId: string) {
   selectedRequestId.value = requestId
   success.value = ''
   runResultText.value = ''
+  bindingSuccess.value = ''
+  bindingError.value = ''
   await loadRequestDetail(requestId)
 }
 
@@ -172,6 +266,42 @@ async function runSingleRequest() {
     error.value = e instanceof Error ? e.message : '运行失败'
   } finally {
     running.value = false
+  }
+}
+
+async function createRequestBinding() {
+  const testcaseId = bindingForm.testcaseId.trim()
+  if (!projectId.value || !collectionId.value || !requestForm.value) return
+  if (!testcaseId) {
+    bindingError.value = 'TestCase ID 不能为空'
+    return
+  }
+  bindingSubmitting.value = true
+  bindingError.value = ''
+  bindingSuccess.value = ''
+  try {
+    await createTestcaseBinding(testcaseId, {
+      name: bindingForm.name.trim() || `${requestForm.value.name}-接口绑定`,
+      requestId: requestForm.value.requestId,
+      collectionId: collectionId.value,
+      linkType: 'REQUEST',
+      sourceType: 'MANUAL',
+      assertSummary: bindingForm.assertSummary.trim(),
+      params: {},
+      priority: 100,
+      enabled: true
+    })
+    bindingSuccess.value = '绑定已创建'
+    bindingForm.testcaseId = ''
+    bindingForm.assertSummary = ''
+    await Promise.all([
+      loadRequestBindings(requestForm.value.requestId),
+      loadCollectionBindings()
+    ])
+  } catch (e) {
+    bindingError.value = e instanceof Error ? e.message : '绑定创建失败'
+  } finally {
+    bindingSubmitting.value = false
   }
 }
 
@@ -231,6 +361,20 @@ watch([collectionId, requestIdFromQuery], () => {
           <div class="rounded-[8px] bg-[#F8FAFC] p-2">
             <div class="mb-1 text-[#717182]">变量</div>
             <pre class="max-h-[160px] overflow-auto whitespace-pre-wrap text-[11px] text-[#0A0A0A]">{{ formatJson(detail?.variables || {}) }}</pre>
+          </div>
+          <div class="rounded-[8px] bg-[#F8FAFC] p-2">
+            <div class="mb-1 flex items-center justify-between text-[#717182]">
+              <span>集合绑定</span>
+              <span>{{ collectionBindingsLoading ? '加载中' : `${collectionBindings.length} 个` }}</span>
+            </div>
+            <div v-if="collectionBindingsError" class="text-[11px] text-[#E7000B]">{{ collectionBindingsError }}</div>
+            <div v-else-if="collectionBindings.length" class="space-y-1">
+              <div v-for="binding in collectionBindings.slice(0, 4)" :key="binding.id" class="rounded-[6px] bg-white px-2 py-1">
+                <div class="truncate text-[#0A0A0A]">{{ binding.name }}</div>
+                <div class="truncate text-[11px] text-[#717182]">{{ linkTypeLabel(binding.linkType) }} · {{ binding.testcaseId }}</div>
+              </div>
+            </div>
+            <div v-else class="text-[11px] text-[#717182]">暂无绑定</div>
           </div>
         </div>
       </section>
@@ -328,6 +472,67 @@ watch([collectionId, requestIdFromQuery], () => {
               <div class="mt-3 flex gap-2">
                 <button class="rounded-[6px] bg-[#155DFC] px-3 py-1 text-[12px] text-white disabled:opacity-60" :disabled="saving" @click="saveRequest">保存</button>
                 <button class="rounded-[6px] border border-black/10 px-3 py-1 text-[12px] disabled:opacity-60" :disabled="running" @click="runSingleRequest">单请求运行</button>
+              </div>
+
+              <div class="mt-4 border-t border-black/10 pt-3">
+                <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div class="text-[12px] font-medium text-[#0A0A0A]">接口绑定</div>
+                    <div class="mt-1 text-[11px] text-[#717182]">
+                      {{ requestBindingsLoading ? '绑定加载中...' : `当前请求 ${requestBindings.length} 个 TestCase 绑定` }}
+                    </div>
+                  </div>
+                  <button
+                    class="rounded-[6px] bg-[#155DFC] px-3 py-1 text-[12px] text-white disabled:opacity-60"
+                    :disabled="bindingSubmitting"
+                    @click="createRequestBinding"
+                  >
+                    {{ bindingSubmitting ? '绑定中...' : '绑定 TestCase' }}
+                  </button>
+                </div>
+
+                <div class="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                  <input
+                    v-model="bindingForm.testcaseId"
+                    class="rounded-[6px] border border-black/10 px-2 py-1 text-[12px]"
+                    placeholder="TestCase ID"
+                  />
+                  <input
+                    v-model="bindingForm.name"
+                    class="rounded-[6px] border border-black/10 px-2 py-1 text-[12px]"
+                    placeholder="绑定名称"
+                  />
+                </div>
+                <textarea
+                  v-model="bindingForm.assertSummary"
+                  class="mt-2 h-[64px] w-full rounded-[6px] border border-black/10 p-2 text-[12px]"
+                  placeholder="断言摘要，可留空"
+                />
+                <div v-if="bindingError" class="mt-2 text-[12px] text-[#E7000B]">{{ bindingError }}</div>
+                <div v-else-if="bindingSuccess" class="mt-2 text-[12px] text-[#008236]">{{ bindingSuccess }}</div>
+                <div v-if="requestBindingsError" class="mt-2 text-[12px] text-[#E7000B]">{{ requestBindingsError }}</div>
+
+                <div class="mt-3 overflow-hidden rounded-[8px] border border-black/10">
+                  <div class="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_96px] bg-[#F8FAFC] px-3 py-2 text-[11px] font-medium text-[#717182]">
+                    <div>绑定名称</div>
+                    <div>TestCase</div>
+                    <div>最近运行</div>
+                  </div>
+                  <div v-if="requestBindings.length">
+                    <div v-for="binding in requestBindings" :key="binding.id" class="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_96px] border-t border-black/10 px-3 py-2 text-[12px]">
+                      <div class="min-w-0">
+                        <div class="truncate text-[#0A0A0A]">{{ binding.name }}</div>
+                        <div class="truncate text-[11px] text-[#717182]">{{ binding.assertSummary || '暂无断言摘要' }}</div>
+                      </div>
+                      <div class="break-all font-mono text-[11px] text-[#4A5565]">{{ binding.testcaseId }}</div>
+                      <div class="text-[11px] text-[#717182]">
+                        <div>{{ runStatusLabel(binding.lastRunStatus) }}</div>
+                        <div>{{ formatUnixTime(binding.lastRunAt || binding.updatedAt) }}</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div v-else class="border-t border-black/10 px-3 py-3 text-[12px] text-[#717182]">暂无请求级绑定</div>
+                </div>
               </div>
             </div>
             <div v-else class="rounded-[8px] border border-black/10 p-3 text-[12px] text-[#717182]">请选择一个请求</div>
