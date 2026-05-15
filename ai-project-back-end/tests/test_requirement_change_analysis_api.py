@@ -6,13 +6,15 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import anyio
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.sql.elements import BindParameter
 
 from app.api.deps import CurrentUser, get_current_user
 from app.api.v1.endpoints import requirement_changes as requirement_changes_endpoint
 from app.core.database import get_db
+from app.models.requirement import RequirementCaseLink, RequirementChangeItem, RequirementChangeSet, RequirementRegressionCase, RequirementRegressionSet
 from app.services import requirement_change as requirement_change_service
 from app.schemas.requirement_change import (
     RequirementChangeSetDetail,
@@ -142,6 +144,14 @@ def test_create_regression_set_scopes_case_links_to_target_version(monkeypatch) 
     user = CurrentUser(id=user_id, tenant_id=tenant_id, roles=frozenset({"ADMIN"}))
     now = datetime.now(timezone.utc).replace(tzinfo=None)
 
+    def _where_value(stmt, column_name: str):
+        for criterion in stmt._where_criteria:
+            left = getattr(criterion, "left", None)
+            right = getattr(criterion, "right", None)
+            if getattr(left, "name", None) == column_name and isinstance(right, BindParameter):
+                return right.value
+        return None
+
     class _ScalarResult:
         def __init__(self, rows):
             self._rows = rows
@@ -162,7 +172,6 @@ def test_create_regression_set_scopes_case_links_to_target_version(monkeypatch) 
     class _DB:
         def __init__(self):
             self.added = []
-            self.link_query_has_version_filter = False
 
         def add(self, row):
             if getattr(row, "id", None) is None:
@@ -177,8 +186,8 @@ def test_create_regression_set_scopes_case_links_to_target_version(monkeypatch) 
             return None
 
         async def scalar(self, stmt):
-            stmt_text = str(stmt)
-            if "FROM requirement_change_sets" in stmt_text:
+            entity = stmt.column_descriptions[0]["entity"]
+            if entity is RequirementChangeSet:
                 return SimpleNamespace(
                     id=change_set_id,
                     project_id=project_id,
@@ -189,8 +198,8 @@ def test_create_regression_set_scopes_case_links_to_target_version(monkeypatch) 
             return None
 
         async def execute(self, stmt):
-            stmt_text = str(stmt)
-            if "FROM requirement_change_items" in stmt_text:
+            primary_entity = stmt.column_descriptions[0]["entity"]
+            if primary_entity is RequirementChangeItem:
                 return _Result(
                     [
                         SimpleNamespace(
@@ -201,11 +210,10 @@ def test_create_regression_set_scopes_case_links_to_target_version(monkeypatch) 
                         )
                     ]
                 )
-            if "FROM requirement_case_links" in stmt_text:
-                self.link_query_has_version_filter = "requirement_case_links.doc_version_id =" in stmt_text
+            if primary_entity is RequirementCaseLink:
                 tc1 = uuid.UUID("99999999-9999-9999-9999-999999999991")
                 tc2 = uuid.UUID("99999999-9999-9999-9999-999999999992")
-                if self.link_query_has_version_filter:
+                if _where_value(stmt, "doc_version_id") == target_version_id:
                     return _Result(
                         [
                             (
@@ -241,7 +249,6 @@ def test_create_regression_set_scopes_case_links_to_target_version(monkeypatch) 
         )
     )
 
-    assert db.link_query_has_version_filter is True
     assert len(detail.cases) == 1
     assert detail.cases[0].testcaseTitle == "case-target"
 
@@ -284,10 +291,10 @@ def test_create_regression_set_is_idempotent_for_same_change_set(monkeypatch) ->
             return None
 
         async def scalar(self, stmt):
-            stmt_text = str(stmt)
-            if "FROM requirement_change_sets" in stmt_text:
+            entity = stmt.column_descriptions[0]["entity"]
+            if entity is RequirementChangeSet:
                 return SimpleNamespace(id=change_set_id, project_id=project_id, tenant_id=tenant_id, doc_id=uuid.uuid4())
-            if "FROM requirement_regression_sets" in stmt_text:
+            if entity is RequirementRegressionSet:
                 return SimpleNamespace(
                     id=regression_set_id,
                     project_id=project_id,
@@ -302,8 +309,8 @@ def test_create_regression_set_is_idempotent_for_same_change_set(monkeypatch) ->
             return None
 
         async def execute(self, stmt):
-            stmt_text = str(stmt)
-            if "FROM requirement_regression_cases" in stmt_text:
+            primary_entity = stmt.column_descriptions[0]["entity"]
+            if primary_entity is RequirementRegressionCase:
                 return _Result(
                     [
                         (
@@ -342,3 +349,128 @@ def test_create_regression_set_is_idempotent_for_same_change_set(monkeypatch) ->
     assert detail.id == str(regression_set_id)
     assert detail.cases[0].testcaseTitle == "existing-case"
     assert db.added == []
+
+
+def test_create_regression_set_handles_unique_conflict_and_returns_existing(monkeypatch) -> None:
+    tenant_id = uuid.UUID("11111111-1111-1111-1111-111111111111")
+    user_id = uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+    project_id = uuid.UUID("22222222-2222-2222-2222-222222222222")
+    change_set_id = uuid.UUID("66666666-6666-6666-6666-666666666666")
+    regression_set_id = uuid.UUID("77777777-7777-7777-7777-777777777777")
+    target_version_id = uuid.UUID("55555555-5555-5555-5555-555555555555")
+    testcase_id = uuid.UUID("99999999-9999-9999-9999-999999999999")
+    user = CurrentUser(id=user_id, tenant_id=tenant_id, roles=frozenset({"ADMIN"}))
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    class _ScalarResult:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def all(self):
+            return self._rows
+
+    class _Result:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def scalars(self):
+            return _ScalarResult(self._rows)
+
+        def all(self):
+            return self._rows
+
+    class _DB:
+        def __init__(self):
+            self.rollback_called = False
+            self.flush_calls = 0
+            self.regression_set_scalar_calls = 0
+
+        def add(self, row):
+            if getattr(row, "id", None) is None:
+                row.id = uuid.uuid4()
+
+        async def rollback(self):
+            self.rollback_called = True
+
+        async def flush(self):
+            self.flush_calls += 1
+            if self.flush_calls == 1:
+                raise IntegrityError("INSERT", {}, Exception("duplicate key value violates unique constraint"))
+            return None
+
+        async def scalar(self, stmt):
+            entity = stmt.column_descriptions[0]["entity"]
+            if entity is RequirementChangeSet:
+                return SimpleNamespace(
+                    id=change_set_id,
+                    project_id=project_id,
+                    tenant_id=tenant_id,
+                    doc_id=uuid.uuid4(),
+                    target_version_id=target_version_id,
+                )
+            if entity is RequirementRegressionSet:
+                self.regression_set_scalar_calls += 1
+                if self.regression_set_scalar_calls == 1:
+                    return None
+                return SimpleNamespace(
+                    id=regression_set_id,
+                    project_id=project_id,
+                    change_set_id=change_set_id,
+                    summary="共需回归 1 条用例",
+                    status="GENERATED",
+                    created_by=user_id,
+                    created_at=now,
+                    updated_at=now,
+                    tenant_id=tenant_id,
+                )
+            return None
+
+        async def execute(self, stmt):
+            primary_entity = stmt.column_descriptions[0]["entity"]
+            if primary_entity is RequirementChangeItem:
+                return _Result(
+                    [SimpleNamespace(id=uuid.uuid4(), impact_level="HIGH", source_path="target:v2:1", created_at=now)]
+                )
+            if primary_entity is RequirementCaseLink:
+                return _Result(
+                    [(SimpleNamespace(testcase_id=testcase_id, created_at=now, id=uuid.uuid4()), "created-case")]
+                )
+            if primary_entity is RequirementRegressionCase:
+                return _Result(
+                    [
+                        (
+                            SimpleNamespace(
+                                id=uuid.uuid4(),
+                                testcase_id=testcase_id,
+                                priority="P1",
+                                reason="需求版本变更关联的追溯用例",
+                                source_paths_json=["target:v2:1"],
+                            ),
+                            "existing-case",
+                        )
+                    ]
+                )
+            return _Result([])
+
+    async def _fake_get_project(db, *, user, project_id):
+        return SimpleNamespace(id=project_id, owner_id=user.id)
+
+    async def _fake_require_project_write(db, *, user, project):
+        return None
+
+    monkeypatch.setattr(requirement_change_service, "_get_project", _fake_get_project)
+    monkeypatch.setattr(requirement_change_service, "_require_project_write", _fake_require_project_write)
+
+    db = _DB()
+    detail = anyio.run(
+        lambda: requirement_change_service.create_requirement_regression_set(
+            db,
+            user=user,
+            project_id=project_id,
+            change_set_id=change_set_id,
+        )
+    )
+
+    assert db.rollback_called is True
+    assert detail.id == str(regression_set_id)
+    assert detail.cases[0].testcaseTitle == "existing-case"

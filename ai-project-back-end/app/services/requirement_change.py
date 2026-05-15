@@ -4,6 +4,7 @@ import uuid
 
 from fastapi import HTTPException
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, to_unix_ts
@@ -179,6 +180,41 @@ def _to_regression_set_detail(
     )
 
 
+async def _load_regression_set_detail_by_change_set(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+    change_set_id: uuid.UUID,
+) -> RequirementRegressionSetDetail | None:
+    existing_set = await db.scalar(
+        select(RequirementRegressionSet).where(
+            RequirementRegressionSet.change_set_id == change_set_id,
+            RequirementRegressionSet.project_id == project_id,
+            RequirementRegressionSet.tenant_id == user.tenant_id,
+        )
+    )
+    if existing_set is None:
+        return None
+    cases = (
+        await db.execute(
+            select(RequirementRegressionCase, TestCase.title)
+            .outerjoin(
+                TestCase,
+                (TestCase.id == RequirementRegressionCase.testcase_id)
+                & (TestCase.tenant_id == RequirementRegressionCase.tenant_id)
+                & (TestCase.project_id == RequirementRegressionCase.project_id),
+            )
+            .where(
+                RequirementRegressionCase.regression_set_id == existing_set.id,
+                RequirementRegressionCase.tenant_id == user.tenant_id,
+            )
+            .order_by(RequirementRegressionCase.created_at.asc(), RequirementRegressionCase.id.asc())
+        )
+    ).all()
+    return _to_regression_set_detail(existing_set, cases)
+
+
 async def _get_doc(db: AsyncSession, *, user: CurrentUser, project_id: uuid.UUID, doc_id: uuid.UUID) -> RequirementDoc:
     doc = await db.scalar(
         select(RequirementDoc).where(
@@ -326,31 +362,14 @@ async def create_requirement_regression_set(db: AsyncSession, *, user: CurrentUs
     )
     if change_set is None:
         raise HTTPException(status_code=404, detail="Requirement change set not found")
-    existing_set = await db.scalar(
-        select(RequirementRegressionSet).where(
-            RequirementRegressionSet.change_set_id == change_set.id,
-            RequirementRegressionSet.project_id == project_id,
-            RequirementRegressionSet.tenant_id == user.tenant_id,
-        )
+    existing_detail = await _load_regression_set_detail_by_change_set(
+        db,
+        user=user,
+        project_id=project_id,
+        change_set_id=change_set.id,
     )
-    if existing_set is not None:
-        cases = (
-            await db.execute(
-                select(RequirementRegressionCase, TestCase.title)
-                .outerjoin(
-                    TestCase,
-                    (TestCase.id == RequirementRegressionCase.testcase_id)
-                    & (TestCase.tenant_id == RequirementRegressionCase.tenant_id)
-                    & (TestCase.project_id == RequirementRegressionCase.project_id),
-                )
-                .where(
-                    RequirementRegressionCase.regression_set_id == existing_set.id,
-                    RequirementRegressionCase.tenant_id == user.tenant_id,
-                )
-                .order_by(RequirementRegressionCase.created_at.asc(), RequirementRegressionCase.id.asc())
-            )
-        ).all()
-        return _to_regression_set_detail(existing_set, cases)
+    if existing_detail is not None:
+        return existing_detail
     change_items = (
         await db.execute(
             select(RequirementChangeItem)
@@ -385,7 +404,19 @@ async def create_requirement_regression_set(db: AsyncSession, *, user: CurrentUs
         created_by=user.id,
     )
     db.add(regression_set)
-    await db.flush()
+    try:
+        await db.flush()
+    except IntegrityError:
+        await db.rollback()
+        existing_detail = await _load_regression_set_detail_by_change_set(
+            db,
+            user=user,
+            project_id=project_id,
+            change_set_id=change_set.id,
+        )
+        if existing_detail is not None:
+            return existing_detail
+        raise
     source_paths = [item.source_path for item in change_items if item.source_path]
     seen: set[uuid.UUID] = set()
     cases: list[tuple[RequirementRegressionCase, str | None]] = []
