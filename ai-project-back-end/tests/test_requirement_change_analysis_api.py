@@ -185,6 +185,18 @@ def test_create_regression_set_scopes_case_links_to_target_version(monkeypatch) 
         async def flush(self):
             return None
 
+        def begin_nested(self):
+            db = self
+
+            class _NestedTx:
+                async def __aenter__(self_nonlocal):
+                    return db
+
+                async def __aexit__(self_nonlocal, exc_type, exc, tb):
+                    return False
+
+            return _NestedTx()
+
         async def scalar(self, stmt):
             entity = stmt.column_descriptions[0]["entity"]
             if entity is RequirementChangeSet:
@@ -384,6 +396,7 @@ def test_create_regression_set_handles_unique_conflict_and_returns_existing(monk
             self.rollback_called = False
             self.flush_calls = 0
             self.regression_set_scalar_calls = 0
+            self.begin_nested_called = 0
 
         def add(self, row):
             if getattr(row, "id", None) is None:
@@ -391,6 +404,19 @@ def test_create_regression_set_handles_unique_conflict_and_returns_existing(monk
 
         async def rollback(self):
             self.rollback_called = True
+
+        def begin_nested(self):
+            db = self
+
+            class _NestedTx:
+                async def __aenter__(self_nonlocal):
+                    db.begin_nested_called += 1
+                    return db
+
+                async def __aexit__(self_nonlocal, exc_type, exc, tb):
+                    return False
+
+            return _NestedTx()
 
         async def flush(self):
             self.flush_calls += 1
@@ -471,6 +497,58 @@ def test_create_regression_set_handles_unique_conflict_and_returns_existing(monk
         )
     )
 
-    assert db.rollback_called is True
+    assert db.begin_nested_called == 1
+    assert db.rollback_called is False
     assert detail.id == str(regression_set_id)
     assert detail.cases[0].testcaseTitle == "existing-case"
+
+
+def test_load_regression_set_detail_filters_cases_by_project(monkeypatch) -> None:
+    tenant_id = uuid.UUID("11111111-1111-1111-1111-111111111111")
+    user_id = uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+    project_id = uuid.UUID("22222222-2222-2222-2222-222222222222")
+    change_set_id = uuid.UUID("66666666-6666-6666-6666-666666666666")
+    regression_set_id = uuid.UUID("77777777-7777-7777-7777-777777777777")
+    user = CurrentUser(id=user_id, tenant_id=tenant_id, roles=frozenset({"ADMIN"}))
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    class _Result:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def all(self):
+            return self._rows
+
+    class _DB:
+        async def scalar(self, stmt):
+            entity = stmt.column_descriptions[0]["entity"]
+            if entity is RequirementRegressionSet:
+                return SimpleNamespace(
+                    id=regression_set_id,
+                    project_id=project_id,
+                    change_set_id=change_set_id,
+                    summary="共需回归 1 条用例",
+                    status="GENERATED",
+                    created_by=user_id,
+                    created_at=now,
+                    updated_at=now,
+                    tenant_id=tenant_id,
+                )
+            return None
+
+        async def execute(self, stmt):
+            where_sql = str(stmt.whereclause)
+            assert "requirement_regression_cases.project_id" in where_sql
+            return _Result([])
+
+    db = _DB()
+    detail = anyio.run(
+        lambda: requirement_change_service._load_regression_set_detail_by_change_set(
+            db,
+            user=user,
+            project_id=project_id,
+            change_set_id=change_set_id,
+        )
+    )
+
+    assert detail is not None

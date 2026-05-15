@@ -208,6 +208,7 @@ async def _load_regression_set_detail_by_change_set(
             .where(
                 RequirementRegressionCase.regression_set_id == existing_set.id,
                 RequirementRegressionCase.tenant_id == user.tenant_id,
+                RequirementRegressionCase.project_id == project_id,
             )
             .order_by(RequirementRegressionCase.created_at.asc(), RequirementRegressionCase.id.asc())
         )
@@ -403,11 +404,11 @@ async def create_requirement_regression_set(db: AsyncSession, *, user: CurrentUs
         status="GENERATED",
         created_by=user.id,
     )
-    db.add(regression_set)
     try:
-        await db.flush()
+        async with db.begin_nested():
+            db.add(regression_set)
+            await db.flush()
     except IntegrityError:
-        await db.rollback()
         existing_detail = await _load_regression_set_detail_by_change_set(
             db,
             user=user,
