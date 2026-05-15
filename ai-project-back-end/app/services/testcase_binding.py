@@ -3,11 +3,12 @@ from __future__ import annotations
 import uuid
 
 from fastapi import HTTPException
-from sqlalchemy import desc, func, select
+from sqlalchemy import desc, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser
+from app.models.api import ApiCollection, ApiRequest
 from app.models.api_target import ApiTarget
 from app.models.enums import ProjectRole
 from app.models.project import Project, ProjectMember
@@ -16,6 +17,8 @@ from app.models.testcase import TestCase
 from app.models.testcase_binding import TestcaseBinding
 from app.schemas.testcase_binding import TestcaseBindingCreateRequest, TestcaseBindingUpdateRequest
 from app.services.platform_record import create_audit_log
+
+_LINK_TYPES = {"API_TARGET", "REQUEST", "COLLECTION"}
 
 
 def _is_admin(user: CurrentUser) -> bool:
@@ -113,6 +116,73 @@ async def _validate_api_target(
         raise HTTPException(status_code=400, detail="api_target_not_in_project")
 
 
+async def _validate_collection(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+    collection_id: uuid.UUID | None,
+) -> ApiCollection | None:
+    if collection_id is None:
+        return None
+    collection = await db.scalar(
+        select(ApiCollection).where(ApiCollection.id == collection_id, ApiCollection.tenant_id == user.tenant_id)
+    )
+    if collection is None:
+        raise HTTPException(status_code=404, detail="collection_not_found")
+    if collection.project_id != project_id:
+        raise HTTPException(status_code=400, detail="collection_not_in_project")
+    return collection
+
+
+async def _validate_request(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+    request_id: uuid.UUID | None,
+) -> ApiRequest | None:
+    if request_id is None:
+        return None
+    request = await db.scalar(select(ApiRequest).where(ApiRequest.id == request_id, ApiRequest.tenant_id == user.tenant_id))
+    if request is None:
+        raise HTTPException(status_code=404, detail="request_not_found")
+    await _validate_collection(db, user=user, project_id=project_id, collection_id=request.collection_id)
+    return request
+
+
+def _resolve_link_type(payload: TestcaseBindingCreateRequest | TestcaseBindingUpdateRequest) -> str:
+    if payload.linkType:
+        link_type = payload.linkType.upper()
+        if link_type not in _LINK_TYPES:
+            raise HTTPException(status_code=400, detail="invalid_link_type")
+        return link_type
+    if payload.requestId:
+        return "REQUEST"
+    if payload.collectionId:
+        return "COLLECTION"
+    return "API_TARGET"
+
+
+def _validate_link_consistency(
+    *,
+    link_type: str,
+    api_target_id: uuid.UUID | None,
+    request: ApiRequest | None,
+    collection: ApiCollection | None,
+) -> None:
+    if link_type == "REQUEST" and request is None:
+        raise HTTPException(status_code=400, detail="request_id_required")
+    if link_type == "COLLECTION" and collection is None:
+        raise HTTPException(status_code=400, detail="collection_id_required")
+    if link_type == "API_TARGET" and (request is not None or collection is not None):
+        raise HTTPException(status_code=400, detail="api_target_link_cannot_reference_request_or_collection")
+    if api_target_id is not None and (request is not None or collection is not None):
+        raise HTTPException(status_code=400, detail="api_target_cannot_mix_with_api_asset_link")
+    if request is not None and collection is not None and request.collection_id != collection.id:
+        raise HTTPException(status_code=400, detail="request_not_in_collection")
+
+
 async def get_testcase_binding(
     db: AsyncSession,
     *,
@@ -157,6 +227,55 @@ async def list_testcase_bindings(
     return total, list(rows.all())
 
 
+async def list_testcase_bindings_by_request(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+    request_id: uuid.UUID,
+) -> list[TestcaseBinding]:
+    project = await _get_project(db, user=user, project_id=project_id)
+    await _require_project_read(db, user=user, project=project)
+    await _validate_request(db, user=user, project_id=project.id, request_id=request_id)
+    rows = (
+        await db.execute(
+            select(TestcaseBinding)
+            .where(
+                TestcaseBinding.tenant_id == user.tenant_id,
+                TestcaseBinding.project_id == project.id,
+                TestcaseBinding.request_id == request_id,
+            )
+            .order_by(desc(TestcaseBinding.updated_at))
+        )
+    ).scalars()
+    return list(rows.all())
+
+
+async def list_testcase_bindings_by_collection(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+    collection_id: uuid.UUID,
+) -> list[TestcaseBinding]:
+    project = await _get_project(db, user=user, project_id=project_id)
+    await _require_project_read(db, user=user, project=project)
+    await _validate_collection(db, user=user, project_id=project.id, collection_id=collection_id)
+    request_ids = select(ApiRequest.id).where(ApiRequest.tenant_id == user.tenant_id, ApiRequest.collection_id == collection_id)
+    rows = (
+        await db.execute(
+            select(TestcaseBinding)
+            .where(
+                TestcaseBinding.tenant_id == user.tenant_id,
+                TestcaseBinding.project_id == project.id,
+                or_(TestcaseBinding.collection_id == collection_id, TestcaseBinding.request_id.in_(request_ids)),
+            )
+            .order_by(desc(TestcaseBinding.updated_at))
+        )
+    ).scalars()
+    return list(rows.all())
+
+
 async def create_testcase_binding(
     db: AsyncSession,
     *,
@@ -170,8 +289,14 @@ async def create_testcase_binding(
 
     dataset_id = uuid.UUID(payload.datasetId) if payload.datasetId else None
     api_target_id = uuid.UUID(payload.apiTargetId) if payload.apiTargetId else None
+    request_id = uuid.UUID(payload.requestId) if payload.requestId else None
+    collection_id = uuid.UUID(payload.collectionId) if payload.collectionId else None
     await _validate_dataset(db, user=user, project_id=project.id, dataset_id=dataset_id)
     await _validate_api_target(db, user=user, project_id=project.id, api_target_id=api_target_id)
+    request = await _validate_request(db, user=user, project_id=project.id, request_id=request_id)
+    collection = await _validate_collection(db, user=user, project_id=project.id, collection_id=collection_id)
+    link_type = _resolve_link_type(payload)
+    _validate_link_consistency(link_type=link_type, api_target_id=api_target_id, request=request, collection=collection)
 
     binding = TestcaseBinding(
         tenant_id=user.tenant_id,
@@ -180,7 +305,12 @@ async def create_testcase_binding(
         name=payload.name,
         dataset_id=dataset_id,
         api_target_id=api_target_id,
+        request_id=request_id,
+        collection_id=collection_id,
         params_json=dict(payload.params or {}),
+        link_type=link_type,
+        source_type=payload.sourceType.upper(),
+        assert_summary=payload.assertSummary,
         priority=payload.priority,
         enabled=payload.enabled,
         version=1,
@@ -221,13 +351,24 @@ async def update_testcase_binding(
 
     dataset_id = uuid.UUID(payload.datasetId) if payload.datasetId else None
     api_target_id = uuid.UUID(payload.apiTargetId) if payload.apiTargetId else None
+    request_id = uuid.UUID(payload.requestId) if payload.requestId else None
+    collection_id = uuid.UUID(payload.collectionId) if payload.collectionId else None
     await _validate_dataset(db, user=user, project_id=project.id, dataset_id=dataset_id)
     await _validate_api_target(db, user=user, project_id=project.id, api_target_id=api_target_id)
+    request = await _validate_request(db, user=user, project_id=project.id, request_id=request_id)
+    collection = await _validate_collection(db, user=user, project_id=project.id, collection_id=collection_id)
+    link_type = _resolve_link_type(payload)
+    _validate_link_consistency(link_type=link_type, api_target_id=api_target_id, request=request, collection=collection)
 
     binding.name = payload.name
     binding.dataset_id = dataset_id
     binding.api_target_id = api_target_id
+    binding.request_id = request_id
+    binding.collection_id = collection_id
     binding.params_json = dict(payload.params or {})
+    binding.link_type = link_type
+    binding.source_type = payload.sourceType.upper()
+    binding.assert_summary = payload.assertSummary
     binding.priority = payload.priority
     binding.enabled = payload.enabled
     binding.version += 1
