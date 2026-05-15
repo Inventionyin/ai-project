@@ -145,8 +145,8 @@ async function loadCollections() {
   loading.value = true
   try {
     const list = await fetchCollections(pid, 1, 200)
-    const details = await Promise.all(list.map((item) => fetchCollectionDetail(item.id)))
-    collections.value = details.map((detail, index) => toCollectionNode(detail, index))
+    const details = await Promise.all(list.map((item: { id: string }) => fetchCollectionDetail(item.id)))
+    collections.value = details.map((detail: CollectionDetail, index: number) => toCollectionNode(detail, index))
     initActiveSelection()
   } catch (error) {
     collections.value = []

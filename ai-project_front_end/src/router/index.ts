@@ -18,6 +18,7 @@ import AiAssistantPanel from '@/components/figma/ai-testing-platform/AiAssistant
 import RunDetail from '@/views/runs/RunDetail.vue'
 import AiTestingPlatform16_3 from '@/views/figma/AiTestingPlatform16_3.vue'
 import Environments from '@/views/settings/Environments.vue'
+import PlatformRecords from '@/views/settings/PlatformRecords.vue'
 import CollectionDetail from '@/views/collections/CollectionDetail.vue'
 import RequirementDocs from '@/views/requirements/RequirementDocs.vue'
 import RequirementDocDetail from '@/views/requirements/RequirementDocDetail.vue'
@@ -77,6 +78,7 @@ const ProjectAiAssistant = createProjectShellPage('AI 助手', AiAssistantPanel)
 const ProjectRequirementDocs = createProjectShellPage('需求文档中心', RequirementDocs)
 const ProjectRequirementDocDetail = createProjectShellPage('需求文档中心', RequirementDocDetail)
 const ProjectRequirementAnalysisDetail = createProjectShellPage('需求文档中心', RequirementAnalysisDetail)
+const ProjectPlatformRecords = createProjectShellPage('平台记录', PlatformRecords)
 
 const router = createRouter({
   history: createWebHistory(),
@@ -166,6 +168,10 @@ const router = createRouter({
     {
       path: '/projects/:projectId/settings/environments',
       component: createProjectShellPage('环境管理', Environments)
+    },
+    {
+      path: '/projects/:projectId/settings/platform-records',
+      component: ProjectPlatformRecords
     },
     {
       path: '/projects/:projectId/requirements/docs',

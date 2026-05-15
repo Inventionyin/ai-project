@@ -65,6 +65,7 @@ const resolvedActiveAssetChild = computed(() => {
   if (route.path.startsWith(`/projects/${projectId.value}/workers`)) return 'Worker 管理'
   if (route.path.startsWith(`/projects/${projectId.value}/ai-assistant`)) return 'AI 助手'
   if (route.path.startsWith(`/projects/${projectId.value}/requirements/docs`)) return '需求文档中心'
+  if (route.path.startsWith(`/projects/${projectId.value}/settings/platform-records`)) return '平台记录'
   if (route.path.startsWith('/figma/untitled-47-1415')) return '测试套件'
   if (route.path.startsWith('/figma/untitled-34-158')) return '用例管理'
   if (route.path.startsWith('/figma/untitled-9-3')) return '用例管理'
@@ -123,6 +124,7 @@ const extraLinks = computed<LinkItem[]>(() => [
 ])
 
 const settingsLinks = computed<LinkItem[]>(() => [
+  { label: '平台记录', icon: navAudit, to: `/projects/${projectId.value}/settings/platform-records` },
   { label: '环境管理', icon: navEnv, to: `/projects/${projectId.value}/settings/environments` },
   { label: '成员权限', icon: navMember, to: '/settings/rbac' },
   { label: '集成配置', icon: navIntegrations, to: '/settings/integrations' },
@@ -237,11 +239,13 @@ const settingsLinks = computed<LinkItem[]>(() => [
             :key="item.label"
             type="button"
             class="flex h-[36px] w-full items-center gap-[8px] rounded-[10px] pl-[12px]"
-            :class="isCollapsed ? 'justify-center pl-0' : ''"
+            :class="[isExtraLinkActive(item) ? 'bg-[#155DFC]' : '', isCollapsed ? 'justify-center pl-0' : '']"
             @click="navigateTo(item)"
           >
-            <img :src="item.icon" alt="" class="h-[16px] w-[16px] flex-shrink-0" />
-            <span v-if="!isCollapsed" class="text-[14px] leading-[20px] text-[rgba(10,10,10,0.7)]">{{ item.label }}</span>
+            <img :src="item.icon" alt="" class="h-[16px] w-[16px] flex-shrink-0" :class="isExtraLinkActive(item) ? 'filter brightness-0 invert' : ''" />
+            <span v-if="!isCollapsed" class="text-[14px] leading-[20px]" :class="isExtraLinkActive(item) ? 'text-white' : 'text-[rgba(10,10,10,0.7)]'">
+              {{ item.label }}
+            </span>
           </button>
         </div>
       </div>
