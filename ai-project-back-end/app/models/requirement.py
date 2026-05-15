@@ -83,6 +83,25 @@ class RequirementTestPoint(Base, TimestampMixin):
     updated_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True, index=True)
 
 
+class RequirementAnalysisRevision(Base, TimestampMixin):
+    __tablename__ = "requirement_analysis_revisions"
+    __table_args__ = (UniqueConstraint("analysis_id", "revision_no", name="uq_requirement_analysis_revisions_analysis_revision_no"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
+    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False, index=True)
+    analysis_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("requirement_analyses.id"), nullable=False, index=True)
+    doc_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("requirement_docs.id"), nullable=False, index=True)
+    doc_version_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("requirement_doc_versions.id"), nullable=False, index=True)
+    revision_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    change_reason: Mapped[str] = mapped_column(String(64), nullable=False, default="manual_update")
+    analysis_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    risk_level: Mapped[str] = mapped_column(String(16), nullable=False, default="MEDIUM")
+    coverage_score: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)
+    created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+
+
 class GeneratedCaseDraft(Base, TimestampMixin):
     __tablename__ = "generated_case_drafts"
 
@@ -129,4 +148,59 @@ class RequirementCaseLink(Base, TimestampMixin):
     testcase_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("testcases.id"), nullable=False, index=True)
     link_type: Mapped[str] = mapped_column(String(32), nullable=False, default="GENERATED_FROM")
     confidence: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)
+    created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+
+
+class RequirementChangeSet(Base, TimestampMixin):
+    __tablename__ = "requirement_change_sets"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
+    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False, index=True)
+    doc_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("requirement_docs.id"), nullable=False, index=True)
+    baseline_version_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("requirement_doc_versions.id"), nullable=False, index=True)
+    target_version_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("requirement_doc_versions.id"), nullable=False, index=True)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="GENERATED")
+    created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+
+
+class RequirementChangeItem(Base, TimestampMixin):
+    __tablename__ = "requirement_change_items"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
+    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False, index=True)
+    change_set_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("requirement_change_sets.id"), nullable=False, index=True)
+    change_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    impact_level: Mapped[str] = mapped_column(String(16), nullable=False, default="MEDIUM")
+    source_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+
+
+class RequirementRegressionSet(Base, TimestampMixin):
+    __tablename__ = "requirement_regression_sets"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
+    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False, index=True)
+    change_set_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("requirement_change_sets.id"), nullable=False, index=True)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="GENERATED")
+    created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+
+
+class RequirementRegressionCase(Base, TimestampMixin):
+    __tablename__ = "requirement_regression_cases"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
+    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False, index=True)
+    regression_set_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("requirement_regression_sets.id"), nullable=False, index=True)
+    testcase_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("testcases.id"), nullable=False, index=True)
+    priority: Mapped[str] = mapped_column(String(16), nullable=False, default="P2")
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_paths_json: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)

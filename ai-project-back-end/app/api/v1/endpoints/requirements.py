@@ -24,6 +24,7 @@ from app.schemas.requirement import (
     RequirementTestPointDetail,
     RequirementTestPointUpdateRequest,
 )
+from app.schemas.requirement_change import RequirementAnalysisRevisionDetail, RequirementAnalysisRollbackRequest
 from app.services.requirement import (
     bulk_approve_case_drafts,
     create_requirement_doc,
@@ -35,6 +36,7 @@ from app.services.requirement import (
     get_requirement_doc,
     get_requirement_doc_version_parsed_text,
     list_generated_case_drafts,
+    list_requirement_analysis_revisions,
     list_requirement_case_links,
     list_requirement_analyses,
     list_requirement_doc_versions,
@@ -42,6 +44,7 @@ from app.services.requirement import (
     list_requirement_test_points,
     parse_requirement_doc_version,
     sync_requirement_test_points,
+    rollback_requirement_analysis_revision,
     update_requirement_test_point,
     update_requirement_analysis,
     update_requirement_doc,
@@ -270,6 +273,42 @@ async def update_analysis(
 ) -> ApiResponse[RequirementAnalysisDetail]:
     try:
         data = await update_requirement_analysis(db, user=user, project_id=projectId, analysis_id=analysisId, payload=payload)
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    return ApiResponse(data=data, requestId=request_id)
+
+
+@router.get("/analyses/{analysisId}/revisions", response_model=ApiResponse[list[RequirementAnalysisRevisionDetail]])
+async def list_analysis_revisions(
+    projectId: uuid.UUID,
+    analysisId: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    request_id: str = Depends(get_request_id),
+) -> ApiResponse[list[RequirementAnalysisRevisionDetail]]:
+    data = await list_requirement_analysis_revisions(db, user=user, project_id=projectId, analysis_id=analysisId)
+    return ApiResponse(data=data, requestId=request_id)
+
+
+@router.post("/analyses/{analysisId}/rollback", response_model=ApiResponse[RequirementAnalysisDetail])
+async def rollback_analysis_revision(
+    projectId: uuid.UUID,
+    analysisId: uuid.UUID,
+    payload: RequirementAnalysisRollbackRequest,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    request_id: str = Depends(get_request_id),
+) -> ApiResponse[RequirementAnalysisDetail]:
+    try:
+        data = await rollback_requirement_analysis_revision(
+            db,
+            user=user,
+            project_id=projectId,
+            analysis_id=analysisId,
+            revision_id=uuid.UUID(payload.revisionId),
+        )
         await db.commit()
     except Exception:
         await db.rollback()
