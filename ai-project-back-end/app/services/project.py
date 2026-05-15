@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, time, timedelta
 
 from fastapi import HTTPException
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, exists, func, or_, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser
@@ -24,6 +24,26 @@ from app.models.testcase_binding import TestcaseBinding
 
 def _is_admin(user: CurrentUser) -> bool:
     return "Admin" in user.roles or "ADMIN" in user.roles
+
+
+def _project_read_filter(user: CurrentUser):
+    if _is_admin(user):
+        return true()
+    return or_(
+        Project.owner_id == user.id,
+        exists().where(
+            ProjectMember.project_id == Project.id,
+            ProjectMember.user_id == user.id,
+            ProjectMember.tenant_id == user.tenant_id,
+        ),
+    )
+
+
+def _readable_project_ids_stmt(user: CurrentUser):
+    return select(Project.id).where(
+        Project.tenant_id == user.tenant_id,
+        _project_read_filter(user),
+    )
 
 
 def _calculate_pass_rate(*, passed_runs: int, failed_runs: int) -> float | None:
@@ -58,7 +78,10 @@ async def list_projects(
     page_size: int,
     keyword: str | None,
 ) -> tuple[int, list[tuple[Project, int, int, float | None]]]:
-    base_stmt = select(Project).where(Project.tenant_id == user.tenant_id)
+    base_stmt = select(Project).where(
+        Project.tenant_id == user.tenant_id,
+        _project_read_filter(user),
+    )
     if keyword:
         base_stmt = base_stmt.where(Project.name.ilike(f"%{keyword}%"))
 
@@ -106,7 +129,10 @@ async def list_projects(
             passed_runs_subq.label("passed_runs"),
             failed_runs_subq.label("failed_runs"),
         )
-        .where(Project.tenant_id == user.tenant_id)
+        .where(
+            Project.tenant_id == user.tenant_id,
+            _project_read_filter(user),
+        )
         .order_by(Project.created_at.desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
@@ -133,6 +159,8 @@ async def get_project_metrics(
     user: CurrentUser,
     project_id: uuid.UUID,
 ) -> tuple[int, float | None]:
+    await get_project(db, user=user, project_id=project_id)
+
     case_count = int(
         (
             await db.execute(
@@ -180,10 +208,15 @@ async def get_project(
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
 
+    await _require_project_read(db, user=user, project=project)
+
     member_count = int(
         (
             await db.execute(
-                select(func.count(ProjectMember.id)).where(ProjectMember.project_id == project.id)
+                select(func.count(ProjectMember.id)).where(
+                    ProjectMember.project_id == project.id,
+                    ProjectMember.tenant_id == user.tenant_id,
+                )
             )
         ).scalar_one()
     )
@@ -195,17 +228,21 @@ async def get_home_stats(
     *,
     user: CurrentUser,
 ) -> tuple[int, int, int, float]:
+    readable_project_ids = _readable_project_ids_stmt(user)
     project_total = int(
         (
             await db.execute(
-                select(func.count(Project.id)).where(Project.tenant_id == user.tenant_id)
+                select(func.count()).select_from(readable_project_ids.subquery())
             )
         ).scalar_one()
     )
     testcase_total = int(
         (
             await db.execute(
-                select(func.count(TestCase.id)).where(TestCase.tenant_id == user.tenant_id)
+                select(func.count(TestCase.id)).where(
+                    TestCase.tenant_id == user.tenant_id,
+                    TestCase.project_id.in_(readable_project_ids),
+                )
             )
         ).scalar_one()
     )
@@ -218,6 +255,7 @@ async def get_home_stats(
             select(Run.status, func.count(Run.id))
             .where(
                 Run.tenant_id == user.tenant_id,
+                Run.project_id.in_(readable_project_ids),
                 Run.start_at >= day_start,
                 Run.start_at < day_end,
             )
@@ -235,6 +273,31 @@ async def get_home_stats(
     today_pass_rate = round((passed_runs / finished_runs) * 100, 1) if finished_runs > 0 else 0.0
 
     return project_total, testcase_total, today_run_total, today_pass_rate
+
+
+async def _require_project_read(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project: Project,
+) -> None:
+    if _is_admin(user):
+        return
+    if project.owner_id == user.id:
+        return
+
+    member_id = (
+        await db.execute(
+            select(ProjectMember.id).where(
+                ProjectMember.project_id == project.id,
+                ProjectMember.user_id == user.id,
+                ProjectMember.tenant_id == user.tenant_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if member_id is not None:
+        return
+    raise HTTPException(status_code=403, detail="No access to this project")
 
 
 async def _require_project_write(
