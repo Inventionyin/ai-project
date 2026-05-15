@@ -182,6 +182,14 @@ class RequirementChangeItem(Base, TimestampMixin):
 
 class RequirementRegressionSet(Base, TimestampMixin):
     __tablename__ = "requirement_regression_sets"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "project_id",
+            "change_set_id",
+            name="uq_requirement_regression_sets_tenant_project_change_set",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)

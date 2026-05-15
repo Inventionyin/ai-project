@@ -326,6 +326,31 @@ async def create_requirement_regression_set(db: AsyncSession, *, user: CurrentUs
     )
     if change_set is None:
         raise HTTPException(status_code=404, detail="Requirement change set not found")
+    existing_set = await db.scalar(
+        select(RequirementRegressionSet).where(
+            RequirementRegressionSet.change_set_id == change_set.id,
+            RequirementRegressionSet.project_id == project_id,
+            RequirementRegressionSet.tenant_id == user.tenant_id,
+        )
+    )
+    if existing_set is not None:
+        cases = (
+            await db.execute(
+                select(RequirementRegressionCase, TestCase.title)
+                .outerjoin(
+                    TestCase,
+                    (TestCase.id == RequirementRegressionCase.testcase_id)
+                    & (TestCase.tenant_id == RequirementRegressionCase.tenant_id)
+                    & (TestCase.project_id == RequirementRegressionCase.project_id),
+                )
+                .where(
+                    RequirementRegressionCase.regression_set_id == existing_set.id,
+                    RequirementRegressionCase.tenant_id == user.tenant_id,
+                )
+                .order_by(RequirementRegressionCase.created_at.asc(), RequirementRegressionCase.id.asc())
+            )
+        ).all()
+        return _to_regression_set_detail(existing_set, cases)
     change_items = (
         await db.execute(
             select(RequirementChangeItem)
@@ -346,6 +371,7 @@ async def create_requirement_regression_set(db: AsyncSession, *, user: CurrentUs
                 RequirementCaseLink.tenant_id == user.tenant_id,
                 RequirementCaseLink.project_id == project_id,
                 RequirementCaseLink.doc_id == change_set.doc_id,
+                RequirementCaseLink.doc_version_id == change_set.target_version_id,
             )
             .order_by(RequirementCaseLink.created_at.desc(), RequirementCaseLink.id.desc())
         )

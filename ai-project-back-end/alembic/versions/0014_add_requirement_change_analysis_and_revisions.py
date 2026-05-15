@@ -122,6 +122,12 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["project_id"], ["projects.id"]),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"]),
         sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint(
+            "tenant_id",
+            "project_id",
+            "change_set_id",
+            name="uq_requirement_regression_sets_tenant_project_change_set",
+        ),
     )
     op.create_index(op.f("ix_requirement_regression_sets_change_set_id"), "requirement_regression_sets", ["change_set_id"], unique=False)
     op.create_index(op.f("ix_requirement_regression_sets_created_by"), "requirement_regression_sets", ["created_by"], unique=False)
