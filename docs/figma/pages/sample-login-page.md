@@ -13,7 +13,7 @@
 ## 页面固定字段（P0）
 
 - header:
-  - text: AI 测试平台
+  - text: WeiTesting
 - subtitle:
   - text: 智能化测试资产管理与执行编排
 - tabs:

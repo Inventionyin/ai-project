@@ -140,7 +140,7 @@ const settingsLinks = computed<LinkItem[]>(() => [
       </div>
 
       <div v-if="!isCollapsed" class="flex flex-col">
-        <div class="text-[14px] font-semibold leading-[1.25] text-[#0A0A0A]">AI 测试平台</div>
+        <div class="text-[14px] font-semibold leading-[1.25] text-[#0A0A0A]">WeiTesting</div>
         <div class="text-[12px] leading-[16px] text-[rgba(10,10,10,0.5)]">v1.0.0</div>
       </div>
     </div>
