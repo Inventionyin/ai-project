@@ -10,7 +10,7 @@ import workersSlots from '@/assets/figma/ai-testing-platform-workers/workers-slo
 
 type WorkerStatus = '在线' | '离线'
 
-type WorkerCardData = {
+export type WorkerCardData = {
   name: string
   status: WorkerStatus
   version: string
