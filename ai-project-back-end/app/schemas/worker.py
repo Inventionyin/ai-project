@@ -4,8 +4,10 @@ from typing import Literal
 
 from pydantic import Field, field_serializer
 
+from app.models.enums import WorkerStatus
 from app.models.enums import JobStatus, TestCaseType
 from app.schemas.common import BaseSchema
+from app.schemas.common import PageData
 from app.schemas.run import CaseRunResult
 from app.schemas.types import IdStr, NameStr, UrlStr, VersionStr
 
@@ -101,3 +103,22 @@ class WorkerReportRequest(BaseSchema):
     runId: IdStr
     results: list[CaseRunResult] = Field(min_length=1, max_length=10_000)
     jobStatus: JobStatus
+
+
+class WorkerAdminListItem(BaseSchema):
+    id: IdStr
+    name: NameStr
+    status: WorkerStatus
+    slots: int = Field(ge=1, le=256)
+    capabilities: list[WorkerCapability] = Field(default_factory=list, max_length=16)
+    lastSeenAt: int | None = None
+    version: VersionStr | None = None
+    updatedAt: int
+
+
+class WorkerAdminDetailData(WorkerAdminListItem):
+    pass
+
+
+class WorkerAdminListData(PageData[WorkerAdminListItem]):
+    pass

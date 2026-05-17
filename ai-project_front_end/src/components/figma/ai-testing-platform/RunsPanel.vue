@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, inject, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import filterSearch from '@/assets/figma/ai-testing-platform/filter-search.svg'
 import headerPlus from '@/assets/figma/ai-testing-platform/header-plus.svg'
 import runsFilter from '@/assets/figma/ai-testing-platform/runs-filter.svg'
@@ -11,6 +11,7 @@ import { fetchProjectEnvironments, fetchRuns, fetchSuitesLite, type RunDetailDat
 const openCreateRun = inject<() => void>('aiTestingPlatformOpenCreateRun', () => {})
 
 const route = useRoute()
+const router = useRouter()
 const projectId = computed(() => String(route.params.projectId || '').trim())
 
 const totalRuns = ref(0)
@@ -145,6 +146,13 @@ function refreshRuns() {
   void loadRuns()
 }
 
+function openRun(runId: string) {
+  const rid = String(runId || '').trim()
+  const pid = projectId.value
+  if (!rid || !pid) return
+  void router.push(`/projects/${encodeURIComponent(pid)}/runs/${encodeURIComponent(rid)}`)
+}
+
 function toggleStatus(status: RunDetailData['status']) {
   statusFilter.value = statusFilter.value === status ? '' : status
 }
@@ -226,7 +234,7 @@ watch(
       </div>
 
       <section class="w-full overflow-hidden rounded-[14px] border border-black/10 bg-white">
-        <RunsTable :rows="filteredRows" />
+        <RunsTable :rows="filteredRows" @open-run="openRun" />
       </section>
     </div>
   </div>

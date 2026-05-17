@@ -17,10 +17,10 @@ import navRunHistory from '@/assets/figma/ai-testing-platform/nav-run-history.sv
 import navWorker from '@/assets/figma/ai-testing-platform/nav-worker.svg'
 import navReports from '@/assets/figma/ai-testing-platform/nav-reports.svg'
 import navAiAssistant from '@/assets/figma/ai-testing-platform/nav-ai-assistant.svg'
+import navAudit from '@/assets/figma/ai-testing-platform/nav-audit.svg'
 import navEnv from '@/assets/figma/ai-testing-platform/nav-env.svg'
 import navMember from '@/assets/figma/ai-testing-platform/nav-member.svg'
 import navIntegrations from '@/assets/figma/ai-testing-platform/nav-integrations.svg'
-import navAudit from '@/assets/figma/ai-testing-platform/nav-audit.svg'
 
 type LinkItem = {
   label: string
@@ -64,6 +64,7 @@ const resolvedActiveAssetChild = computed(() => {
   if (route.path.startsWith(`/projects/${projectId.value}/runs`)) return '运行记录'
   if (route.path.startsWith(`/projects/${projectId.value}/workers`)) return 'Worker 管理'
   if (route.path.startsWith(`/projects/${projectId.value}/ai-assistant`)) return 'AI 助手'
+  if (route.path.startsWith(`/projects/${projectId.value}/requirements/docs`)) return '需求文档中心'
   if (route.path.startsWith('/figma/untitled-47-1415')) return '测试套件'
   if (route.path.startsWith('/figma/untitled-34-158')) return '用例管理'
   if (route.path.startsWith('/figma/untitled-9-3')) return '用例管理'
@@ -117,6 +118,7 @@ const groups = computed<GroupItem[]>(() => [
 const extraLinks = computed<LinkItem[]>(() => [
   { label: '报告中心', icon: navReports, to: `/projects/${projectId.value}/reports` },
   { label: 'Allure报告', icon: navReports, to: `/projects/${projectId.value}/reports/allure` },
+  { label: '需求文档中心', icon: navAudit, to: `/projects/${projectId.value}/requirements/docs` },
   { label: 'AI 助手', icon: navAiAssistant, to: `/projects/${projectId.value}/ai-assistant` }
 ])
 

@@ -64,45 +64,20 @@ export type RunMetrics = {
   skipped: number
 }
 
-export type CollectionListItem = {
-  id: string
-  projectId: string
-  name: string
-  requestCount: number
-  updatedAt: number
-}
+export type {
+  CollectionListItem,
+  CollectionRequest,
+  CollectionGroup,
+  CollectionDetail
+} from '@/lib/api/collections'
 
-export type CollectionRequest = {
-  id: string
-  collectionId: string
-  groupId?: string | null
-  name: string
-  method: string
-  url: string
-  headers?: Record<string, unknown>
-  auth?: Record<string, unknown>
-  body?: Record<string, unknown>
-  asserts?: Record<string, unknown>
-  updatedAt?: number
-}
-
-export type CollectionGroup = {
-  id: string
-  collectionId: string
-  name: string
-  order: number
-  requests: CollectionRequest[]
-}
-
-export type CollectionDetail = {
-  id: string
-  projectId: string
-  name: string
-  variables?: Record<string, unknown>
-  groups: CollectionGroup[]
-  requests: CollectionRequest[]
-  updatedAt?: number
-}
+export {
+  fetchCollections,
+  fetchCollectionDetail,
+  createCollection,
+  createCollectionGroup,
+  createCollectionRequest
+} from '@/lib/api/collections'
 
 export type TestcaseBinding = {
   id: string
@@ -409,34 +384,6 @@ export async function importTestcases(payload: { projectId: string; file: File; 
   })
 }
 
-export async function fetchCollections(projectId: string, page = 1, pageSize = 200) {
-  const pid = String(projectId || '').trim()
-  if (!pid) return []
-  const query = new URLSearchParams({
-    projectId: pid,
-    page: String(page),
-    pageSize: String(pageSize)
-  })
-  const data = await requestJson<CollectionListItem[] | { items?: CollectionListItem[] }>(`/api/collections?${query.toString()}`, {
-    method: 'GET',
-    headers: {
-      Authorization: resolveAuthHeader()
-    }
-  })
-  if (Array.isArray(data)) return data
-  return Array.isArray(data?.items) ? data.items : []
-}
-
-export async function fetchCollectionDetail(collectionId: string) {
-  const id = String(collectionId || '').trim()
-  if (!id) throw new Error('集合 ID 不能为空')
-  return requestJson<CollectionDetail>(`/api/collections/${encodeURIComponent(id)}`, {
-    method: 'GET',
-    headers: {
-      Authorization: resolveAuthHeader()
-    }
-  })
-}
 
 export type DocIngestApiCandidate = {
   id: string
@@ -591,54 +538,6 @@ export async function executeK6(scriptText: string, vus?: number, duration?: str
   })
 }
 
-export async function createCollection(payload: { projectId: string; name: string; variables?: Record<string, unknown> }) {
-  return requestJson<CollectionDetail>('/api/collections', {
-    method: 'POST',
-    headers: {
-      Authorization: resolveAuthHeader(),
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(payload)
-  })
-}
-
-export async function createCollectionGroup(collectionId: string, payload: { name: string }) {
-  const id = String(collectionId || '').trim()
-  if (!id) throw new Error('集合 ID 不能为空')
-  return requestJson<{ id: string; collectionId: string; name: string; order: number }>(`/api/collections/${encodeURIComponent(id)}/groups`, {
-    method: 'POST',
-    headers: {
-      Authorization: resolveAuthHeader(),
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(payload)
-  })
-}
-
-export async function createCollectionRequest(
-  collectionId: string,
-  payload: {
-    groupId?: string | null
-    name: string
-    method: string
-    url: string
-    headers?: Record<string, unknown>
-    auth?: Record<string, unknown>
-    body?: Record<string, unknown>
-    asserts?: Record<string, unknown>
-  }
-) {
-  const id = String(collectionId || '').trim()
-  if (!id) throw new Error('集合 ID 不能为空')
-  return requestJson<CollectionRequest>(`/api/collections/${encodeURIComponent(id)}/requests`, {
-    method: 'POST',
-    headers: {
-      Authorization: resolveAuthHeader(),
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(payload)
-  })
-}
 
 export async function fetchProjectEnvironments(projectId: string) {
   const pid = String(projectId || '').trim()
@@ -933,6 +832,17 @@ export async function fetchRunCaseRuns(runId: string) {
     }
   })
   return normalizeCaseRuns(data)
+}
+
+export async function fetchRunDetail(runId: string) {
+  const id = String(runId || '').trim()
+  if (!id) throw new Error('runId 不能为空')
+  return requestJson<RunDetailData>(`/api/runs/${encodeURIComponent(id)}`, {
+    method: 'GET',
+    headers: {
+      Authorization: resolveAuthHeader()
+    }
+  })
 }
 
 export async function fetchProjectAllureReports(projectId: string, page = 1, pageSize = 50) {
