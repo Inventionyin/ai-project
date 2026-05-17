@@ -46,12 +46,15 @@ type CollectionNode = {
   folders: FolderNode[]
 }
 
+const emit = defineEmits<{ selectEndpoint: [collectionId: string, requestId: string] }>()
+
 const route = useRoute()
 const router = useRouter()
 const collectionIcons = [apiCollection, apiCollection2, apiCollection3]
 const collections = ref<CollectionNode[]>([])
 const activeCollectionId = ref('')
 const activeEndpointId = ref('')
+const searchQuery = ref('')
 const loading = ref(false)
 const loadError = ref('')
 const actionError = ref('')
@@ -120,6 +123,18 @@ function toCollectionNode(detail: CollectionDetail, index: number): CollectionNo
     folders
   }
 }
+
+const filteredCollections = computed(() => {
+  const q = searchQuery.value.trim().toLowerCase()
+  if (!q) return collections.value
+  return collections.value.map(col => ({
+    ...col,
+    folders: col.folders.map(folder => ({
+      ...folder,
+      endpoints: folder.endpoints.filter(ep => ep.name.toLowerCase().includes(q) || ep.method.toLowerCase().includes(q))
+    })).filter(folder => folder.endpoints.length > 0)
+  })).filter(col => col.folders.length > 0 || col.name.toLowerCase().includes(q))
+})
 
 function initActiveSelection() {
   const firstCollection = collections.value[0]
@@ -208,6 +223,7 @@ function toggleFolder(collection: CollectionNode, folder: FolderNode) {
 function selectEndpoint(collection: CollectionNode, endpoint: ApiEndpoint) {
   activeCollectionId.value = collection.id
   activeEndpointId.value = endpoint.id
+  emit('selectEndpoint', collection.id, endpoint.id)
   if (!projectId.value) return
   void router.push(`/projects/${projectId.value}/assets/apis/${collection.id}?requestId=${encodeURIComponent(endpoint.id)}`)
 }
@@ -422,15 +438,20 @@ watch(projectId, () => {
 
         <div class="relative h-[28px] w-full rounded-[10px] border border-black/10 bg-white pl-[28px] pr-[8px]">
           <img :src="apiSearch" alt="" class="absolute left-[10px] top-[8px] h-[12px] w-[12px]" />
-          <div class="flex h-full items-center text-[12px] leading-[16px] text-[#0A0A0A]">搜索接口...</div>
+          <input
+            v-model="searchQuery"
+            type="text"
+            placeholder="搜索接口..."
+            class="flex h-full w-full items-center bg-transparent text-[12px] leading-[16px] text-[#0A0A0A] outline-none"
+          />
         </div>
       </div>
 
       <div class="flex min-h-0 flex-1 flex-col gap-[2px] overflow-auto px-[8px] pt-[12px]">
         <div v-if="loading" class="px-[8px] py-[6px] text-[12px] leading-[16px] text-[#717182]">正在加载接口集合...</div>
         <div v-else-if="loadError" class="px-[8px] py-[6px] text-[12px] leading-[16px] text-[#E7000B]">{{ loadError }}</div>
-        <div v-else-if="collections.length === 0" class="px-[8px] py-[6px] text-[12px] leading-[16px] text-[#717182]">暂无接口集合</div>
-        <div v-for="collection in collections" :key="collection.id" class="flex flex-col gap-[2px]">
+        <div v-else-if="filteredCollections.length === 0" class="px-[8px] py-[6px] text-[12px] leading-[16px] text-[#717182]">{{ searchQuery ? '无匹配接口' : '暂无接口集合' }}</div>
+        <div v-for="collection in filteredCollections" :key="collection.id" class="flex flex-col gap-[2px]">
           <button
             type="button"
             class="flex h-[28px] w-full items-center gap-[8px] rounded-[10px] px-[8px]"

@@ -65,6 +65,8 @@ const resolvedActiveAssetChild = computed(() => {
   if (route.path.startsWith(`/projects/${projectId.value}/workers`)) return 'Worker 管理'
   if (route.path.startsWith(`/projects/${projectId.value}/ai-assistant`)) return 'AI 助手'
   if (route.path.startsWith(`/projects/${projectId.value}/requirements/docs`)) return '需求文档中心'
+  if (route.path.startsWith(`/projects/${projectId.value}/defects`)) return '缺陷管理'
+  if (route.path.startsWith(`/projects/${projectId.value}/knowledge`)) return '知识中心'
   if (route.path.startsWith(`/projects/${projectId.value}/settings/platform-records`)) return '平台记录'
   if (route.path.startsWith(`/projects/${projectId.value}/settings/integrations`)) return '集成配置'
   if (route.path.startsWith(`/projects/${projectId.value}/settings/doc-parse-jobs`)) return '文档解析任务'
@@ -128,6 +130,8 @@ const extraLinks = computed<LinkItem[]>(() => [
   { label: '报告中心', icon: navReports, to: `/projects/${projectId.value}/reports` },
   { label: 'Allure报告', icon: navReports, to: `/projects/${projectId.value}/reports/allure` },
   { label: '需求文档中心', icon: navAudit, to: `/projects/${projectId.value}/requirements/docs` },
+  { label: '缺陷管理', icon: navAudit, to: `/projects/${projectId.value}/defects` },
+  { label: '知识中心', icon: navAudit, to: `/projects/${projectId.value}/knowledge/retrospectives` },
   { label: 'AI 助手', icon: navAiAssistant, to: `/projects/${projectId.value}/ai-assistant` }
 ])
 

@@ -1044,11 +1044,46 @@ async def run_request_quick(
     )
 
     ok = result.error is None and (result.status is not None and 200 <= result.status < 400)
-    expected_status = None
     if isinstance(req.asserts_json, dict):
+        # statusCode assertion
         expected_status = req.asserts_json.get("statusCode")
         if isinstance(expected_status, int) and result.status is not None:
             ok = ok and result.status == expected_status
+
+        # Response time assertion
+        max_ms = req.asserts_json.get("timeoutMs") or req.asserts_json.get("maxResponseTimeMs")
+        if isinstance(max_ms, (int, float)) and result.elapsed_ms is not None:
+            ok = ok and result.elapsed_ms <= max_ms
+
+        # JSONPath assertions (simple dot-path traversal)
+        jsonpath_rules = req.asserts_json.get("jsonpath")
+        if isinstance(jsonpath_rules, list) and result.body:
+            try:
+                body_obj = json.loads(result.body) if isinstance(result.body, str) else result.body
+                for rule in jsonpath_rules:
+                    if not isinstance(rule, dict):
+                        continue
+                    path = str(rule.get("path", ""))
+                    expected = rule.get("value")
+                    node = body_obj
+                    for part in path.lstrip("$.").split("."):
+                        if not part:
+                            continue
+                        if isinstance(node, dict):
+                            node = node.get(part)
+                        elif isinstance(node, list):
+                            try:
+                                node = node[int(part)]
+                            except (ValueError, IndexError):
+                                node = None
+                                break
+                        else:
+                            node = None
+                            break
+                    if expected is not None:
+                        ok = ok and (node == expected)
+            except (json.JSONDecodeError, AttributeError, TypeError):
+                pass
 
     response_data = {
         "collectionId": str(collection.id),
