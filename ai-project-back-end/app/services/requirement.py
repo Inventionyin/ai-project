@@ -42,7 +42,7 @@ from app.schemas.requirement import (
 )
 from app.services.doc_ingest.parse_with_docling import parse_document
 from app.services.llm.provider import get_provider
-from app.services.platform_record import create_ai_job_record
+from app.services.platform_record import create_ai_job_record, create_audit_log
 
 
 def _is_admin(user: CurrentUser) -> bool:
@@ -84,6 +84,30 @@ async def _require_project_write(db: AsyncSession, *, user: CurrentUser, project
     if role in (ProjectRole.ADMIN, ProjectRole.OWNER, ProjectRole.EDITOR):
         return
     raise HTTPException(status_code=403, detail="Only Owner/Editor can modify this project")
+
+
+async def _create_requirement_audit(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+    action: str,
+    resource_type: str,
+    resource_id: str,
+    summary: str,
+    detail: dict | None = None,
+) -> None:
+    await create_audit_log(
+        db,
+        user=user,
+        project_id=project_id,
+        module="REQUIREMENT",
+        action=action,
+        resource_type=resource_type,
+        resource_id=resource_id,
+        summary=summary,
+        detail=detail or {},
+    )
 
 
 def _to_doc_detail(doc: RequirementDoc) -> RequirementDocDetail:
@@ -330,6 +354,22 @@ async def create_requirement_doc(db: AsyncSession, *, user: CurrentUser, project
     )
     db.add(doc)
     await db.flush()
+    await _create_requirement_audit(
+        db,
+        user=user,
+        project_id=project_id,
+        action="CREATE_DOC",
+        resource_type="requirement_doc",
+        resource_id=str(doc.id),
+        summary=f"创建需求文档：{doc.title}",
+        detail={
+            "title": doc.title,
+            "sourceType": doc.source_type,
+            "status": doc.status,
+            "tags": list(doc.tags_json or []),
+            "ownerId": str(doc.owner_id) if doc.owner_id else None,
+        },
+    )
     return _to_doc_detail(doc)
 
 
@@ -348,17 +388,33 @@ async def update_requirement_doc(db: AsyncSession, *, user: CurrentUser, project
     doc = await db.scalar(select(RequirementDoc).where(RequirementDoc.id == doc_id, RequirementDoc.project_id == project_id, RequirementDoc.tenant_id == user.tenant_id))
     if doc is None:
         raise HTTPException(status_code=404, detail="Requirement doc not found")
+    changed_fields: list[str] = []
     if payload.title is not None:
         doc.title = payload.title
+        changed_fields.append("title")
     if payload.sourceType is not None:
         doc.source_type = normalize_doc_source_type(payload.sourceType)
+        changed_fields.append("sourceType")
     if payload.status is not None:
         doc.status = normalize_doc_status(payload.status)
+        changed_fields.append("status")
     if payload.tags is not None:
         doc.tags_json = payload.tags
+        changed_fields.append("tags")
     if payload.ownerId is not None:
         doc.owner_id = uuid.UUID(payload.ownerId)
+        changed_fields.append("ownerId")
     await db.flush()
+    await _create_requirement_audit(
+        db,
+        user=user,
+        project_id=project_id,
+        action="UPDATE_DOC",
+        resource_type="requirement_doc",
+        resource_id=str(doc.id),
+        summary=f"更新需求文档：{doc.title}",
+        detail={"changedFields": changed_fields, "status": doc.status},
+    )
     return _to_doc_detail(doc)
 
 
@@ -368,6 +424,16 @@ async def delete_requirement_doc(db: AsyncSession, *, user: CurrentUser, project
     doc = await db.scalar(select(RequirementDoc).where(RequirementDoc.id == doc_id, RequirementDoc.project_id == project_id, RequirementDoc.tenant_id == user.tenant_id))
     if doc is None:
         raise HTTPException(status_code=404, detail="Requirement doc not found")
+    await _create_requirement_audit(
+        db,
+        user=user,
+        project_id=project_id,
+        action="DELETE_DOC",
+        resource_type="requirement_doc",
+        resource_id=str(doc.id),
+        summary=f"删除需求文档：{doc.title}",
+        detail={"title": doc.title, "status": doc.status},
+    )
     await db.delete(doc)
     await db.flush()
 
@@ -429,6 +495,22 @@ async def create_requirement_doc_version(db: AsyncSession, *, user: CurrentUser,
     )
     db.add(row)
     await db.flush()
+    await _create_requirement_audit(
+        db,
+        user=user,
+        project_id=project_id,
+        action="UPLOAD_VERSION",
+        resource_type="requirement_doc_version",
+        resource_id=str(row.id),
+        summary=f"上传需求文档版本：{file_name}",
+        detail={
+            "docId": str(doc_id),
+            "version": row.version,
+            "fileName": row.file_name,
+            "fileType": row.file_type,
+            "contentHash": row.content_hash,
+        },
+    )
     return _to_version_detail(row)
 
 
@@ -450,6 +532,16 @@ async def parse_requirement_doc_version(db: AsyncSession, *, user: CurrentUser, 
     version.parsed_text_url = str(txt_path).replace("\\", "/")
     version.parsed_text_preview = text[:1000]
     await db.flush()
+    await _create_requirement_audit(
+        db,
+        user=user,
+        project_id=project_id,
+        action="PARSE_VERSION",
+        resource_type="requirement_doc_version",
+        resource_id=str(version.id),
+        summary=f"解析需求文档版本：{version.file_name}",
+        detail={"docId": str(doc_id), "version": version.version, "textLength": len(text)},
+    )
     return {"status": "ok"}
 
 
@@ -559,6 +651,16 @@ async def generate_requirement_analysis(db: AsyncSession, *, user: CurrentUser, 
     db.add(row)
     await db.flush()
     await _create_analysis_revision(db, user=user, analysis=row, change_reason="generated")
+    await _create_requirement_audit(
+        db,
+        user=user,
+        project_id=project_id,
+        action="GENERATE_ANALYSIS",
+        resource_type="requirement_analysis",
+        resource_id=str(row.id),
+        summary=f"生成需求分析：{doc.title} v{version.version}",
+        detail={"docId": str(doc_id), "docVersionId": str(version_id), "aiTaskId": str(ai_job.id)},
+    )
     return _to_analysis_detail(row)
 
 
@@ -620,6 +722,16 @@ async def update_requirement_analysis(db: AsyncSession, *, user: CurrentUser, pr
     row.updated_by = user.id
     await db.flush()
     await _create_analysis_revision(db, user=user, analysis=row, change_reason="manual_update")
+    await _create_requirement_audit(
+        db,
+        user=user,
+        project_id=project_id,
+        action="UPDATE_ANALYSIS",
+        resource_type="requirement_analysis",
+        resource_id=str(row.id),
+        summary="人工更新需求分析",
+        detail={"status": row.status, "riskLevel": row.risk_level, "coverageScore": float(row.coverage_score) if row.coverage_score is not None else None},
+    )
     return _to_analysis_detail(row)
 
 
@@ -689,6 +801,16 @@ async def rollback_requirement_analysis_revision(
         user=user,
         analysis=analysis,
         change_reason=f"rollback_to_{revision.revision_no}",
+    )
+    await _create_requirement_audit(
+        db,
+        user=user,
+        project_id=project_id,
+        action="ROLLBACK_ANALYSIS",
+        resource_type="requirement_analysis",
+        resource_id=str(analysis.id),
+        summary=f"回滚需求分析到修订 {revision.revision_no}",
+        detail={"revisionId": str(revision.id), "revisionNo": revision.revision_no},
     )
     return _to_analysis_detail(analysis)
 
@@ -816,7 +938,18 @@ async def sync_requirement_test_points(db: AsyncSession, *, user: CurrentUser, p
         )
     await db.flush()
     rows = (await db.execute(select(RequirementTestPoint).where(RequirementTestPoint.analysis_id == analysis_id, RequirementTestPoint.project_id == project_id, RequirementTestPoint.tenant_id == user.tenant_id).order_by(RequirementTestPoint.created_at.asc()))).scalars().all()
-    return [_to_test_point_detail(x) for x in rows]
+    details = [_to_test_point_detail(x) for x in rows]
+    await _create_requirement_audit(
+        db,
+        user=user,
+        project_id=project_id,
+        action="SYNC_TEST_POINTS",
+        resource_type="requirement_analysis",
+        resource_id=str(analysis_id),
+        summary=f"同步需求测试点：{len(details)} 条",
+        detail={"testPointCount": len(details)},
+    )
+    return details
 
 
 async def list_requirement_test_points(db: AsyncSession, *, user: CurrentUser, project_id: uuid.UUID, analysis_id: uuid.UUID) -> list[RequirementTestPointDetail]:
@@ -848,6 +981,16 @@ async def update_requirement_test_point(db: AsyncSession, *, user: CurrentUser, 
         row.ai_meta_json = payload.aiMeta
     row.updated_by = user.id
     await db.flush()
+    await _create_requirement_audit(
+        db,
+        user=user,
+        project_id=project_id,
+        action="UPDATE_TEST_POINT",
+        resource_type="requirement_test_point",
+        resource_id=str(row.id),
+        summary=f"更新需求测试点：{row.title}",
+        detail={"analysisId": str(row.analysis_id), "status": row.status, "priority": row.priority, "riskLevel": row.risk_level},
+    )
     return _to_test_point_detail(row)
 
 
@@ -902,7 +1045,18 @@ async def generate_case_drafts_from_analysis(db: AsyncSession, *, user: CurrentU
         )
     await db.flush()
     rows = (await db.execute(select(GeneratedCaseDraft).where(GeneratedCaseDraft.analysis_id == analysis_id, GeneratedCaseDraft.project_id == project_id, GeneratedCaseDraft.tenant_id == user.tenant_id).order_by(GeneratedCaseDraft.created_at.asc()))).scalars().all()
-    return [_to_case_draft_detail(x) for x in rows]
+    details = [_to_case_draft_detail(x) for x in rows]
+    await _create_requirement_audit(
+        db,
+        user=user,
+        project_id=project_id,
+        action="GENERATE_CASE_DRAFTS",
+        resource_type="requirement_analysis",
+        resource_id=str(analysis_id),
+        summary=f"生成用例草稿：{len(details)} 条",
+        detail={"caseDraftCount": len(details), "mode": mode, "forceRegenerate": payload.forceRegenerate},
+    )
+    return details
 
 
 async def list_generated_case_drafts(db: AsyncSession, *, user: CurrentUser, project_id: uuid.UUID, analysis_id: uuid.UUID) -> list[GeneratedCaseDraftDetail]:
@@ -1018,6 +1172,22 @@ async def bulk_approve_case_drafts(db: AsyncSession, *, user: CurrentUser, proje
         approved_count += 1
         created_ids.append(str(tc.id))
     await db.flush()
+    if approved_count > 0:
+        await _create_requirement_audit(
+            db,
+            user=user,
+            project_id=project_id,
+            action="BULK_APPROVE_CASE_DRAFTS",
+            resource_type="generated_case_draft",
+            resource_id=",".join(payload.draftIds),
+            summary=f"批量审核用例草稿：入库 {approved_count} 条",
+            detail={
+                "draftIds": list(payload.draftIds),
+                "approvedDraftCount": approved_count,
+                "createdTestCaseCount": len(created_ids),
+                "testCaseIds": created_ids,
+            },
+        )
     return BulkApproveCaseDraftsResult(
         approvedDraftCount=approved_count,
         createdTestCaseCount=len(created_ids),

@@ -102,6 +102,15 @@ export async function generateRequirementRegressionSet(projectId: string, change
   )
 }
 
+export async function fetchRequirementRegressionSetByChangeSet(projectId: string, changeSetId: string) {
+  const pid = requireId(projectId, '项目 ID 不能为空')
+  const cid = requireId(changeSetId, '变更分析 ID 不能为空')
+  return requestJson<RequirementRegressionSetDetail | null>(
+    `/projects/${encodeURIComponent(pid)}/requirements/change-sets/${encodeURIComponent(cid)}/regression-set`,
+    { method: 'GET', headers: authHeader() }
+  )
+}
+
 export async function fetchRequirementRegressionSet(projectId: string, regressionSetId: string) {
   const pid = requireId(projectId, '项目 ID 不能为空')
   const rid = requireId(regressionSetId, '回归集 ID 不能为空')

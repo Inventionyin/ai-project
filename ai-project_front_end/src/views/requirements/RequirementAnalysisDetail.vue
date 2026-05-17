@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import RiskMatrix from '@/components/RiskMatrix.vue'
 import {
   bulkApproveRequirementCaseDrafts,
   fetchRequirementAnalysis,
@@ -80,6 +81,23 @@ function normalizeAnalysisPayload(raw: Record<string, unknown>): RequirementAnal
     coverageSuggestions: list(raw.coverageSuggestions)
   }
 }
+
+const riskItems = computed(() => {
+  try {
+    const parsed = JSON.parse(analysisText.value || '{}') as Record<string, unknown>
+    const raw = parsed.riskPoints
+    if (!Array.isArray(raw)) return []
+    return raw.map((r: Record<string, unknown>, i: number) => ({
+      id: String(r.id || i),
+      title: String(r.title || r.name || ''),
+      description: String(r.description || ''),
+      level: String(r.level || r.riskLevel || r.impactLevel || 'MEDIUM'),
+      probability: String(r.probability || r.likelihood || 'MEDIUM')
+    }))
+  } catch {
+    return []
+  }
+})
 
 const filteredTestPoints = computed(() => {
   if (testPointFilter.value === 'ALL') return testPoints.value
@@ -414,6 +432,10 @@ watch(
             class="min-h-[640px] w-full resize-y rounded-[8px] border border-black/10 bg-[#0B1220] p-4 font-mono text-[12px] leading-5 text-[#D7E3F4] outline-none"
           />
         </div>
+      </section>
+
+      <section class="rounded-[12px] border border-black/10 bg-white">
+        <RiskMatrix :risks="riskItems" />
       </section>
 
       <section class="rounded-[12px] border border-black/10 bg-white xl:col-span-2">

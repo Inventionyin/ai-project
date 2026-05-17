@@ -2,6 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from pydantic import Field
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -40,6 +41,26 @@ class Settings(BaseSettings):
     llm_base_url: str = "https://api.deepseek.com"
     llm_model: str = "deepseek-chat"
     llm_timeout_seconds: float = 60.0
+    notification_outbox_consumer_enabled: bool = True
+    notification_outbox_poll_interval_seconds: float = 2.0
+    notification_outbox_batch_size: int = 20
+    notification_outbox_retry_base_seconds: int = 5
+
+    @field_validator("debug", mode="before")
+    @classmethod
+    def parse_debug(cls, value):
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, int):
+            return value != 0
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"1", "true", "t", "yes", "y", "on", "debug", "dev", "local"}:
+                return True
+            if normalized in {"0", "false", "f", "no", "n", "off", "release", "prod", "production"}:
+                return False
+            return False
+        return False
 
 
 @lru_cache

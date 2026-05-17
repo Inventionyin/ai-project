@@ -29,6 +29,7 @@ from app.schemas.worker import (
     WorkerRegisterRequest,
 )
 from app.services.environment import get_secret_keys
+from app.services.integration_delivery import dispatch_run_terminal_notification
 
 _WORKER_CAPABILITIES = {"API", "UI", "PERF"}
 _TERMINAL_CASE_STATUS = {CaseRunStatus.PASSED, CaseRunStatus.FAILED, CaseRunStatus.SKIPPED}
@@ -536,5 +537,10 @@ async def report_job_result(
         )
         run.status = RunStatus.FAILED if failed_count > 0 else RunStatus.PASSED
         run.end_at = now
+    if run.status in (RunStatus.PASSED, RunStatus.FAILED, RunStatus.CANCELED):
+        try:
+            await dispatch_run_terminal_notification(db, run=run)
+        except Exception:
+            pass
 
     await db.flush()

@@ -49,6 +49,52 @@ class RunFromTestcasesHttpRequest(BaseSchema):
     notifyRuleId: IdStr | None = None
 
 
+class ProjectCiTokenManageRequest(BaseSchema):
+    projectId: IdStr
+
+
+class ProjectCiTokenPolicyData(BaseSchema):
+    allowedRunnerTypes: list[str] = Field(default_factory=list, max_length=20)
+    allowedTestCaseIds: list[IdStr] = Field(default_factory=list, max_length=10_000)
+    maxTestCaseCount: int | None = Field(default=None, ge=1, le=10_000)
+
+
+class ProjectCiTokenRotateRequest(ProjectCiTokenManageRequest):
+    policy: ProjectCiTokenPolicyData | None = None
+
+
+class ProjectCiTokenPolicyUpdateRequest(ProjectCiTokenManageRequest):
+    policy: ProjectCiTokenPolicyData
+
+
+class ProjectCiTokenRotateData(BaseSchema):
+    projectId: IdStr
+    token: str
+    hint: str
+    rotatedAt: UnixTs
+    policy: ProjectCiTokenPolicyData = Field(default_factory=ProjectCiTokenPolicyData)
+
+
+class ProjectCiTokenStatusData(BaseSchema):
+    projectId: IdStr
+    enabled: bool
+    hint: str | None = None
+    rotatedAt: UnixTs | None = None
+    lastUsedAt: UnixTs | None = None
+    rotatedBy: IdStr | None = None
+    policy: ProjectCiTokenPolicyData = Field(default_factory=ProjectCiTokenPolicyData)
+
+
+class RunCiTriggerRequest(BaseSchema):
+    projectId: IdStr
+    envId: IdStr | None = None
+    meta: dict[str, object] = Field(default_factory=dict)
+    concurrency: int = Field(default=10, ge=1, le=100)
+    stopOnFailure: bool = False
+    items: list[RunFromTestcasesHttpItem] = Field(min_length=1, max_length=10_000)
+    notifyRuleId: IdStr | None = None
+
+
 class RunProgress(BaseSchema):
     done: int = Field(ge=0)
     total: int = Field(ge=0)

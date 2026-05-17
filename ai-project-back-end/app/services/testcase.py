@@ -17,6 +17,7 @@ from app.models.testcase import TestCase, TestCaseVersion
 from app.models.testcase_binding import TestcaseBinding
 from app.models.user import User
 from app.schemas.testcase import TestCaseCreateRequest, TestCasePutRequest
+from app.services.platform_record import create_audit_log
 
 
 def _is_admin(user: CurrentUser) -> bool:
@@ -44,6 +45,30 @@ def _parse_version_minor(version: str) -> int:
 
 def _format_version(minor: int) -> str:
     return f"v1.{minor}"
+
+
+async def _create_testcase_audit(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+    action: str,
+    testcase: TestCase | None = None,
+    resource_id: str | None = None,
+    summary: str | None = None,
+    detail: dict | None = None,
+) -> None:
+    await create_audit_log(
+        db,
+        user=user,
+        project_id=project_id,
+        module="TESTCASE",
+        action=action,
+        resource_type="testcase",
+        resource_id=resource_id or (str(testcase.id) if testcase is not None else ""),
+        summary=summary or (testcase.title if testcase is not None else None),
+        detail=detail,
+    )
 
 
 def _normalize_optional_text(value: str | None) -> str | None:
@@ -240,6 +265,14 @@ async def create_testcase(
         created_by=user.id,
     )
     db.add(version)
+    await _create_testcase_audit(
+        db,
+        user=user,
+        project_id=project_id,
+        action="CREATE_TESTCASE",
+        testcase=testcase,
+        detail={"title": testcase.title, "type": testcase.type, "priority": testcase.priority},
+    )
     
     return testcase
 
@@ -398,6 +431,14 @@ async def update_testcase(
         created_by=user.id,
     )
     db.add(version)
+    await _create_testcase_audit(
+        db,
+        user=user,
+        project_id=testcase.project_id,
+        action="UPDATE_TESTCASE",
+        testcase=testcase,
+        detail={"title": testcase.title, "version": _format_version(testcase.version)},
+    )
     
     return testcase
 
@@ -410,6 +451,8 @@ async def delete_testcase(
 ) -> None:
     testcase = await get_testcase(db, user=user, testcase_id=testcase_id)
     await _check_project_permission(db, user, testcase.project_id, [ProjectRole.OWNER, ProjectRole.ADMIN, ProjectRole.EDITOR])
+    project_id = testcase.project_id
+    title = testcase.title
 
     case_run_ids = list(
         (
@@ -461,6 +504,15 @@ async def delete_testcase(
     )
 
     await db.delete(testcase)
+    await _create_testcase_audit(
+        db,
+        user=user,
+        project_id=project_id,
+        action="DELETE_TESTCASE",
+        resource_id=str(testcase_id),
+        summary=title,
+        detail={"title": title},
+    )
 
 
 async def list_testcases(
@@ -582,5 +634,13 @@ async def restore_testcase_version(
         created_by=user.id,
     )
     db.add(new_version)
+    await _create_testcase_audit(
+        db,
+        user=user,
+        project_id=testcase.project_id,
+        action="RESTORE_TESTCASE_VERSION",
+        testcase=testcase,
+        detail={"restoredVersion": version_num, "newVersion": _format_version(testcase.version)},
+    )
     
     return testcase

@@ -51,6 +51,28 @@ export type SuiteLite = {
   name: string
 }
 
+export type SuiteDetail = {
+  id: string
+  projectId: string
+  name: string
+  defaultEnvId?: string | null
+  config?: Record<string, unknown>
+  createdAt?: number
+  updatedAt?: number
+}
+
+export type SuiteItem = {
+  id?: string
+  suiteId?: string
+  testcaseId: string
+  orderNo: number
+  params?: Record<string, unknown>
+  testcaseTitle?: string
+  testcaseType?: string
+  testcasePriority?: string
+  testcaseStatus?: string
+}
+
 export type RunProgress = {
   done: number
   total: number
@@ -291,6 +313,25 @@ export type UiTestGenerateRunData = {
   finishedAt: number
   stdout: string
   stderr: string
+}
+
+export type CreateSuiteRunPayload = {
+  projectId: string
+  suiteId: string
+  envId: string
+  triggerType: 'MANUAL' | 'CI' | 'CRON' | 'WEBHOOK'
+  meta?: Record<string, unknown>
+  notifyRuleId?: string
+}
+
+export type ProjectTestcaseLite = {
+  id: string
+  projectId: string
+  title: string
+  name?: string
+  type?: string
+  priority?: string
+  status?: string
 }
 
 const resolveApiBaseUrl = () => {
@@ -586,6 +627,66 @@ export async function fetchSuitesLite(projectId: string, page = 1, pageSize = 20
   })
 }
 
+export async function fetchSuiteDetail(suiteId: string) {
+  const id = String(suiteId || '').trim()
+  if (!id) throw new Error('suiteId 不能为空')
+  return requestJson<SuiteDetail>(`/api/suites/${encodeURIComponent(id)}`, {
+    method: 'GET',
+    headers: {
+      Authorization: resolveAuthHeader()
+    }
+  })
+}
+
+export async function fetchSuiteItems(suiteId: string) {
+  const id = String(suiteId || '').trim()
+  if (!id) return []
+  const data = await requestJson<SuiteItem[] | { items?: SuiteItem[] }>(`/api/suites/${encodeURIComponent(id)}/items`, {
+    method: 'GET',
+    headers: {
+      Authorization: resolveAuthHeader()
+    }
+  })
+  if (Array.isArray(data)) return data
+  return Array.isArray(data?.items) ? data.items : []
+}
+
+export async function upsertSuiteItems(suiteId: string, items: SuiteItem[]) {
+  const id = String(suiteId || '').trim()
+  if (!id) throw new Error('suiteId 不能为空')
+  return requestJson<SuiteItem[]>(`/api/suites/${encodeURIComponent(id)}/items`, {
+    method: 'POST',
+    headers: {
+      Authorization: resolveAuthHeader(),
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ items: Array.isArray(items) ? items : [] })
+  })
+}
+
+export async function fetchProjectTestcasesLite(projectId: string, page = 1, pageSize = 20) {
+  const pid = String(projectId || '').trim()
+  if (!pid) {
+    return {
+      page,
+      pageSize,
+      total: 0,
+      items: []
+    } satisfies PageData<ProjectTestcaseLite>
+  }
+  const query = new URLSearchParams({
+    projectId: pid,
+    page: String(page),
+    pageSize: String(pageSize)
+  })
+  return requestJson<PageData<ProjectTestcaseLite>>(`/api/testcases?${query.toString()}`, {
+    method: 'GET',
+    headers: {
+      Authorization: resolveAuthHeader()
+    }
+  })
+}
+
 export async function fetchRuns(payload: {
   projectId: string
   page?: number
@@ -835,16 +936,77 @@ export async function runFromTestcasesHttp(payload: BatchRunDirectFormState, ide
   })
 }
 
-export async function fetchRunCaseRuns(runId: string) {
+export async function createSuiteRun(payload: CreateSuiteRunPayload) {
+  const body = {
+    projectId: String(payload.projectId || '').trim(),
+    suiteId: String(payload.suiteId || '').trim(),
+    envId: String(payload.envId || '').trim(),
+    triggerType: String(payload.triggerType || '').trim(),
+    meta: payload.meta ?? {},
+    notifyRuleId: String(payload.notifyRuleId || '').trim() || undefined
+  }
+  if (!body.projectId) throw new Error('projectId 不能为空')
+  if (!body.suiteId) throw new Error('suiteId 不能为空')
+  if (!body.envId) throw new Error('envId 不能为空')
+  if (!body.triggerType) throw new Error('triggerType 不能为空')
+  return requestJson<RunDetailData>('/api/runs', {
+    method: 'POST',
+    headers: {
+      Authorization: resolveAuthHeader(),
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(body)
+  })
+}
+
+export async function fetchRunCaseRuns(runId: string): Promise<CaseRunItem[]>
+export async function fetchRunCaseRuns(
+  runId: string,
+  query: { status?: 'QUEUED' | 'RUNNING' | 'PASSED' | 'FAILED' | 'SKIPPED'; page?: number; pageSize?: number }
+): Promise<PageData<CaseRunItem>>
+export async function fetchRunCaseRuns(
+  runId: string,
+  query?: { status?: 'QUEUED' | 'RUNNING' | 'PASSED' | 'FAILED' | 'SKIPPED'; page?: number; pageSize?: number }
+) {
   const id = String(runId || '').trim()
-  if (!id) return []
-  const data = await requestJson<CaseRunItem[] | { items?: CaseRunItem[] }>(`/api/runs/${encodeURIComponent(id)}/case-runs`, {
+  if (!id) {
+    if (!query) return []
+    return {
+      page: query.page ?? 1,
+      pageSize: query.pageSize ?? 20,
+      total: 0,
+      items: []
+    } satisfies PageData<CaseRunItem>
+  }
+
+  const qs = new URLSearchParams()
+  if (query?.status) qs.set('status', String(query.status))
+  if (typeof query?.page === 'number' && Number.isFinite(query.page)) qs.set('page', String(query.page))
+  if (typeof query?.pageSize === 'number' && Number.isFinite(query.pageSize)) qs.set('pageSize', String(query.pageSize))
+  const path = `/api/runs/${encodeURIComponent(id)}/case-runs${qs.toString() ? `?${qs.toString()}` : ''}`
+  const data = await requestJson<CaseRunItem[] | PageData<CaseRunItem> | { items?: CaseRunItem[] }>(path, {
     method: 'GET',
     headers: {
       Authorization: resolveAuthHeader()
     }
   })
-  return normalizeCaseRuns(data)
+  if (!query) return normalizeCaseRuns(data)
+  if (
+    data &&
+    typeof data === 'object' &&
+    !Array.isArray(data) &&
+    Array.isArray((data as { items?: unknown[] }).items) &&
+    'total' in data
+  ) {
+    return data as PageData<CaseRunItem>
+  }
+  const items = normalizeCaseRuns(data)
+  return {
+    page: query.page ?? 1,
+    pageSize: query.pageSize ?? (items.length || 20),
+    total: items.length,
+    items
+  }
 }
 
 export async function fetchRunDetail(runId: string) {

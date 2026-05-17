@@ -16,14 +16,21 @@ from app.api.deps import CurrentUser, get_current_user, get_request_id, to_unix_
 from app.core.database import get_db
 from app.core.security import decode_access_token
 from app.models.enums import ArtifactType, CaseRunStatus, RunStatus
-from app.models.run import Artifact, Job, Run
+from app.models.run import Artifact, CaseRun, Job, Run
 from app.schemas.common import ApiResponse, PageData
 from app.schemas.run import (
     CaseRunListItem,
+    ProjectCiTokenManageRequest,
+    ProjectCiTokenRotateData,
+    ProjectCiTokenPolicyData,
+    ProjectCiTokenPolicyUpdateRequest,
+    ProjectCiTokenStatusData,
+    ProjectCiTokenRotateRequest,
     RunAllureReportGenerateData,
     RunAllureReportDeleteData,
     RunAllureReportListItem,
     RunCancelResponseData,
+    RunCiTriggerRequest,
     RunCreateRequest,
     RunDetailData,
     RunFromTestcasesHttpRequest,
@@ -33,14 +40,21 @@ from app.schemas.run import (
     RunRetryRequest,
 )
 from app.services.run import (
+    CiTokenPolicyDenied,
     cancel_run,
+    create_run_via_ci_token,
     create_run,
     create_run_from_testcases,
     create_run_from_testcases_http,
     delete_run_allure_report,
+    get_project_ci_token_status,
+    get_project_ci_token_policy,
     get_run,
     list_case_runs,
     list_runs,
+    revoke_project_ci_token,
+    rotate_project_ci_token,
+    update_project_ci_token_policy,
     retry_run,
 )
 from app.services.runner_pytest_allure import generate_allure_report_for_run, resolve_run_allure_paths
@@ -130,6 +144,174 @@ def _to_run_detail(run, done: int, total: int, passed: int, failed: int, skipped
         envId=str(run.env_id) if run.env_id else None,
         startAt=to_unix_ts(start_at),
     )
+
+
+async def _load_run_case_metrics(db: AsyncSession, *, run: Run) -> tuple[int, int, int, int, int]:
+    total = int(
+        (
+            await db.execute(
+                select(func.count(CaseRun.id)).where(CaseRun.run_id == run.id, CaseRun.tenant_id == run.tenant_id)
+            )
+        ).scalar_one()
+        or 0
+    )
+    grouped = (
+        await db.execute(
+            select(CaseRun.status, func.count(CaseRun.id))
+            .where(CaseRun.run_id == run.id, CaseRun.tenant_id == run.tenant_id)
+            .group_by(CaseRun.status)
+        )
+    ).all()
+    counts = {status: int(cnt or 0) for status, cnt in grouped}
+    passed = int(counts.get(CaseRunStatus.PASSED, 0))
+    failed = int(counts.get(CaseRunStatus.FAILED, 0))
+    skipped = int(counts.get(CaseRunStatus.SKIPPED, 0))
+    done = passed + failed + skipped
+    return done, total, passed, failed, skipped
+
+
+def _to_ci_token_status(project) -> ProjectCiTokenStatusData:
+    return ProjectCiTokenStatusData(
+        projectId=str(project.id),
+        enabled=bool(project.ci_token_hash),
+        hint=project.ci_token_hint,
+        rotatedAt=to_unix_ts(project.ci_token_rotated_at) if project.ci_token_rotated_at else None,
+        lastUsedAt=to_unix_ts(project.ci_token_last_used_at) if project.ci_token_last_used_at else None,
+        rotatedBy=str(project.ci_token_rotated_by) if project.ci_token_rotated_by else None,
+        policy=_to_ci_token_policy(project),
+    )
+
+
+def _to_ci_token_policy(project) -> ProjectCiTokenPolicyData:
+    policy = get_project_ci_token_policy(project)
+    return ProjectCiTokenPolicyData(
+        allowedRunnerTypes=list(policy["allowedRunnerTypes"]),
+        allowedTestCaseIds=list(policy["allowedTestCaseIds"]),
+        maxTestCaseCount=policy["maxTestCaseCount"],
+    )
+
+
+@router.post("/ci-token/rotate", response_model=ApiResponse[ProjectCiTokenRotateData])
+async def rotate_ci_token_(
+    payload: ProjectCiTokenRotateRequest,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    request_id: str = Depends(get_request_id),
+) -> ApiResponse[ProjectCiTokenRotateData]:
+    try:
+        project, token = await rotate_project_ci_token(
+            db,
+            user=user,
+            project_id=uuid.UUID(payload.projectId),
+            policy=payload.policy.model_dump(mode="json") if payload.policy else None,
+        )
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    return ApiResponse(
+        data=ProjectCiTokenRotateData(
+            projectId=str(project.id),
+            token=token,
+            hint=str(project.ci_token_hint or ""),
+            rotatedAt=to_unix_ts(project.ci_token_rotated_at),
+            policy=_to_ci_token_policy(project),
+        ),
+        requestId=request_id,
+    )
+
+
+@router.get("/ci-token/status", response_model=ApiResponse[ProjectCiTokenStatusData])
+async def get_ci_token_status_(
+    projectId: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    request_id: str = Depends(get_request_id),
+) -> ApiResponse[ProjectCiTokenStatusData]:
+    project = await get_project_ci_token_status(db, user=user, project_id=uuid.UUID(projectId))
+    return ApiResponse(data=_to_ci_token_status(project), requestId=request_id)
+
+
+@router.put("/ci-token/policy", response_model=ApiResponse[ProjectCiTokenStatusData])
+async def update_ci_token_policy_(
+    payload: ProjectCiTokenPolicyUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    request_id: str = Depends(get_request_id),
+) -> ApiResponse[ProjectCiTokenStatusData]:
+    try:
+        project = await update_project_ci_token_policy(
+            db,
+            user=user,
+            project_id=uuid.UUID(payload.projectId),
+            policy=payload.policy.model_dump(mode="json"),
+        )
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    return ApiResponse(data=_to_ci_token_status(project), requestId=request_id)
+
+
+@router.delete("/ci-token", response_model=ApiResponse[ProjectCiTokenStatusData])
+async def revoke_ci_token_(
+    payload: ProjectCiTokenManageRequest,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    request_id: str = Depends(get_request_id),
+) -> ApiResponse[ProjectCiTokenStatusData]:
+    try:
+        project = await revoke_project_ci_token(db, user=user, project_id=uuid.UUID(payload.projectId))
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    return ApiResponse(data=_to_ci_token_status(project), requestId=request_id)
+
+
+@router.post("/ci-trigger", response_model=ApiResponse[RunDetailData])
+async def ci_trigger_(
+    payload: RunCiTriggerRequest,
+    ci_token: str | None = Header(default=None, alias="X-CI-Token"),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    db: AsyncSession = Depends(get_db),
+    request_id: str = Depends(get_request_id),
+) -> ApiResponse[RunDetailData]:
+    token = str(ci_token or "").strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Invalid CI token")
+    idem = (idempotency_key or "").strip() or None
+    if idem is not None:
+        idem = idem[:128]
+    env_uuid: uuid.UUID | None = None
+    if payload.envId:
+        env_uuid = uuid.UUID(payload.envId)
+    try:
+        run = await create_run_via_ci_token(
+            db,
+            project_id=uuid.UUID(payload.projectId),
+            ci_token=token,
+            env_id=env_uuid,
+            meta=dict(payload.meta or {}),
+            concurrency=payload.concurrency,
+            stop_on_failure=payload.stopOnFailure,
+            items=[item.model_dump() for item in payload.items],
+            notify_rule_id=payload.notifyRuleId,
+            idempotency_key=idem,
+        )
+        await db.commit()
+    except CiTokenPolicyDenied:
+        try:
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            raise
+        raise
+    except Exception:
+        await db.rollback()
+        raise
+    done, total, passed, failed, skipped = await _load_run_case_metrics(db, run=run)
+    return ApiResponse(data=_to_run_detail(run, done, total, passed, failed, skipped), requestId=request_id)
 
 
 @router.post("", response_model=ApiResponse[RunDetailData])

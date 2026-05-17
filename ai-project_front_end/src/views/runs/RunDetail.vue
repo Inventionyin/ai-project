@@ -11,6 +11,7 @@ import {
   type CaseRunItem,
   type RunDetailData
 } from '@/lib/aiTestingPlatformApi'
+import { createRunRetrospectiveDraft } from '@/lib/api/knowledge'
 
 const route = useRoute()
 const router = useRouter()
@@ -22,9 +23,16 @@ const isLoading = ref(false)
 const loadError = ref('')
 const runDetail = ref<RunDetailData | null>(null)
 const caseRuns = ref<CaseRunItem[]>([])
+const isCaseRunsLoading = ref(false)
+const caseRunsError = ref('')
+const caseRunStatusFilter = ref<'ALL' | 'QUEUED' | 'RUNNING' | 'PASSED' | 'FAILED' | 'SKIPPED'>('ALL')
+const caseRunPage = ref(1)
+const caseRunPageSize = ref(20)
+const caseRunTotal = ref(0)
 const suiteName = ref('-')
 const envName = ref('-')
 const isGeneratingReport = ref(false)
+const isGeneratingRetrospective = ref(false)
 const reportStatus = ref('未生成')
 const reportUrl = ref('')
 const reportError = ref('')
@@ -90,6 +98,72 @@ const metricsSummary = computed(() => {
   return { total, done, passed, failed, skipped, passRate }
 })
 
+const caseRunTotalPages = computed(() => {
+  const pages = Math.ceil(caseRunTotal.value / Math.max(1, caseRunPageSize.value))
+  return Math.max(1, pages)
+})
+
+async function loadCaseRuns() {
+  const rid = runId.value
+  if (!rid) {
+    caseRuns.value = []
+    caseRunTotal.value = 0
+    return
+  }
+  isCaseRunsLoading.value = true
+  caseRunsError.value = ''
+  try {
+    const data = await fetchRunCaseRuns(rid, {
+      status: caseRunStatusFilter.value === 'ALL' ? undefined : caseRunStatusFilter.value,
+      page: caseRunPage.value,
+      pageSize: caseRunPageSize.value
+    })
+    caseRuns.value = Array.isArray(data.items) ? data.items : []
+    caseRunTotal.value = Number(data.total ?? caseRuns.value.length)
+    if (caseRunPage.value > caseRunTotalPages.value) {
+      caseRunPage.value = caseRunTotalPages.value
+      void loadCaseRuns()
+      return
+    }
+  } catch (error) {
+    caseRuns.value = []
+    caseRunTotal.value = 0
+    caseRunsError.value = error instanceof Error ? error.message : '加载 case-runs 失败'
+  } finally {
+    isCaseRunsLoading.value = false
+  }
+}
+
+function handleCaseRunStatusChange(event: Event) {
+  const target = event.target as HTMLSelectElement | null
+  const value = String(target?.value || 'ALL')
+  if (value === caseRunStatusFilter.value) return
+  caseRunStatusFilter.value = value as typeof caseRunStatusFilter.value
+  caseRunPage.value = 1
+  void loadCaseRuns()
+}
+
+function handleCaseRunPageSizeChange(event: Event) {
+  const target = event.target as HTMLSelectElement | null
+  const value = Number(target?.value || caseRunPageSize.value)
+  if (!Number.isFinite(value) || value <= 0 || value === caseRunPageSize.value) return
+  caseRunPageSize.value = value
+  caseRunPage.value = 1
+  void loadCaseRuns()
+}
+
+function goCaseRunPrevPage() {
+  if (caseRunPage.value <= 1 || isCaseRunsLoading.value) return
+  caseRunPage.value -= 1
+  void loadCaseRuns()
+}
+
+function goCaseRunNextPage() {
+  if (caseRunPage.value >= caseRunTotalPages.value || isCaseRunsLoading.value) return
+  caseRunPage.value += 1
+  void loadCaseRuns()
+}
+
 async function loadRunDetail() {
   const pid = projectId.value
   const rid = runId.value
@@ -101,12 +175,12 @@ async function loadRunDetail() {
     const detail = await fetchRunDetail(rid)
     runDetail.value = detail
 
-    const [rows, suites, environments] = await Promise.all([
-      fetchRunCaseRuns(rid),
+    const [suites, environments] = await Promise.all([
       fetchSuitesLite(pid, 1, 200),
       fetchProjectEnvironments(pid)
     ])
-    caseRuns.value = rows
+    caseRunPage.value = 1
+    await loadCaseRuns()
     suiteName.value = suites.items.find((item) => item.id === detail.suiteId)?.name || detail.suiteId || '-'
     envName.value = detail.envId ? environments.find((item) => item.id === detail.envId)?.name || detail.envId : '-'
     try {
@@ -121,6 +195,7 @@ async function loadRunDetail() {
   } catch (error) {
     runDetail.value = null
     caseRuns.value = []
+    caseRunTotal.value = 0
     suiteName.value = '-'
     envName.value = '-'
     loadError.value = error instanceof Error ? error.message : '加载运行详情失败'
@@ -152,6 +227,25 @@ async function handleGenerateAllureReport() {
   }
 }
 
+async function handleGenerateRetrospectiveDraft() {
+  const pid = projectId.value
+  const rid = runId.value
+  if (!pid || !rid) return
+  isGeneratingRetrospective.value = true
+  try {
+    const created = await createRunRetrospectiveDraft(pid, rid)
+    const retrospectiveId = String(created?.id || '').trim()
+    if (!retrospectiveId) throw new Error('未返回复盘记录 ID')
+    showToast('复盘草稿已生成')
+    void router.push(`/projects/${encodeURIComponent(pid)}/knowledge/retrospectives?retrospectiveId=${encodeURIComponent(retrospectiveId)}`)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '生成复盘草稿失败'
+    showToast(message, 'error')
+  } finally {
+    isGeneratingRetrospective.value = false
+  }
+}
+
 function openAllureReportPage() {
   const pid = projectId.value
   const rid = runId.value
@@ -174,6 +268,21 @@ function openCaseDetail(testcaseId?: string | null) {
   const id = String(testcaseId || '').trim()
   if (!pid || !id) return
   void router.push(`/projects/${encodeURIComponent(pid)}/assets/testcases/${encodeURIComponent(id)}`)
+}
+
+function openCreateDefect(item: CaseRunItem) {
+  const pid = projectId.value
+  const rid = runId.value
+  if (!pid || !rid) return
+  void router.push({
+    path: `/projects/${encodeURIComponent(pid)}/defects`,
+    query: {
+      runId: rid,
+      caseRunId: String(item.caseRunId || '').trim(),
+      testcaseId: String(item.testcaseId || '').trim(),
+      errorMessage: String(item.errorMessage || '').trim()
+    }
+  })
 }
 
 watch(
@@ -210,6 +319,14 @@ watch(
               @click="handleGenerateAllureReport"
             >
               {{ isGeneratingReport ? '生成中...' : '生成 Allure 报告' }}
+            </button>
+            <button
+              type="button"
+              class="h-[32px] rounded-[10px] border border-black/10 px-[12px] text-[13px] leading-[18px] text-[#717182] disabled:cursor-not-allowed disabled:opacity-60"
+              :disabled="isGeneratingRetrospective || isLoading"
+              @click="handleGenerateRetrospectiveDraft"
+            >
+              {{ isGeneratingRetrospective ? '生成中...' : '一键生成复盘草稿' }}
             </button>
             <button
               type="button"
@@ -289,8 +406,50 @@ watch(
         </div>
 
         <div class="overflow-hidden rounded-[12px] border border-black/10 bg-white">
-          <div class="border-b border-black/10 px-[16px] py-[10px] text-[13px] font-medium leading-[18px] text-[#0A0A0A]">
-            Case Runs（{{ caseRuns.length }}）
+          <div class="flex flex-wrap items-center justify-between gap-[8px] border-b border-black/10 px-[16px] py-[10px]">
+            <div class="text-[13px] font-medium leading-[18px] text-[#0A0A0A]">Case Runs（{{ caseRunTotal }}）</div>
+            <div class="flex items-center gap-[8px]">
+              <select
+                class="h-[28px] rounded-[8px] border border-black/10 bg-white px-[8px] text-[12px] leading-[16px] text-[#717182]"
+                :value="caseRunStatusFilter"
+                :disabled="isCaseRunsLoading"
+                @change="handleCaseRunStatusChange"
+              >
+                <option value="ALL">全部状态</option>
+                <option value="QUEUED">QUEUED</option>
+                <option value="RUNNING">RUNNING</option>
+                <option value="PASSED">PASSED</option>
+                <option value="FAILED">FAILED</option>
+                <option value="SKIPPED">SKIPPED</option>
+              </select>
+              <select
+                class="h-[28px] rounded-[8px] border border-black/10 bg-white px-[8px] text-[12px] leading-[16px] text-[#717182]"
+                :value="String(caseRunPageSize)"
+                :disabled="isCaseRunsLoading"
+                @change="handleCaseRunPageSizeChange"
+              >
+                <option value="20">20/页</option>
+                <option value="50">50/页</option>
+                <option value="100">100/页</option>
+              </select>
+              <button
+                type="button"
+                class="h-[28px] rounded-[8px] border border-black/10 px-[8px] text-[12px] leading-[16px] text-[#717182] disabled:cursor-not-allowed disabled:opacity-60"
+                :disabled="caseRunPage <= 1 || isCaseRunsLoading"
+                @click="goCaseRunPrevPage"
+              >
+                上一页
+              </button>
+              <div class="text-[12px] leading-[16px] text-[#717182]">{{ caseRunPage }}/{{ caseRunTotalPages }}</div>
+              <button
+                type="button"
+                class="h-[28px] rounded-[8px] border border-black/10 px-[8px] text-[12px] leading-[16px] text-[#717182] disabled:cursor-not-allowed disabled:opacity-60"
+                :disabled="caseRunPage >= caseRunTotalPages || isCaseRunsLoading"
+                @click="goCaseRunNextPage"
+              >
+                下一页
+              </button>
+            </div>
           </div>
           <div class="overflow-x-auto">
             <table class="w-full min-w-[880px] border-collapse">
@@ -314,18 +473,30 @@ watch(
                   <td class="px-[12px] py-[8px] text-[12px] leading-[16px] text-[#717182]">{{ formatDateTime(item.endAt ?? null) }}</td>
                   <td class="px-[12px] py-[8px] text-[12px] leading-[16px] text-[#E7000B]">{{ item.errorMessage || '-' }}</td>
                   <td class="px-[12px] py-[8px]">
-                    <button
-                      type="button"
-                      class="h-[28px] rounded-[8px] border border-black/10 px-[10px] text-[12px] leading-[16px] text-[#155DFC] disabled:cursor-not-allowed disabled:text-[#717182] disabled:opacity-60"
-                      :disabled="!item.testcaseId"
-                      @click="openCaseDetail(item.testcaseId)"
-                    >
-                      打开用例
-                    </button>
+                    <div class="flex items-center gap-[6px]">
+                      <button
+                        type="button"
+                        class="h-[28px] rounded-[8px] border border-black/10 px-[10px] text-[12px] leading-[16px] text-[#155DFC] disabled:cursor-not-allowed disabled:text-[#717182] disabled:opacity-60"
+                        :disabled="!item.testcaseId"
+                        @click="openCaseDetail(item.testcaseId)"
+                      >
+                        打开用例
+                      </button>
+                      <button
+                        type="button"
+                        class="h-[28px] rounded-[8px] border border-black/10 px-[10px] text-[12px] leading-[16px] text-[#155DFC] disabled:cursor-not-allowed disabled:text-[#717182] disabled:opacity-60"
+                        :disabled="!item.caseRunId"
+                        @click="openCreateDefect(item)"
+                      >
+                        新建缺陷
+                      </button>
+                    </div>
                   </td>
                 </tr>
                 <tr v-if="!caseRuns.length">
-                  <td colspan="7" class="px-[12px] py-[16px] text-center text-[12px] leading-[16px] text-[#717182]">暂无 case-runs 数据</td>
+                  <td colspan="7" class="px-[12px] py-[16px] text-center text-[12px] leading-[16px]" :class="caseRunsError ? 'text-[#E7000B]' : 'text-[#717182]'">
+                    {{ isCaseRunsLoading ? 'case-runs 加载中...' : caseRunsError || '暂无 case-runs 数据' }}
+                  </td>
                 </tr>
               </tbody>
             </table>

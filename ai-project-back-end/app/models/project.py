@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 
-from sqlalchemy import Enum, ForeignKey, String, Text, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import DateTime, Enum, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -20,6 +21,14 @@ class Project(Base, CreatedAtMixin):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     owner_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    ci_token_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    ci_token_hint: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    ci_token_rotated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    ci_token_last_used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    ci_token_rotated_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True, index=True)
+    ci_token_allowed_runner_types: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    ci_token_allowed_testcase_ids: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    ci_token_max_testcase_count: Mapped[int | None] = mapped_column(nullable=True)
 
     tenant: Mapped["Tenant"] = relationship(back_populates="projects")
     owner: Mapped["User"] = relationship(back_populates="owned_projects", foreign_keys=[owner_id])

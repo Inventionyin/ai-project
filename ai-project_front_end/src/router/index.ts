@@ -20,11 +20,22 @@ const RunDetail = defineAsyncComponent(() => import('@/views/runs/RunDetail.vue'
 const AiTestingPlatform16_3 = defineAsyncComponent(() => import('@/views/figma/AiTestingPlatform16_3.vue'))
 const Environments = defineAsyncComponent(() => import('@/views/settings/Environments.vue'))
 const PlatformRecords = defineAsyncComponent(() => import('@/views/settings/PlatformRecords.vue'))
+const Integrations = defineAsyncComponent(() => import('@/views/settings/Integrations.vue'))
 const CollectionDetail = defineAsyncComponent(() => import('@/views/collections/CollectionDetail.vue'))
 const RequirementDocs = defineAsyncComponent(() => import('@/views/requirements/RequirementDocs.vue'))
 const RequirementDocDetail = defineAsyncComponent(() => import('@/views/requirements/RequirementDocDetail.vue'))
 const RequirementAnalysisDetail = defineAsyncComponent(() => import('@/views/requirements/RequirementAnalysisDetail.vue'))
 const RequirementChangeSetDetail = defineAsyncComponent(() => import('@/views/requirements/RequirementChangeSetDetail.vue'))
+const KnowledgeRetrospectives = defineAsyncComponent(() => import('@/views/knowledge/KnowledgeRetrospectives.vue'))
+const DefectsList = defineAsyncComponent(() => import('@/views/defects/DefectsList.vue'))
+const DefectDetail = defineAsyncComponent(() => import('@/views/defects/DefectDetail.vue'))
+const DocParseJobs = defineAsyncComponent(() => import('@/views/settings/DocParseJobs.vue'))
+const DevOps = defineAsyncComponent(() => import('@/views/settings/DevOps.vue'))
+const Executors = defineAsyncComponent(() => import('@/views/settings/Executors.vue'))
+const Plugins = defineAsyncComponent(() => import('@/views/settings/Plugins.vue'))
+const SecurityAudit = defineAsyncComponent(() => import('@/views/settings/SecurityAudit.vue'))
+const CiTokenGovernance = defineAsyncComponent(() => import('@/views/settings/CiTokenGovernance.vue'))
+const AiCapabilities = defineAsyncComponent(() => import('@/views/settings/AiCapabilities.vue'))
 
 function createProjectShellPage(activeAssetChild: string, Content: Parameters<typeof h>[0]) {
   return defineComponent({
@@ -81,7 +92,11 @@ const ProjectRequirementDocs = createProjectShellPage('需求文档中心', Requ
 const ProjectRequirementDocDetail = createProjectShellPage('需求文档中心', RequirementDocDetail)
 const ProjectRequirementAnalysisDetail = createProjectShellPage('需求文档中心', RequirementAnalysisDetail)
 const ProjectRequirementChangeSetDetail = createProjectShellPage('需求文档中心', RequirementChangeSetDetail)
+const ProjectKnowledgeRetrospectives = createProjectShellPage('知识中心', KnowledgeRetrospectives)
 const ProjectPlatformRecords = createProjectShellPage('平台记录', PlatformRecords)
+const ProjectIntegrations = createProjectShellPage('集成配置', Integrations)
+const ProjectDefectsList = createProjectShellPage('缺陷管理', DefectsList)
+const ProjectDefectDetail = createProjectShellPage('缺陷管理', DefectDetail)
 
 const router = createRouter({
   history: createWebHistory(),
@@ -177,6 +192,38 @@ const router = createRouter({
       component: ProjectPlatformRecords
     },
     {
+      path: '/projects/:projectId/settings/integrations',
+      component: ProjectIntegrations
+    },
+    {
+      path: '/projects/:projectId/settings/doc-parse-jobs',
+      component: createProjectShellPage('文档解析任务', DocParseJobs)
+    },
+    {
+      path: '/projects/:projectId/settings/devops',
+      component: createProjectShellPage('DevOps 流水线', DevOps)
+    },
+    {
+      path: '/projects/:projectId/settings/executors',
+      component: createProjectShellPage('测试执行器', Executors)
+    },
+    {
+      path: '/projects/:projectId/settings/plugins',
+      component: createProjectShellPage('插件市场', Plugins)
+    },
+    {
+      path: '/projects/:projectId/settings/security-audit',
+      component: createProjectShellPage('安全审计', SecurityAudit)
+    },
+    {
+      path: '/projects/:projectId/settings/ci-token-governance',
+      component: createProjectShellPage('CI Token 治理', CiTokenGovernance)
+    },
+    {
+      path: '/projects/:projectId/settings/ai-capabilities',
+      component: createProjectShellPage('AI 能力中心', AiCapabilities)
+    },
+    {
       path: '/projects/:projectId/requirements/docs',
       component: ProjectRequirementDocs
     },
@@ -193,8 +240,20 @@ const router = createRouter({
       component: ProjectRequirementChangeSetDetail
     },
     {
+      path: '/projects/:projectId/knowledge/retrospectives',
+      component: ProjectKnowledgeRetrospectives
+    },
+    {
+      path: '/projects/:projectId/defects',
+      component: ProjectDefectsList
+    },
+    {
+      path: '/projects/:projectId/defects/:defectId',
+      component: ProjectDefectDetail
+    },
+    {
       path: '/settings/integrations',
-      component: createPlaceholderPage('集成配置（管理员/Owner）')
+      redirect: '/projects/1/settings/integrations'
     },
     {
       path: '/settings/rbac',

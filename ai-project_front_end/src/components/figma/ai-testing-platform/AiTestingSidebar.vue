@@ -66,6 +66,14 @@ const resolvedActiveAssetChild = computed(() => {
   if (route.path.startsWith(`/projects/${projectId.value}/ai-assistant`)) return 'AI 助手'
   if (route.path.startsWith(`/projects/${projectId.value}/requirements/docs`)) return '需求文档中心'
   if (route.path.startsWith(`/projects/${projectId.value}/settings/platform-records`)) return '平台记录'
+  if (route.path.startsWith(`/projects/${projectId.value}/settings/integrations`)) return '集成配置'
+  if (route.path.startsWith(`/projects/${projectId.value}/settings/doc-parse-jobs`)) return '文档解析任务'
+  if (route.path.startsWith(`/projects/${projectId.value}/settings/devops`)) return 'DevOps 流水线'
+  if (route.path.startsWith(`/projects/${projectId.value}/settings/executors`)) return '测试执行器'
+  if (route.path.startsWith(`/projects/${projectId.value}/settings/plugins`)) return '插件市场'
+  if (route.path.startsWith(`/projects/${projectId.value}/settings/security-audit`)) return '安全审计'
+  if (route.path.startsWith(`/projects/${projectId.value}/settings/ci-token-governance`)) return 'CI Token 治理'
+  if (route.path.startsWith(`/projects/${projectId.value}/settings/ai-capabilities`)) return 'AI 能力中心'
   if (route.path.startsWith('/figma/untitled-47-1415')) return '测试套件'
   if (route.path.startsWith('/figma/untitled-34-158')) return '用例管理'
   if (route.path.startsWith('/figma/untitled-9-3')) return '用例管理'
@@ -127,8 +135,15 @@ const settingsLinks = computed<LinkItem[]>(() => [
   { label: '平台记录', icon: navAudit, to: `/projects/${projectId.value}/settings/platform-records` },
   { label: '环境管理', icon: navEnv, to: `/projects/${projectId.value}/settings/environments` },
   { label: '成员权限', icon: navMember, to: '/settings/rbac' },
-  { label: '集成配置', icon: navIntegrations, to: '/settings/integrations' },
-  { label: '审计日志', icon: navAudit, to: '/settings/audit' }
+  { label: '集成配置', icon: navIntegrations, to: `/projects/${projectId.value}/settings/integrations` },
+  { label: '审计日志', icon: navAudit, to: '/settings/audit' },
+  { label: '文档解析任务', icon: navAudit, to: `/projects/${projectId.value}/settings/doc-parse-jobs` },
+  { label: 'DevOps 流水线', icon: navIntegrations, to: `/projects/${projectId.value}/settings/devops` },
+  { label: '测试执行器', icon: navCases, to: `/projects/${projectId.value}/settings/executors` },
+  { label: '插件市场', icon: navAsset, to: `/projects/${projectId.value}/settings/plugins` },
+  { label: '安全审计', icon: navAudit, to: `/projects/${projectId.value}/settings/security-audit` },
+  { label: 'CI Token 治理', icon: navIntegrations, to: `/projects/${projectId.value}/settings/ci-token-governance` },
+  { label: 'AI 能力中心', icon: navAsset, to: `/projects/${projectId.value}/settings/ai-capabilities` }
 ])
 </script>
 

@@ -12,6 +12,17 @@ from app.schemas.auth import LoginRequest, LoginResponseData, MeResponseData, Re
 from app.schemas.common import ApiResponse, BaseSchema, PageData
 from app.schemas.environment import EnvironmentCreateRequest, EnvironmentPublic, HealthCheckConfig
 from app.schemas.integration import IssueCreateData, IssueCreateRequest
+from app.schemas.integration_issue import IntegrationIssueCreateRequest, IntegrationIssueDetail
+from app.schemas.knowledge import (
+    KnowledgeTemplateCreateRequest,
+    KnowledgeTemplateDetail,
+    KnowledgeTemplateListItem,
+    KnowledgeTemplateUpdateRequest,
+    RetrospectiveRecordCreateRequest,
+    RetrospectiveRecordDetail,
+    RetrospectiveRecordListItem,
+    RetrospectiveRecordUpdateRequest,
+)
 from app.schemas.project import (
     ProjectCreateRequest,
     ProjectDetailData,
@@ -19,6 +30,12 @@ from app.schemas.project import (
     ProjectListItem,
     ProjectListQuery,
     ProjectUpdateRequest,
+)
+from app.schemas.prompt_template import (
+    PromptTemplateActivateRequest,
+    PromptTemplateCreateRequest,
+    PromptTemplateDetail,
+    PromptTemplateUpdateRequest,
 )
 from app.schemas.run import (
     ArtifactIndex,
@@ -28,6 +45,9 @@ from app.schemas.run import (
     CaseRunMetrics,
     CaseRunResult,
     JobReportSummary,
+    ProjectCiTokenPolicyData,
+    ProjectCiTokenPolicyUpdateRequest,
+    ProjectCiTokenRotateRequest,
     RunCancelResponseData,
     RunCreateRequest,
     RunDebugRequest,
@@ -83,6 +103,12 @@ __all__ = [
     "IdStr",
     "IssueCreateData",
     "IssueCreateRequest",
+    "IntegrationIssueCreateRequest",
+    "IntegrationIssueDetail",
+    "KnowledgeTemplateCreateRequest",
+    "KnowledgeTemplateDetail",
+    "KnowledgeTemplateListItem",
+    "KnowledgeTemplateUpdateRequest",
     "JobEnv",
     "JobItem",
     "JobPayload",
@@ -94,11 +120,22 @@ __all__ = [
     "NameStr",
     "PageData",
     "ProjectCreateRequest",
+    "ProjectCiTokenPolicyData",
+    "ProjectCiTokenPolicyUpdateRequest",
+    "ProjectCiTokenRotateRequest",
     "ProjectDetailData",
     "ProjectListData",
     "ProjectListItem",
     "ProjectListQuery",
     "ProjectUpdateRequest",
+    "PromptTemplateActivateRequest",
+    "PromptTemplateCreateRequest",
+    "PromptTemplateDetail",
+    "PromptTemplateUpdateRequest",
+    "RetrospectiveRecordCreateRequest",
+    "RetrospectiveRecordDetail",
+    "RetrospectiveRecordListItem",
+    "RetrospectiveRecordUpdateRequest",
     "RegisterRequest",
     "RegisterResponseData",
     "RunCancelResponseData",
