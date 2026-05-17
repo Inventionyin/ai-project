@@ -318,7 +318,7 @@ function downloadResult() {
   
   let fileName = resultFileName.value
   if (!fileName) {
-    const timestamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)
+    const timestamp = new Date().toISOString().split('-').join('').split(':').join('').replace('T', '').slice(0, 14)
     fileName = isCase ? `api_test_cases_${timestamp}.csv` : `k6_script_${timestamp}.js`
   } else if (!fileName.includes('.')) {
     fileName += defaultExt

@@ -18,6 +18,8 @@ from app.services.testcase_binding import (
     create_testcase_binding,
     delete_testcase_binding,
     list_testcase_bindings,
+    list_testcase_bindings_by_collection,
+    list_testcase_bindings_by_request,
     update_testcase_binding,
 )
 
@@ -30,8 +32,15 @@ def _to_item(binding) -> TestcaseBindingListItem:
         projectId=str(binding.project_id),
         testcaseId=str(binding.testcase_id),
         name=binding.name,
+        linkType=binding.link_type,
         datasetId=str(binding.dataset_id) if binding.dataset_id else None,
         apiTargetId=str(binding.api_target_id) if binding.api_target_id else None,
+        requestId=str(binding.request_id) if binding.request_id else None,
+        collectionId=str(binding.collection_id) if binding.collection_id else None,
+        sourceType=binding.source_type,
+        assertSummary=binding.assert_summary,
+        lastRunStatus=binding.last_run_status,
+        lastRunAt=to_unix_ts(binding.last_run_at) if binding.last_run_at else None,
         params=dict(binding.params_json or {}),
         priority=binding.priority,
         enabled=binding.enabled,
@@ -60,6 +69,30 @@ async def list_(
         data=PageData(page=page, pageSize=pageSize, total=total, items=[_to_item(item) for item in rows]),
         requestId=request_id,
     )
+
+
+@router.get("/projects/{projectId}/requests/{requestId}/bindings", response_model=ApiResponse[list[TestcaseBindingListItem]])
+async def list_by_request(
+    projectId: uuid.UUID,
+    requestId: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    request_id: str = Depends(get_request_id),
+) -> ApiResponse[list[TestcaseBindingListItem]]:
+    rows = await list_testcase_bindings_by_request(db, user=user, project_id=projectId, request_id=requestId)
+    return ApiResponse(data=[_to_item(item) for item in rows], requestId=request_id)
+
+
+@router.get("/projects/{projectId}/collections/{collectionId}/bindings", response_model=ApiResponse[list[TestcaseBindingListItem]])
+async def list_by_collection(
+    projectId: uuid.UUID,
+    collectionId: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    request_id: str = Depends(get_request_id),
+) -> ApiResponse[list[TestcaseBindingListItem]]:
+    rows = await list_testcase_bindings_by_collection(db, user=user, project_id=projectId, collection_id=collectionId)
+    return ApiResponse(data=[_to_item(item) for item in rows], requestId=request_id)
 
 
 @router.post("/testcases/{testcaseId}/bindings", response_model=ApiResponse[TestcaseBindingDetail])

@@ -1,27 +1,30 @@
-import { defineComponent, h } from 'vue'
+import { defineAsyncComponent, defineComponent, h } from 'vue'
 import { createRouter, createWebHistory, useRoute } from 'vue-router'
-import Login from '../views/Login.vue'
-import Home from '../views/Home.vue'
-import Overview from '../views/dashboard/Overview.vue'
 import AiTestingPlatformShell from '@/components/figma/ai-testing-platform/AiTestingPlatformShell.vue'
-import CasesPanel from '@/components/figma/ai-testing-platform/CasesPanel.vue'
-import SuitesPanel from '@/components/figma/ai-testing-platform/SuitesPanel.vue'
-import ApiCollectionsPanel from '@/components/figma/ai-testing-platform/ApiCollectionsPanel.vue'
-import DataSetsPanel from '@/components/figma/ai-testing-platform/DataSetsPanel.vue'
-import RunsPanel from '@/components/figma/ai-testing-platform/RunsPanel.vue'
-import WorkersPanel from '@/components/figma/ai-testing-platform/WorkersPanel.vue'
-import SuiteDetailPanel from '@/components/figma/ai-testing-platform/SuiteDetailPanel.vue'
-import ReportsPanel from '@/components/figma/ai-testing-platform/ReportsPanel.vue'
-import AllureReportPanel from '@/components/figma/ai-testing-platform/AllureReportPanel.vue'
-import TestCaseDetailPanel from '@/components/figma/ai-testing-platform/TestCaseDetailPanel.vue'
-import AiAssistantPanel from '@/components/figma/ai-testing-platform/AiAssistantPanel.vue'
-import RunDetail from '@/views/runs/RunDetail.vue'
-import AiTestingPlatform16_3 from '@/views/figma/AiTestingPlatform16_3.vue'
-import Environments from '@/views/settings/Environments.vue'
-import CollectionDetail from '@/views/collections/CollectionDetail.vue'
-import RequirementDocs from '@/views/requirements/RequirementDocs.vue'
-import RequirementDocDetail from '@/views/requirements/RequirementDocDetail.vue'
-import RequirementAnalysisDetail from '@/views/requirements/RequirementAnalysisDetail.vue'
+
+const Login = defineAsyncComponent(() => import('../views/Login.vue'))
+const Home = defineAsyncComponent(() => import('../views/Home.vue'))
+const Overview = defineAsyncComponent(() => import('../views/dashboard/Overview.vue'))
+const CasesPanel = defineAsyncComponent(() => import('@/components/figma/ai-testing-platform/CasesPanel.vue'))
+const SuitesPanel = defineAsyncComponent(() => import('@/components/figma/ai-testing-platform/SuitesPanel.vue'))
+const ApiCollectionsPanel = defineAsyncComponent(() => import('@/components/figma/ai-testing-platform/ApiCollectionsPanel.vue'))
+const DataSetsPanel = defineAsyncComponent(() => import('@/components/figma/ai-testing-platform/DataSetsPanel.vue'))
+const RunsPanel = defineAsyncComponent(() => import('@/components/figma/ai-testing-platform/RunsPanel.vue'))
+const WorkersPanel = defineAsyncComponent(() => import('@/components/figma/ai-testing-platform/WorkersPanel.vue'))
+const SuiteDetailPanel = defineAsyncComponent(() => import('@/components/figma/ai-testing-platform/SuiteDetailPanel.vue'))
+const ReportsPanel = defineAsyncComponent(() => import('@/components/figma/ai-testing-platform/ReportsPanel.vue'))
+const AllureReportPanel = defineAsyncComponent(() => import('@/components/figma/ai-testing-platform/AllureReportPanel.vue'))
+const TestCaseDetailPanel = defineAsyncComponent(() => import('@/components/figma/ai-testing-platform/TestCaseDetailPanel.vue'))
+const AiAssistantPanel = defineAsyncComponent(() => import('@/components/figma/ai-testing-platform/AiAssistantPanel.vue'))
+const RunDetail = defineAsyncComponent(() => import('@/views/runs/RunDetail.vue'))
+const AiTestingPlatform16_3 = defineAsyncComponent(() => import('@/views/figma/AiTestingPlatform16_3.vue'))
+const Environments = defineAsyncComponent(() => import('@/views/settings/Environments.vue'))
+const PlatformRecords = defineAsyncComponent(() => import('@/views/settings/PlatformRecords.vue'))
+const CollectionDetail = defineAsyncComponent(() => import('@/views/collections/CollectionDetail.vue'))
+const RequirementDocs = defineAsyncComponent(() => import('@/views/requirements/RequirementDocs.vue'))
+const RequirementDocDetail = defineAsyncComponent(() => import('@/views/requirements/RequirementDocDetail.vue'))
+const RequirementAnalysisDetail = defineAsyncComponent(() => import('@/views/requirements/RequirementAnalysisDetail.vue'))
+const RequirementChangeSetDetail = defineAsyncComponent(() => import('@/views/requirements/RequirementChangeSetDetail.vue'))
 
 function createProjectShellPage(activeAssetChild: string, Content: Parameters<typeof h>[0]) {
   return defineComponent({
@@ -77,6 +80,8 @@ const ProjectAiAssistant = createProjectShellPage('AI 助手', AiAssistantPanel)
 const ProjectRequirementDocs = createProjectShellPage('需求文档中心', RequirementDocs)
 const ProjectRequirementDocDetail = createProjectShellPage('需求文档中心', RequirementDocDetail)
 const ProjectRequirementAnalysisDetail = createProjectShellPage('需求文档中心', RequirementAnalysisDetail)
+const ProjectRequirementChangeSetDetail = createProjectShellPage('需求文档中心', RequirementChangeSetDetail)
+const ProjectPlatformRecords = createProjectShellPage('平台记录', PlatformRecords)
 
 const router = createRouter({
   history: createWebHistory(),
@@ -168,6 +173,10 @@ const router = createRouter({
       component: createProjectShellPage('环境管理', Environments)
     },
     {
+      path: '/projects/:projectId/settings/platform-records',
+      component: ProjectPlatformRecords
+    },
+    {
       path: '/projects/:projectId/requirements/docs',
       component: ProjectRequirementDocs
     },
@@ -178,6 +187,10 @@ const router = createRouter({
     {
       path: '/projects/:projectId/requirements/analyses/:analysisId',
       component: ProjectRequirementAnalysisDetail
+    },
+    {
+      path: '/projects/:projectId/requirements/change-sets/:changeSetId',
+      component: ProjectRequirementChangeSetDetail
     },
     {
       path: '/settings/integrations',

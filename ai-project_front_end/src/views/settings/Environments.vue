@@ -35,7 +35,7 @@ const form = ref({
   healthExpectedStatus: 200
 })
 
-const selectedEnvironment = computed(() => environments.value.find((item) => item.id === selectedId.value) || null)
+const selectedEnvironment = computed(() => environments.value.find((item: EnvironmentPublic) => item.id === selectedId.value) || null)
 
 function resetForm() {
   form.value = {

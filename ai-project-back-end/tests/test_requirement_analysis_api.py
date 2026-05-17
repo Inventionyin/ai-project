@@ -10,6 +10,9 @@ from app.api.deps import CurrentUser, get_current_user
 from app.api.v1.endpoints import requirements as requirements_endpoint
 from app.core.database import get_db
 from app.schemas.requirement import RequirementAnalysisDetail
+from app.schemas.requirement_change import (
+    RequirementAnalysisRevisionDetail,
+)
 
 
 @dataclass
@@ -136,3 +139,51 @@ def test_list_and_update_requirement_analyses(monkeypatch) -> None:
     )
     assert update_resp.status_code == 200
     assert update_resp.json()["data"]["status"] == "REVIEWED"
+
+
+def test_list_and_rollback_analysis_revisions(monkeypatch) -> None:
+    project_id = uuid.UUID("22222222-2222-2222-2222-222222222222")
+    analysis_id = uuid.UUID("55555555-5555-5555-5555-555555555555")
+    revision_id = uuid.UUID("66666666-6666-6666-6666-666666666666")
+    doc_id = uuid.UUID("33333333-3333-3333-3333-333333333333")
+    version_id = uuid.UUID("44444444-4444-4444-4444-444444444444")
+
+    async def _fake_list_revisions(db, *, user, project_id, analysis_id):
+        return [
+            RequirementAnalysisRevisionDetail(
+                id=str(revision_id),
+                projectId=str(project_id),
+                analysisId=str(analysis_id),
+                docId=str(doc_id),
+                docVersionId=str(version_id),
+                revisionNo=2,
+                changeReason="manual_update",
+                summary="人工修订了风险点",
+                riskLevel="HIGH",
+                coverageScore=0.8,
+                analysis={"featurePoints": [], "businessRules": [], "testPoints": [], "riskPoints": [], "boundaryCases": [], "coverageSuggestions": []},
+                createdBy=str(user.id),
+                createdAt=1710000200,
+            )
+        ]
+
+    async def _fake_rollback(db, *, user, project_id, analysis_id, revision_id):
+        data = _analysis(project_id, doc_id, version_id, str(analysis_id))
+        data.summary = "已回滚到指定修订"
+        data.riskLevel = "HIGH"
+        return data
+
+    monkeypatch.setattr(requirements_endpoint, "list_requirement_analysis_revisions", _fake_list_revisions)
+    monkeypatch.setattr(requirements_endpoint, "rollback_requirement_analysis_revision", _fake_rollback)
+    client = TestClient(_build_app())
+
+    list_resp = client.get(f"/api/projects/{project_id}/requirements/analyses/{analysis_id}/revisions")
+    assert list_resp.status_code == 200
+    assert list_resp.json()["data"][0]["revisionNo"] == 2
+
+    rollback_resp = client.post(
+        f"/api/projects/{project_id}/requirements/analyses/{analysis_id}/rollback",
+        json={"revisionId": str(revision_id)},
+    )
+    assert rollback_resp.status_code == 200
+    assert rollback_resp.json()["data"]["summary"] == "已回滚到指定修订"

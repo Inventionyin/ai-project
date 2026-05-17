@@ -17,6 +17,11 @@ import {
   type RequirementDocVersion,
   type RequirementSourceType
 } from '@/lib/api/requirements'
+import {
+  createRequirementChangeSet,
+  fetchRequirementChangeSets,
+  type RequirementChangeSetDetail
+} from '@/lib/api/requirementChanges'
 
 const route = useRoute()
 const router = useRouter()
@@ -41,6 +46,13 @@ const parsedText = ref('')
 const analyses = ref<RequirementAnalysis[]>([])
 const analyzingVersionId = ref('')
 const analysisInstruction = ref('')
+const changeSets = ref<RequirementChangeSetDetail[]>([])
+const selectedBaselineVersionId = ref('')
+const creatingChangeSet = ref(false)
+const changeSetsLoading = ref(false)
+const changeSetsError = ref('')
+let docLoadSeq = 0
+let changeSetLoadSeq = 0
 
 const form = ref({
   title: '',
@@ -72,28 +84,55 @@ function fillForm(doc: RequirementDoc) {
 }
 
 async function loadDetail() {
-  if (!projectId.value || !docId.value) return
+  const pid = projectId.value
+  const did = docId.value
+  if (!pid || !did) return
+  const seq = ++docLoadSeq
   loading.value = true
   error.value = ''
+  changeSetsError.value = ''
+  changeSets.value = []
   try {
     const [doc, list, analysisList] = await Promise.all([
-      fetchRequirementDoc(projectId.value, docId.value),
-      fetchRequirementDocVersions(projectId.value, docId.value),
-      fetchRequirementAnalyses(projectId.value, { docId: docId.value })
+      fetchRequirementDoc(pid, did),
+      fetchRequirementDocVersions(pid, did),
+      fetchRequirementAnalyses(pid, { docId: did })
     ])
+    if (seq !== docLoadSeq || pid !== projectId.value || did !== docId.value) return
     detail.value = doc
     versions.value = list
     analyses.value = analysisList
     fillForm(doc)
     selectedVersionId.value = list[0]?.id || ''
+    selectedBaselineVersionId.value = list[1]?.id || list[0]?.id || ''
     parsedText.value = ''
+    void loadChangeSets(pid, did)
   } catch (e) {
+    if (seq !== docLoadSeq) return
     error.value = e instanceof Error ? e.message : '加载详情失败'
     detail.value = null
     versions.value = []
     analyses.value = []
+    changeSets.value = []
   } finally {
-    loading.value = false
+    if (seq === docLoadSeq) loading.value = false
+  }
+}
+
+async function loadChangeSets(pid = projectId.value, did = docId.value) {
+  if (!pid || !did) return
+  const seq = ++changeSetLoadSeq
+  changeSetsLoading.value = true
+  changeSetsError.value = ''
+  try {
+    const rows = await fetchRequirementChangeSets(pid, did)
+    if (seq !== changeSetLoadSeq || pid !== projectId.value || did !== docId.value) return
+    changeSets.value = rows
+  } catch (e) {
+    if (seq !== changeSetLoadSeq) return
+    changeSetsError.value = e instanceof Error ? e.message : '加载变更分析记录失败'
+  } finally {
+    if (seq === changeSetLoadSeq) changeSetsLoading.value = false
   }
 }
 
@@ -224,6 +263,53 @@ function openAnalysis(analysisId: string) {
   void router.push(`/projects/${encodeURIComponent(projectId.value)}/requirements/analyses/${encodeURIComponent(analysisId)}`)
 }
 
+async function createChangeSet() {
+  const pid = projectId.value
+  const did = docId.value
+  if (!pid || !did) return
+  if (!selectedBaselineVersionId.value || !selectedVersionId.value) {
+    error.value = '请选择基线版本和目标版本'
+    return
+  }
+  creatingChangeSet.value = true
+  error.value = ''
+  success.value = ''
+  try {
+    const created = await createRequirementChangeSet(pid, did, {
+      baselineVersionId: selectedBaselineVersionId.value,
+      targetVersionId: selectedVersionId.value
+    })
+    changeSets.value = [created, ...changeSets.value.filter((item) => item.id !== created.id)]
+    success.value = '变更影响分析已生成'
+    void router.push(`/projects/${encodeURIComponent(pid)}/requirements/change-sets/${encodeURIComponent(created.id)}`)
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '生成变更影响分析失败'
+  } finally {
+    creatingChangeSet.value = false
+  }
+}
+
+function openChangeSet(changeSetId: string) {
+  void router.push(`/projects/${encodeURIComponent(projectId.value)}/requirements/change-sets/${encodeURIComponent(changeSetId)}`)
+}
+
+function versionLabel(versionId: string) {
+  const version = versions.value.find((item) => item.id === versionId)
+  if (!version) return versionId
+  const label = String(version.version ?? '').trim()
+  return `v${label || version.id}`
+}
+
+function formatTime(ts?: number | null) {
+  if (!ts) return '-'
+  const value = ts < 100000000000 ? ts * 1000 : ts
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '-'
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(
+    date.getHours()
+  ).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+}
+
 watch(
   () => [projectId.value, docId.value],
   () => {
@@ -301,6 +387,41 @@ watch(
                 placeholder="例如：重点覆盖权限、异常流程、边界值和回归风险"
               />
             </div>
+            <div class="rounded-[8px] border border-black/10 bg-[#FAFAFA] p-3">
+              <div class="flex items-center justify-between gap-2">
+                <div>
+                  <div class="text-[12px] font-medium text-[#0A0A0A]">变更影响分析</div>
+                  <div class="mt-1 text-[11px] text-[#717182]">选择基线版本和目标版本，生成影响项与回归集入口。</div>
+                </div>
+                <button
+                  class="h-8 shrink-0 rounded-[8px] bg-[#155DFC] px-3 text-[12px] text-white disabled:opacity-60"
+                  :disabled="versions.length < 2 || !selectedBaselineVersionId || !selectedVersionId || selectedBaselineVersionId === selectedVersionId || creatingChangeSet"
+                  @click="createChangeSet"
+                >
+                  {{ creatingChangeSet ? '生成中...' : '生成' }}
+                </button>
+              </div>
+              <div class="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <label class="block text-[11px] text-[#717182]">
+                  基线版本
+                  <select v-model="selectedBaselineVersionId" class="mt-1 h-8 w-full rounded-[8px] border border-black/10 bg-white px-2 text-[12px] text-[#0A0A0A]">
+                    <option value="">请选择</option>
+                    <option v-for="version in versions" :key="`base-${version.id}`" :value="version.id">
+                      v{{ version.version || version.id }}
+                    </option>
+                  </select>
+                </label>
+                <label class="block text-[11px] text-[#717182]">
+                  目标版本
+                  <select v-model="selectedVersionId" class="mt-1 h-8 w-full rounded-[8px] border border-black/10 bg-white px-2 text-[12px] text-[#0A0A0A]">
+                    <option value="">请选择</option>
+                    <option v-for="version in versions" :key="`target-${version.id}`" :value="version.id">
+                      v{{ version.version || version.id }}
+                    </option>
+                  </select>
+                </label>
+              </div>
+            </div>
             <div v-if="versions.length === 0" class="rounded-[8px] border border-dashed border-black/10 p-4 text-[12px] text-[#717182]">暂无版本记录</div>
             <button
               v-for="version in versions"
@@ -336,6 +457,32 @@ watch(
                 </button>
               </div>
             </button>
+
+            <div class="rounded-[8px] border border-black/10 bg-white">
+              <div class="flex items-center justify-between gap-2 border-b border-black/10 px-3 py-2">
+                <div class="text-[12px] font-medium text-[#0A0A0A]">变更分析记录</div>
+                <button class="h-7 rounded-[6px] border border-black/10 px-2 text-[11px] disabled:opacity-60" :disabled="changeSetsLoading" @click="loadChangeSets()">
+                  {{ changeSetsLoading ? '刷新中...' : '刷新' }}
+                </button>
+              </div>
+              <div v-if="changeSetsLoading && changeSets.length === 0" class="px-3 py-4 text-[12px] text-[#717182]">变更分析记录加载中...</div>
+              <div v-else-if="changeSetsError" class="px-3 py-4 text-[12px] text-[#B91C1C]">{{ changeSetsError }}</div>
+              <div v-else-if="changeSets.length === 0" class="px-3 py-4 text-[12px] text-[#717182]">暂无变更影响分析。</div>
+              <button
+                v-for="row in changeSets"
+                :key="row.id"
+                class="block w-full border-t border-black/10 px-3 py-2 text-left first:border-t-0 hover:bg-[#F8FAFC]"
+                @click="openChangeSet(row.id)"
+              >
+                <div class="flex items-center justify-between gap-2">
+                  <div class="min-w-0 text-[12px] font-medium text-[#0A0A0A]">{{ row.summary || '变更影响分析' }}</div>
+                  <div class="shrink-0 rounded-[6px] bg-[#F4F4F5] px-2 py-1 text-[11px] text-[#4A5565]">{{ row.status }}</div>
+                </div>
+                <div class="mt-1 text-[11px] text-[#717182]">
+                  {{ versionLabel(row.baselineVersionId) }} -> {{ versionLabel(row.targetVersionId) }} · {{ formatTime(row.createdAt) }}
+                </div>
+              </button>
+            </div>
           </div>
 
           <div class="rounded-[10px] border border-black/10 bg-[#FAFAFA] p-3">

@@ -15,8 +15,9 @@ from app.api.deps import CurrentUser, to_unix_ts
 from app.models.enums import ProjectRole
 from app.models.project import Project, ProjectMember
 from app.models.enums import Priority, TestCaseStatus, TestCaseType
-from app.models.requirement import GeneratedCaseDraft, RequirementAnalysis, RequirementCaseLink, RequirementDoc, RequirementDocVersion, RequirementTestPoint
+from app.models.requirement import GeneratedCaseDraft, RequirementAnalysis, RequirementAnalysisRevision, RequirementCaseLink, RequirementDoc, RequirementDocVersion, RequirementTestPoint
 from app.models.testcase import TestCase, TestCaseVersion
+from app.schemas.requirement_change import RequirementAnalysisRevisionDetail
 from app.schemas.requirement import (
     BulkApproveCaseDraftsRequest,
     BulkApproveCaseDraftsResult,
@@ -41,6 +42,7 @@ from app.schemas.requirement import (
 )
 from app.services.doc_ingest.parse_with_docling import parse_document
 from app.services.llm.provider import get_provider
+from app.services.platform_record import create_ai_job_record
 
 
 def _is_admin(user: CurrentUser) -> bool:
@@ -136,6 +138,24 @@ def _to_analysis_detail(row: RequirementAnalysis) -> RequirementAnalysisDetail:
         updatedBy=str(row.updated_by) if row.updated_by else None,
         createdAt=to_unix_ts(row.created_at),
         updatedAt=to_unix_ts(row.updated_at),
+    )
+
+
+def _to_analysis_revision_detail(row: RequirementAnalysisRevision) -> RequirementAnalysisRevisionDetail:
+    return RequirementAnalysisRevisionDetail(
+        id=str(row.id),
+        projectId=str(row.project_id),
+        analysisId=str(row.analysis_id),
+        docId=str(row.doc_id),
+        docVersionId=str(row.doc_version_id),
+        revisionNo=row.revision_no,
+        changeReason=row.change_reason,
+        summary=row.summary,
+        riskLevel=row.risk_level,
+        coverageScore=float(row.coverage_score) if row.coverage_score is not None else None,
+        analysis=dict(row.analysis_json or empty_analysis_payload()),
+        createdBy=str(row.created_by),
+        createdAt=to_unix_ts(row.created_at),
     )
 
 
@@ -446,6 +466,41 @@ async def get_requirement_doc_version_parsed_text(db: AsyncSession, *, user: Cur
     return {"text": txt_path.read_text(encoding="utf-8")}
 
 
+async def _create_analysis_revision(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    analysis: RequirementAnalysis,
+    change_reason: str,
+) -> RequirementAnalysisRevision:
+    current_max = (
+        await db.execute(
+            select(func.max(RequirementAnalysisRevision.revision_no)).where(
+                RequirementAnalysisRevision.analysis_id == analysis.id,
+                RequirementAnalysisRevision.project_id == analysis.project_id,
+                RequirementAnalysisRevision.tenant_id == analysis.tenant_id,
+            )
+        )
+    ).scalar_one_or_none()
+    revision = RequirementAnalysisRevision(
+        tenant_id=analysis.tenant_id,
+        project_id=analysis.project_id,
+        analysis_id=analysis.id,
+        doc_id=analysis.doc_id,
+        doc_version_id=analysis.doc_version_id,
+        revision_no=int(current_max or 0) + 1,
+        change_reason=change_reason,
+        analysis_json=dict(analysis.analysis_json or {}),
+        summary=analysis.summary,
+        risk_level=analysis.risk_level,
+        coverage_score=analysis.coverage_score,
+        created_by=user.id,
+    )
+    db.add(revision)
+    await db.flush()
+    return revision
+
+
 async def _get_requirement_doc_version(db: AsyncSession, *, user: CurrentUser, project_id: uuid.UUID, doc_id: uuid.UUID, version_id: uuid.UUID) -> tuple[RequirementDoc, RequirementDocVersion]:
     project = await _get_project(db, user=user, project_id=project_id)
     await _require_project_read(db, user=user, project=project)
@@ -477,6 +532,16 @@ async def generate_requirement_analysis(db: AsyncSession, *, user: CurrentUser, 
         summary = f"AI 已从《{doc.title}》v{version.version} 生成结构化需求分析。"
         risk_level = "MEDIUM"
         coverage_score = 0.72
+    ai_job = await create_ai_job_record(
+        db,
+        user=user,
+        project_id=project_id,
+        job_type="REQUIREMENT_ANALYSIS",
+        status="SUCCEEDED",
+        trigger_source="REQUIREMENTS",
+        summary=summary,
+        detail={"docId": str(doc_id), "docVersionId": str(version_id)},
+    )
     row = RequirementAnalysis(
         tenant_id=user.tenant_id,
         project_id=project_id,
@@ -487,12 +552,13 @@ async def generate_requirement_analysis(db: AsyncSession, *, user: CurrentUser, 
         summary=summary,
         risk_level=risk_level,
         coverage_score=coverage_score,
-        ai_task_id=None,
+        ai_task_id=ai_job.id,
         created_by=user.id,
         updated_by=None,
     )
     db.add(row)
     await db.flush()
+    await _create_analysis_revision(db, user=user, analysis=row, change_reason="generated")
     return _to_analysis_detail(row)
 
 
@@ -553,7 +619,78 @@ async def update_requirement_analysis(db: AsyncSession, *, user: CurrentUser, pr
         row.analysis_json = _normalize_analysis_payload(payload.analysis)
     row.updated_by = user.id
     await db.flush()
+    await _create_analysis_revision(db, user=user, analysis=row, change_reason="manual_update")
     return _to_analysis_detail(row)
+
+
+async def list_requirement_analysis_revisions(db: AsyncSession, *, user: CurrentUser, project_id: uuid.UUID, analysis_id: uuid.UUID) -> list[RequirementAnalysisRevisionDetail]:
+    project = await _get_project(db, user=user, project_id=project_id)
+    await _require_project_read(db, user=user, project=project)
+    exists = await db.scalar(
+        select(RequirementAnalysis.id).where(
+            RequirementAnalysis.id == analysis_id,
+            RequirementAnalysis.project_id == project_id,
+            RequirementAnalysis.tenant_id == user.tenant_id,
+        )
+    )
+    if exists is None:
+        raise HTTPException(status_code=404, detail="Requirement analysis not found")
+    rows = (
+        await db.execute(
+            select(RequirementAnalysisRevision)
+            .where(
+                RequirementAnalysisRevision.analysis_id == analysis_id,
+                RequirementAnalysisRevision.project_id == project_id,
+                RequirementAnalysisRevision.tenant_id == user.tenant_id,
+            )
+            .order_by(RequirementAnalysisRevision.revision_no.desc(), RequirementAnalysisRevision.id.desc())
+        )
+    ).scalars().all()
+    return [_to_analysis_revision_detail(row) for row in rows]
+
+
+async def rollback_requirement_analysis_revision(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+    analysis_id: uuid.UUID,
+    revision_id: uuid.UUID,
+) -> RequirementAnalysisDetail:
+    project = await _get_project(db, user=user, project_id=project_id)
+    await _require_project_write(db, user=user, project=project)
+    analysis = await db.scalar(
+        select(RequirementAnalysis).where(
+            RequirementAnalysis.id == analysis_id,
+            RequirementAnalysis.project_id == project_id,
+            RequirementAnalysis.tenant_id == user.tenant_id,
+        )
+    )
+    if analysis is None:
+        raise HTTPException(status_code=404, detail="Requirement analysis not found")
+    revision = await db.scalar(
+        select(RequirementAnalysisRevision).where(
+            RequirementAnalysisRevision.id == revision_id,
+            RequirementAnalysisRevision.analysis_id == analysis_id,
+            RequirementAnalysisRevision.project_id == project_id,
+            RequirementAnalysisRevision.tenant_id == user.tenant_id,
+        )
+    )
+    if revision is None:
+        raise HTTPException(status_code=404, detail="Requirement analysis revision not found")
+    analysis.summary = revision.summary
+    analysis.risk_level = revision.risk_level
+    analysis.coverage_score = revision.coverage_score
+    analysis.analysis_json = _normalize_analysis_payload(revision.analysis_json)
+    analysis.updated_by = user.id
+    await db.flush()
+    await _create_analysis_revision(
+        db,
+        user=user,
+        analysis=analysis,
+        change_reason=f"rollback_to_{revision.revision_no}",
+    )
+    return _to_analysis_detail(analysis)
 
 
 def normalize_analysis_test_points_payload(payload: object) -> list[dict]:

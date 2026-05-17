@@ -400,7 +400,7 @@ onMounted(() => {
     <div class="bg-white py-6 px-6 border-b border-gray-200">
       <div class="max-w-7xl mx-auto flex justify-between items-center">
         <DashboardHeader 
-          title="AI 测试平台" 
+          title="WeiTesting" 
           subtitle="智能化测试资产管理与执行编排"
           @create="isCreateModalOpen = true"
         />
