@@ -9,6 +9,7 @@ import {
   fetchCollectionRequestDetail,
   fetchRequestBindings,
   importCollection,
+  importCollectionFile,
   runCollectionRequest,
   updateCollectionRequest,
   type ApiAssetBinding,
@@ -343,6 +344,26 @@ async function handleImport() {
   }
 }
 
+async function handleFileImport(event: Event) {
+  if (!projectId.value) return
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  importSubmitting.value = true
+  error.value = ''
+  success.value = ''
+  try {
+    const created = await importCollectionFile(projectId.value, importFormat.value, file)
+    success.value = `导入成功：${created.name}（${file.name}）`
+    await loadCollection()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '文件导入失败'
+  } finally {
+    importSubmitting.value = false
+    input.value = ''
+  }
+}
+
 watch([collectionId, requestIdFromQuery], () => {
   void loadCollection()
 }, { immediate: true })
@@ -432,6 +453,12 @@ watch([collectionId, requestIdFromQuery], () => {
               <button class="mt-2 w-full rounded-[6px] bg-[#155DFC] px-2 py-1 text-[12px] text-white disabled:opacity-60" :disabled="importSubmitting" @click="handleImport">
                 导入集合
               </button>
+              <div class="mt-2 flex items-center gap-2">
+                <label class="flex-1 cursor-pointer rounded-[6px] border border-dashed border-[#155DFC] bg-[#EFF6FF] px-2 py-1 text-center text-[12px] text-[#155DFC] hover:bg-[#DBEAFE]">
+                  选择文件导入
+                  <input type="file" accept=".json,.yaml,.yml" class="hidden" @change="handleFileImport" />
+                </label>
+              </div>
             </div>
           </aside>
 

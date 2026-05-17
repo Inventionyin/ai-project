@@ -740,37 +740,170 @@ async def import_collection(
     if fmt == "swagger":
         if not isinstance(parsed, dict):
             raise HTTPException(status_code=400, detail="Invalid content")
-        if "openapi" in parsed:
-            collection_name = str((parsed.get("info") or {}).get("title") or "Imported OpenAPI").strip() or "Imported OpenAPI"
-            paths = parsed.get("paths")
-            if not isinstance(paths, dict):
-                raise HTTPException(status_code=400, detail="Invalid content")
-            for path, ops in paths.items():
-                if not isinstance(ops, dict):
-                    continue
-                for method, op in ops.items():
-                    if method.lower() not in ("get", "post", "put", "patch", "delete", "head", "options"):
-                        continue
-                    if not isinstance(op, dict):
-                        continue
-                    tags = op.get("tags")
-                    group_name = "default"
-                    if isinstance(tags, list) and tags:
-                        group_name = str(tags[0] or "default")
-                    name = str(op.get("summary") or op.get("operationId") or f"{method.upper()} {path}")
-                    groups.setdefault(group_name, []).append(
-                        {
-                            "name": name,
-                            "method": method.upper(),
-                            "url": str(path),
-                            "headers": {},
-                            "auth": {},
-                            "body": {},
-                            "asserts": {},
-                        }
-                    )
-        else:
+        if "openapi" not in parsed and "swagger" not in parsed:
             raise HTTPException(status_code=400, detail="Invalid content")
+
+        collection_name = str((parsed.get("info") or {}).get("title") or "Imported OpenAPI").strip() or "Imported OpenAPI"
+
+        # Parse servers for base URL
+        servers = parsed.get("servers")
+        if isinstance(servers, list) and servers:
+            base_server = servers[0]
+            if isinstance(base_server, dict):
+                server_url = str(base_server.get("url") or "")
+                if server_url:
+                    variables["baseUrl"] = server_url
+
+        # Parse security schemes for auth
+        components = parsed.get("components") or {}
+        security_schemes = components.get("securitySchemes") or {}
+        global_security = parsed.get("security")
+        if isinstance(global_security, list) and global_security and isinstance(security_schemes, dict):
+            first_sec = global_security[0]
+            if isinstance(first_sec, dict):
+                for scheme_name in first_sec:
+                    scheme = security_schemes.get(scheme_name)
+                    if isinstance(scheme, dict):
+                        scheme_type = str(scheme.get("type") or "").lower()
+                        if scheme_type == "http" and str(scheme.get("scheme") or "").lower() == "bearer":
+                            auth = {"type": "bearer", "token": "{{token}}"}
+                        elif scheme_type == "apiKey":
+                            auth = {"type": "apiKey", "name": scheme.get("name"), "in": scheme.get("in")}
+                        elif scheme_type == "oauth2":
+                            auth = {"type": "bearer", "token": "{{token}}"}
+                        break
+
+        # Build $ref resolver
+        schemas = components.get("schemas") or {}
+
+        def _resolve_ref(ref_str: str) -> dict[str, Any]:
+            if not isinstance(ref_str, str) or not ref_str.startswith("#/"):
+                return {}
+            parts = ref_str.lstrip("#/").split("/")
+            node = parsed
+            for part in parts:
+                if isinstance(node, dict):
+                    node = node.get(part)
+                else:
+                    return {}
+            return node if isinstance(node, dict) else {}
+
+        def _schema_to_sample(schema: dict[str, Any], depth: int = 0) -> Any:
+            if depth > 5:
+                return None
+            if not isinstance(schema, dict):
+                return None
+            # Handle $ref
+            ref = schema.get("$ref")
+            if isinstance(ref, str):
+                resolved = _resolve_ref(ref)
+                return _schema_to_sample(resolved, depth + 1)
+            schema_type = str(schema.get("type") or "object").lower()
+            example = schema.get("example")
+            if example is not None:
+                return example
+            default = schema.get("default")
+            if default is not None:
+                return default
+            if schema_type == "string":
+                fmt = schema.get("format")
+                if fmt == "date-time": return "2024-01-01T00:00:00Z"
+                if fmt == "date": return "2024-01-01"
+                if fmt == "email": return "user@example.com"
+                if fmt == "uri": return "https://example.com"
+                return "string"
+            if schema_type in ("integer", "number"):
+                return 0
+            if schema_type == "boolean":
+                return True
+            if schema_type == "array":
+                items = schema.get("items")
+                if isinstance(items, dict):
+                    return [_schema_to_sample(items, depth + 1)]
+                return []
+            if schema_type == "object":
+                result: dict[str, Any] = {}
+                props = schema.get("properties")
+                if isinstance(props, dict):
+                    for pname, pschema in props.items():
+                        result[pname] = _schema_to_sample(pschema, depth + 1)
+                return result
+            return None
+
+        paths = parsed.get("paths")
+        if not isinstance(paths, dict):
+            raise HTTPException(status_code=400, detail="Invalid content")
+
+        for path, ops in paths.items():
+            if not isinstance(ops, dict):
+                continue
+            # Path-level parameters
+            path_params = ops.get("parameters") if isinstance(ops.get("parameters"), list) else []
+            for method, op in ops.items():
+                if method.lower() not in ("get", "post", "put", "patch", "delete", "head", "options"):
+                    continue
+                if not isinstance(op, dict):
+                    continue
+                tags = op.get("tags")
+                group_name = "default"
+                if isinstance(tags, list) and tags:
+                    group_name = str(tags[0] or "default")
+                name = str(op.get("summary") or op.get("operationId") or f"{method.upper()} {path}")
+
+                # Resolve path with server base
+                url_path = path
+                if variables.get("baseUrl"):
+                    url_path = path
+
+                # Parse operation-level + path-level parameters
+                op_params = op.get("parameters") if isinstance(op.get("parameters"), list) else []
+                all_params = list(path_params) + op_params
+                headers: dict[str, str] = {}
+                query_parts: list[str] = []
+                for param in all_params:
+                    if not isinstance(param, dict):
+                        continue
+                    ref = param.get("$ref")
+                    if isinstance(ref, str):
+                        param = _resolve_ref(ref)
+                    p_in = str(param.get("in") or "")
+                    p_name = str(param.get("name") or "")
+                    if not p_name:
+                        continue
+                    if p_in == "header":
+                        headers[p_name] = "{{" + p_name + "}}"
+                    elif p_in == "query":
+                        query_parts.append(f"{p_name}={{{{{p_name}}}}}")
+
+                if query_parts:
+                    url_path = f"{url_path}?{'&'.join(query_parts)}"
+
+                # Parse request body
+                body: dict[str, Any] = {}
+                req_body = op.get("requestBody")
+                if isinstance(req_body, dict):
+                    ref = req_body.get("$ref")
+                    if isinstance(ref, str):
+                        req_body = _resolve_ref(ref)
+                    content = req_body.get("content")
+                    if isinstance(content, dict):
+                        json_content = content.get("application/json")
+                        if isinstance(json_content, dict):
+                            schema = json_content.get("schema")
+                            if isinstance(schema, dict):
+                                body = _schema_to_sample(schema) or {}
+
+                groups.setdefault(group_name, []).append(
+                    {
+                        "name": name,
+                        "method": method.upper(),
+                        "url": url_path,
+                        "headers": headers,
+                        "auth": dict(auth),
+                        "body": body,
+                        "asserts": {},
+                    }
+                )
 
     collection = ApiCollection(
         tenant_id=user.tenant_id,

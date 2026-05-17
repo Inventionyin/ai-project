@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, File, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, get_current_user, get_request_id, to_unix_ts
@@ -401,6 +401,34 @@ async def import_(
             project_id=uuid.UUID(payload.projectId),
             format=payload.format,
             content=payload.content,
+        )
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    groups, reqs = await list_groups_and_requests(db, user=user, collection_id=collection.id)
+    detail = await _build_detail(db, user=user, collection_id=collection.id, groups=groups, reqs=reqs)
+    return ApiResponse(data=detail, requestId=request_id)
+
+
+@router.post("/import/file", response_model=ApiResponse[ApiCollectionDetail])
+async def import_file(
+    projectId: str = Query(...),
+    format: str = Query(...),
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    request_id: str = Depends(get_request_id),
+) -> ApiResponse[ApiCollectionDetail]:
+    raw = await file.read()
+    content = raw.decode("utf-8", errors="replace")
+    try:
+        collection = await import_collection(
+            db,
+            user=user,
+            project_id=uuid.UUID(projectId),
+            format=format,
+            content=content,
         )
         await db.commit()
     except Exception:

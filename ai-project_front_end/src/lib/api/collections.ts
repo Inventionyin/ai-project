@@ -226,3 +226,14 @@ export async function importCollection(payload: { projectId: string; format: 'po
     body: JSON.stringify(payload)
   })
 }
+
+export async function importCollectionFile(projectId: string, format: 'postman' | 'swagger', file: File) {
+  const formData = new FormData()
+  formData.append('file', file)
+  const query = new URLSearchParams({ projectId, format })
+  return requestJson<CollectionDetail>(`/api/collections/import/file?${query.toString()}`, {
+    method: 'POST',
+    headers: authHeader(),
+    body: formData
+  })
+}
