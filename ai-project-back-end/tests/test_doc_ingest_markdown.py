@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from app.schemas.doc_ingest import ApiCandidate
 from app.schemas.testcase_gen import GeneratedTestCaseRow
 from app.services.doc_ingest.case_generator import _heuristic_rows, rows_to_csv_dicts
@@ -14,6 +16,8 @@ from app.services.testcase_import import _parse_csv_rows
 def test_markdown_doc_ingest_generates_non_empty_csv_rows() -> None:
     root = Path(__file__).resolve().parents[2]
     doc = root / "docs" / "API.md"
+    if not doc.exists():
+        pytest.skip("docs/API.md not available (e.g. in Docker container)")
     content = doc.read_bytes()
     result = parse_document(content, doc.name, job_id=None)
     assert len(result.apiCandidates) > 0
