@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import uuid
 
 from sqlalchemy import select
@@ -64,7 +65,7 @@ def main() -> None:
             email="qa@example.com",
             name="QA",
             username="qa",
-            password="123456",
+            password=os.getenv("SEED_USER_PASSWORD", "ChangeMe123!"),
             tenant_name="t1",
             roles=["Editor"],
         )

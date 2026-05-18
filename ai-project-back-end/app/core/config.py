@@ -18,7 +18,7 @@ class Settings(BaseSettings):
 
     api_prefix: str = "/api"
 
-    database_url: str = "postgresql+asyncpg://postgres:123456@localhost:5432/ai_test_platform"
+    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/ai_test_platform"
 
     cors_origins: str = "*"
     cors_allow_credentials: bool = True

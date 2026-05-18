@@ -11,7 +11,6 @@ import AuthCard from '@/components/AuthCard.vue'
 const router = useRouter()
 
 const handleRegisterSuccess = () => {
-  console.log('Register successful')
   // AuthCard switches to login tab automatically on register success,
   // so we might not need to do anything, or we can show a toast.
 }
