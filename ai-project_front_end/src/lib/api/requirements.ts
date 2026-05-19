@@ -79,6 +79,7 @@ export type RequirementTestPoint = {
   riskLevel?: string | null
   scenarioType?: string | null
   reason?: string | null
+  aiMeta?: Record<string, unknown> | null
   createdAt?: number | null
   updatedAt?: number | null
 }
@@ -414,6 +415,7 @@ function normalizeTestPoint(data: unknown): RequirementTestPoint {
     riskLevel: row.riskLevel == null ? (row.risk_level == null ? (row.risk == null ? null : String(row.risk)) : String(row.risk_level)) : String(row.riskLevel),
     scenarioType: row.scenarioType == null ? (row.scenario_type == null ? (row.scenario == null ? null : String(row.scenario)) : String(row.scenario_type)) : String(row.scenarioType),
     reason: row.reason == null ? null : String(row.reason),
+    aiMeta: row.aiMeta && typeof row.aiMeta === 'object' ? row.aiMeta as Record<string, unknown> : (row.ai_meta && typeof row.ai_meta === 'object' ? row.ai_meta as Record<string, unknown> : null),
     createdAt: row.createdAt == null ? (row.created_at == null ? null : Number(row.created_at)) : Number(row.createdAt),
     updatedAt: row.updatedAt == null ? (row.updated_at == null ? null : Number(row.updated_at)) : Number(row.updatedAt)
   }

@@ -81,6 +81,7 @@ const resolvedActiveAssetChild = computed(() => {
   if (route.path.startsWith(`/projects/${projectId.value}/settings/defect-providers`)) return '缺陷系统对接'
   if (route.path.startsWith(`/projects/${projectId.value}/settings/notification-providers`)) return '通知 Provider 配置'
   if (route.path.startsWith(`/projects/${projectId.value}/settings/cicd-config`)) return 'CI/CD 配置中心'
+  if (route.path.startsWith(`/projects/${projectId.value}/settings/api-docs`)) return 'API 文档'
   if (route.path.startsWith('/figma/untitled-47-1415')) return '测试套件'
   if (route.path.startsWith('/figma/untitled-34-158')) return '用例管理'
   if (route.path.startsWith('/figma/untitled-9-3')) return '用例管理'
@@ -158,7 +159,8 @@ const settingsLinks = computed<LinkItem[]>(() => [
   { label: '告警规则', icon: navAudit, to: `/projects/${projectId.value}/settings/alert-rules` },
   { label: '缺陷系统对接', icon: navIntegrations, to: `/projects/${projectId.value}/settings/defect-providers` },
   { label: '通知 Provider', icon: navIntegrations, to: `/projects/${projectId.value}/settings/notification-providers` },
-  { label: 'CI/CD 配置中心', icon: navIntegrations, to: `/projects/${projectId.value}/settings/cicd-config` }
+  { label: 'CI/CD 配置中心', icon: navIntegrations, to: `/projects/${projectId.value}/settings/cicd-config` },
+  { label: 'API 文档', icon: navIntegrations, to: `/projects/${projectId.value}/settings/api-docs` }
 ])
 </script>
 

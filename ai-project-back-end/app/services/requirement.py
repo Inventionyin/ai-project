@@ -259,6 +259,9 @@ def _heuristic_analysis(doc: RequirementDoc, version: RequirementDocVersion, tex
                 "scenarioType": "POSITIVE" if i % 2 else "NEGATIVE",
                 "priority": "P1" if i <= 3 else "P2",
                 "source": f"v{version.version}",
+                "rationale": f"基于需求文档中的功能描述「{c[:40]}」生成，覆盖该功能的核心验证场景。",
+                "sourceFeature": f"{doc.title} v{version.version}",
+                "confidenceReason": "通过启发式规则从文档文本中提取，置信度基于文本清晰度和结构完整度。",
             }
         )
     lower_text = text.lower()
@@ -294,6 +297,10 @@ def _llm_analysis(text: str, instruction: str | None) -> dict | None:
     system = (
         "你是资深测试架构师。只输出 JSON 对象，不要 Markdown。字段必须包含 "
         "featurePoints,businessRules,testPoints,riskPoints,boundaryCases,coverageSuggestions。"
+        "每个 testPoints 条目必须包含以下可解释性字段："
+        "rationale（为什么需要这个测试点）、sourceFeature（来自哪个功能/需求）、"
+        "confidenceReason（置信度评分的原因）。"
+        "每个 featurePoints 和 businessRules 条目也应包含 rationale 字段。"
     )
     prompt = json.dumps(
         {

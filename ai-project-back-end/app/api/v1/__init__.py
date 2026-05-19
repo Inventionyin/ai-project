@@ -31,6 +31,7 @@ from app.api.v1.endpoints.plugins import project_router as plugins_project_route
 from app.api.v1.endpoints.members import router as members_router
 from app.api.v1.endpoints.defect_providers import router as defect_providers_router
 from app.api.v1.endpoints.organizations import router as organizations_router
+from app.api.v1.endpoints.performance import router as performance_router
 
 router = APIRouter()
 router.include_router(auth_router, tags=["auth"])
@@ -64,3 +65,4 @@ router.include_router(plugins_project_router, tags=["plugins-project"])
 router.include_router(members_router, prefix="/projects/{projectId}/members", tags=["members"])
 router.include_router(defect_providers_router, prefix="/projects/{projectId}/defect-providers", tags=["defect-providers"])
 router.include_router(organizations_router, tags=["organizations"])
+router.include_router(performance_router, tags=["performance"])

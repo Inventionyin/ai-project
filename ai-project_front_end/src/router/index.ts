@@ -42,6 +42,7 @@ const AlertRules = defineAsyncComponent(() => import('@/views/settings/AlertRule
 const DefectProviders = defineAsyncComponent(() => import('@/views/settings/DefectProviders.vue'))
 const NotificationProviders = defineAsyncComponent(() => import('@/views/settings/NotificationProviders.vue'))
 const CiCdConfig = defineAsyncComponent(() => import('@/views/settings/CiCdConfig.vue'))
+const ApiDocs = defineAsyncComponent(() => import('@/views/settings/ApiDocs.vue'))
 const KnowledgeTemplates = defineAsyncComponent(() => import('@/views/knowledge/KnowledgeTemplates.vue'))
 
 function createProjectShellPage(activeAssetChild: string, Content: Parameters<typeof h>[0]) {
@@ -229,6 +230,10 @@ const router = createRouter({
     {
       path: '/projects/:projectId/settings/cicd-config',
       component: createProjectShellPage('CI/CD 配置中心', CiCdConfig)
+    },
+    {
+      path: '/projects/:projectId/settings/api-docs',
+      component: createProjectShellPage('API 文档', ApiDocs)
     },
     {
       path: '/projects/:projectId/requirements/docs',

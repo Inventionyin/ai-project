@@ -462,6 +462,7 @@ watch(
             <thead>
               <tr class="bg-[rgba(236,236,240,0.3)]">
                 <th class="px-3 py-2 text-left text-[12px] font-medium text-[#717182]">标题</th>
+                <th class="px-3 py-2 text-left text-[12px] font-medium text-[#717182]">AI 解释</th>
                 <th class="px-3 py-2 text-left text-[12px] font-medium text-[#717182]">Priority</th>
                 <th class="px-3 py-2 text-left text-[12px] font-medium text-[#717182]">Risk</th>
                 <th class="px-3 py-2 text-left text-[12px] font-medium text-[#717182]">Scenario</th>
@@ -474,6 +475,14 @@ watch(
                 <td class="px-3 py-2 text-[12px] text-[#0A0A0A]">
                   <div class="font-medium">{{ row.title || '-' }}</div>
                   <div class="mt-1 line-clamp-2 text-[#717182]">{{ row.description || '-' }}</div>
+                </td>
+                <td class="px-3 py-2 text-[12px] text-[#4A5565]">
+                  <div v-if="row.aiMeta && (row.aiMeta.rationale || row.aiMeta.sourceFeature || row.aiMeta.confidenceReason)" class="space-y-1">
+                    <div v-if="row.aiMeta.rationale" class="line-clamp-2"><span class="font-medium text-[#0A0A0A]">原因:</span> {{ row.aiMeta.rationale }}</div>
+                    <div v-if="row.aiMeta.sourceFeature" class="line-clamp-1"><span class="font-medium text-[#0A0A0A]">来源:</span> {{ row.aiMeta.sourceFeature }}</div>
+                    <div v-if="row.aiMeta.confidenceReason" class="line-clamp-1"><span class="font-medium text-[#0A0A0A]">置信度:</span> {{ row.aiMeta.confidenceReason }}</div>
+                  </div>
+                  <span v-else class="text-[#717182]">-</span>
                 </td>
                 <td class="px-3 py-2 text-[12px] text-[#4A5565]">{{ row.priority || '-' }}</td>
                 <td class="px-3 py-2 text-[12px] text-[#4A5565]">{{ row.riskLevel || '-' }}</td>
