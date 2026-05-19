@@ -1,5 +1,5 @@
 import { defineAsyncComponent, defineComponent, h } from 'vue'
-import { createRouter, createWebHistory, useRoute } from 'vue-router'
+import { createRouter, createWebHistory } from 'vue-router'
 import AiTestingPlatformShell from '@/components/figma/ai-testing-platform/AiTestingPlatformShell.vue'
 
 const Login = defineAsyncComponent(() => import('../views/Login.vue'))
@@ -33,9 +33,13 @@ const DocParseJobs = defineAsyncComponent(() => import('@/views/settings/DocPars
 const DevOps = defineAsyncComponent(() => import('@/views/settings/DevOps.vue'))
 const Executors = defineAsyncComponent(() => import('@/views/settings/Executors.vue'))
 const Plugins = defineAsyncComponent(() => import('@/views/settings/Plugins.vue'))
+const Members = defineAsyncComponent(() => import('@/views/settings/Members.vue'))
 const SecurityAudit = defineAsyncComponent(() => import('@/views/settings/SecurityAudit.vue'))
 const CiTokenGovernance = defineAsyncComponent(() => import('@/views/settings/CiTokenGovernance.vue'))
 const AiCapabilities = defineAsyncComponent(() => import('@/views/settings/AiCapabilities.vue'))
+const TaskQueue = defineAsyncComponent(() => import('@/views/settings/TaskQueue.vue'))
+const AlertRules = defineAsyncComponent(() => import('@/views/settings/AlertRules.vue'))
+const KnowledgeTemplates = defineAsyncComponent(() => import('@/views/knowledge/KnowledgeTemplates.vue'))
 
 function createProjectShellPage(activeAssetChild: string, Content: Parameters<typeof h>[0]) {
   return defineComponent({
@@ -51,26 +55,6 @@ function createProjectShellPage(activeAssetChild: string, Content: Parameters<ty
                 default: () => h(Content)
               }
         )
-    }
-  })
-}
-
-function createPlaceholderPage(title: string) {
-  return defineComponent({
-    name: `Placeholder_${title}`,
-    setup() {
-      const route = useRoute()
-      return () =>
-        h('div', { class: 'min-h-[calc(100vh-48px)] w-full bg-[rgba(236,236,240,0.3)] p-6' }, [
-          h('div', { class: 'rounded-[14px] border border-black/10 bg-white p-6' }, [
-            h('div', { class: 'text-[14px] font-semibold leading-[20px] text-[#0A0A0A]' }, title),
-            h(
-              'div',
-              { class: 'mt-2 text-[12px] leading-[16px] text-[#717182]' },
-              `projectId: ${String(route.params.projectId ?? '-')}${route.params.id ? ` · id: ${String(route.params.id)}` : ''}${route.params.runId ? ` · runId: ${String(route.params.runId)}` : ''}`
-            )
-          ])
-        ])
     }
   })
 }
@@ -224,6 +208,14 @@ const router = createRouter({
       component: createProjectShellPage('AI 能力中心', AiCapabilities)
     },
     {
+      path: '/projects/:projectId/settings/task-queue',
+      component: createProjectShellPage('任务队列监控', TaskQueue)
+    },
+    {
+      path: '/projects/:projectId/settings/alert-rules',
+      component: createProjectShellPage('告警规则', AlertRules)
+    },
+    {
       path: '/projects/:projectId/requirements/docs',
       component: ProjectRequirementDocs
     },
@@ -244,6 +236,10 @@ const router = createRouter({
       component: ProjectKnowledgeRetrospectives
     },
     {
+      path: '/projects/:projectId/knowledge/templates',
+      component: createProjectShellPage('知识中心', KnowledgeTemplates)
+    },
+    {
       path: '/projects/:projectId/defects',
       component: ProjectDefectsList
     },
@@ -257,11 +253,11 @@ const router = createRouter({
     },
     {
       path: '/settings/rbac',
-      component: createPlaceholderPage('权限与成员')
+      component: createProjectShellPage('权限与成员', Members)
     },
     {
       path: '/settings/audit',
-      component: createPlaceholderPage('审计日志')
+      component: createProjectShellPage('安全审计', SecurityAudit)
     },
     {
       path: '/dashboard',
