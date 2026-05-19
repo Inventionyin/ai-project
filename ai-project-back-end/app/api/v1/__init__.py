@@ -28,6 +28,7 @@ from app.api.v1.endpoints.security_policy import router as security_policy_route
 from app.api.v1.endpoints.executors import router as executors_router
 from app.api.v1.endpoints.plugins import router as plugins_router
 from app.api.v1.endpoints.plugins import project_router as plugins_project_router
+from app.api.v1.endpoints.members import router as members_router
 
 router = APIRouter()
 router.include_router(auth_router, tags=["auth"])
@@ -58,3 +59,4 @@ router.include_router(security_policy_router, tags=["security-policy"])
 router.include_router(executors_router, tags=["executors"])
 router.include_router(plugins_router, tags=["plugins"])
 router.include_router(plugins_project_router, tags=["plugins-project"])
+router.include_router(members_router, prefix="/projects/{projectId}/members", tags=["members"])
