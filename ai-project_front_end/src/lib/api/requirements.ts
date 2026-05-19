@@ -11,6 +11,7 @@ export type RequirementDoc = {
   tags: string[]
   sourceType: RequirementSourceType
   latestVersionId?: string | null
+  currentVersionId?: string | null
   createdAt?: number | null
   updatedAt?: number | null
 }

@@ -522,6 +522,20 @@ watch(
                 >
                   {{ analyzingVersionId === version.id ? '生成中...' : '生成分析' }}
                 </button>
+                <button
+                  v-if="detail && detail.currentVersionId !== version.id"
+                  class="h-7 rounded-[6px] border border-[#F59E0B]/40 px-2 text-[11px] text-[#B45309] disabled:opacity-60"
+                  :disabled="rollingBackVersionId === version.id"
+                  @click.stop="handleRollback(version.id)"
+                >
+                  {{ rollingBackVersionId === version.id ? '回滚中...' : '回滚到此版本' }}
+                </button>
+                <span
+                  v-else-if="detail && detail.currentVersionId === version.id"
+                  class="inline-flex h-7 items-center rounded-[6px] bg-[#ECFDF5] px-2 text-[11px] text-[#047857]"
+                >
+                  当前版本
+                </span>
               </div>
             </button>
 
