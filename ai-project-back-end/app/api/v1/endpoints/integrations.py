@@ -208,3 +208,30 @@ async def simulate_batch_project_notification_strategy(
         run_contexts=payload.runContexts,
     )
     return ApiResponse(data=data, requestId=request_id)
+
+
+@router.get("/outbox/stats", response_model=ApiResponse[dict])
+async def outbox_stats(
+    projectId: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    request_id: str = Depends(get_request_id),
+) -> ApiResponse[dict]:
+    from sqlalchemy import func, select
+    from app.models.integration import NotificationOutbox
+
+    q = select(
+        NotificationOutbox.status,
+        func.count().label("count"),
+    ).where(
+        NotificationOutbox.tenant_id == user.tenant_id,
+    ).group_by(NotificationOutbox.status)
+
+    rows = (await db.execute(q)).all()
+    stats = {str(r.status.value if hasattr(r.status, 'value') else r.status): r.count for r in rows}
+    total = sum(stats.values())
+
+    return ApiResponse(
+        data={"total": total, "byStatus": stats},
+        requestId=request_id,
+    )
