@@ -72,7 +72,7 @@ type TestCaseListItem = {
   version: string
   type: Row['type']
   priority: Row['priority']
-  status: 'DRAFT' | 'REVIEWED' | 'DEPRECATED'
+  status: 'DRAFT' | 'REVIEWED' | 'DEPRECATED' | 'ARCHIVED'
   lastRun?: 'QUEUED' | 'RUNNING' | 'PASSED' | 'FAILED' | 'SKIPPED' | null
   updatedAt: number
   tags: string[]
@@ -96,7 +96,7 @@ type TestCaseDetail = {
   version: string
   type: TestCaseListItem['type']
   priority: TestCaseListItem['priority']
-  status: TestCaseListItem['status']
+  status: 'DRAFT' | 'REVIEWED' | 'DEPRECATED' | 'ARCHIVED'
   tags: string[]
   ownerId?: string | null
   contentMd: string
@@ -151,7 +151,8 @@ type EditCasePayload = {
 const statusLabelMap: Record<TestCaseListItem['status'], Row['status']> = {
   DRAFT: '草稿',
   REVIEWED: '已评审',
-  DEPRECATED: '已弃用'
+  DEPRECATED: '已弃用',
+  ARCHIVED: '已归档'
 }
 
 const caseLastRunLabelMap: Record<NonNullable<TestCaseListItem['lastRun']>, Row['lastRun']> = {
@@ -346,7 +347,9 @@ const loadCases = async () => {
         ? 'DRAFT'
         : selectedStatuses.value[0] === '已评审'
           ? 'REVIEWED'
-          : 'DEPRECATED'
+          : selectedStatuses.value[0] === '已归档'
+            ? 'ARCHIVED'
+            : 'DEPRECATED'
       query.set('status', statusParam)
     }
 
@@ -704,6 +707,33 @@ async function deleteCase(index: number) {
   }
 }
 
+async function archiveOrRestoreCase(index: number) {
+  const target = displayRows.value[index]
+  if (!target) return
+  const isArchived = target.status === '已归档'
+  const action = isArchived ? 'unarchive' : 'archive'
+  const label = isArchived ? '恢复' : '归档'
+  if (!window.confirm(`确定要${label}用例 "${target.title}" 吗？`)) return
+  try {
+    const authorization = resolveAuthHeader()
+    const response = await fetch(`${resolveApiBaseUrl()}/api/testcases/${target.id}/${action}`, {
+      method: 'POST',
+      headers: {
+        Authorization: authorization
+      }
+    })
+    const payload = await response.json() as ApiResponse<Record<string, never>>
+    if (!response.ok || payload.code !== 0) {
+      throw new Error(payload.message || `${label}用例失败，请稍后重试`)
+    }
+    showToast(`用例已${label}`)
+    await loadCases()
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : `${label}用例失败，请稍后重试`
+    showToast(errorMessage, 'error')
+  }
+}
+
 async function saveEditCase(payload: EditCasePayload) {
   if (!editingCaseId.value || !editingCaseDetail.value) return
   const title = payload.title.trim()
@@ -824,7 +854,7 @@ const isFilterOpen = ref(false)
 const filterAreaRef = ref<HTMLElement | null>(null)
 
 const typeOptions = ['API', 'UI', 'PERF', 'MIX'] as const
-const statusOptions = ['草稿', '已评审', '已弃用'] as const
+const statusOptions = ['草稿', '已评审', '已弃用', '已归档'] as const
 const priorityOptions = ['P0', 'P1', 'P2', 'P3'] as const
 
 const selectedTypes = ref<string[]>([])
@@ -1080,6 +1110,7 @@ watch(() => route.params.projectId, () => {
           :rows="displayRows"
           @delete="deleteCase"
           @edit="openEditCase"
+          @archive="archiveOrRestoreCase"
         />
         <div
           v-else

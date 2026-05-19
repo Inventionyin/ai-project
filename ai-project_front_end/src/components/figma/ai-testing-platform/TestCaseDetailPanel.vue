@@ -11,8 +11,8 @@ import { fetchTestcaseBindings, type TestcaseBinding } from '@/lib/aiTestingPlat
 
 type CaseType = 'API' | 'UI' | 'PERF' | 'MIX'
 type CasePriority = 'P0' | 'P1' | 'P2' | 'P3'
-type CaseStatus = '已评审' | '草稿' | '已弃用'
-type CaseStatusCode = 'DRAFT' | 'REVIEWED' | 'DEPRECATED'
+type CaseStatus = '已评审' | '草稿' | '已弃用' | '已归档'
+type CaseStatusCode = 'DRAFT' | 'REVIEWED' | 'DEPRECATED' | 'ARCHIVED'
 
 type TabKey = 'basic' | 'content' | 'ai' | 'history'
 type ApiResponse<T> = {
@@ -31,7 +31,7 @@ type TestCaseDetail = {
   version: string
   type: CaseType
   priority: CasePriority
-  status: CaseStatusCode
+  status: 'DRAFT' | 'REVIEWED' | 'DEPRECATED' | 'ARCHIVED'
   tags: string[]
   ownerId?: string | null
   ownerName?: string | null
@@ -76,18 +76,46 @@ function debugRun() {
   showToast('调试运行已触发')
 }
 
+async function archiveOrUnarchiveCase() {
+  if (!currentDetail.value) return
+  const isArchived = currentDetail.value.status === 'ARCHIVED'
+  const action = isArchived ? 'unarchive' : 'archive'
+  const label = isArchived ? '恢复' : '归档'
+  if (!window.confirm(`确定要${label}用例 "${form.title}" 吗？`)) return
+  try {
+    const response = await fetch(resolveApiUrl(`/api/testcases/${caseId.value}/${action}`), {
+      method: 'POST',
+      headers: {
+        Authorization: resolveAuthHeader()
+      }
+    })
+    const payload = await response.json() as ApiResponse<TestCaseDetail>
+    if (!response.ok || payload.code !== 0 || !payload.data) {
+      throw new Error(payload.message || `${label}失败`)
+    }
+    const detail = payload.data
+    currentDetail.value = detail
+    form.status = statusLabelMap[detail.status]
+    showToast(`用例已${label}`)
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : `${label}失败`, 'error')
+  }
+}
+
 const activeTab = ref<TabKey>('basic')
 const caseVersion = ref('v1.0')
 const tabKeys: TabKey[] = ['basic', 'content', 'ai', 'history']
 const statusLabelMap: Record<CaseStatusCode, CaseStatus> = {
   DRAFT: '草稿',
   REVIEWED: '已评审',
-  DEPRECATED: '已弃用'
+  DEPRECATED: '已弃用',
+  ARCHIVED: '已归档'
 }
 const statusCodeMap: Record<CaseStatus, CaseStatusCode> = {
   草稿: 'DRAFT',
   已评审: 'REVIEWED',
-  已弃用: 'DEPRECATED'
+  已弃用: 'DEPRECATED',
+  已归档: 'ARCHIVED'
 }
 
 const form = reactive({
@@ -470,6 +498,19 @@ watch(() => route.query.tab, () => {
       <div class="flex items-center gap-[8px]">
         <button
           type="button"
+          class="relative h-[32px] rounded-[10px] border-[0.6667px] border-black/10 bg-transparent px-[12px]"
+          @click="archiveOrUnarchiveCase"
+        >
+          <span
+            class="text-[14px] font-medium leading-[20px]"
+            :class="currentDetail?.status === 'ARCHIVED' ? 'text-[#00A63E]' : 'text-[#717182]'"
+          >
+            {{ currentDetail?.status === 'ARCHIVED' ? '恢复' : '归档' }}
+          </span>
+        </button>
+
+        <button
+          type="button"
           class="relative h-[32px] rounded-[10px] border-[0.6667px] border-black/10 bg-transparent px-[12px] pr-[14px]"
           @click="debugRun"
         >
@@ -624,6 +665,7 @@ watch(() => route.query.tab, () => {
                   <option value="草稿">草稿</option>
                   <option value="已评审">已评审</option>
                   <option value="已弃用">已弃用</option>
+                  <option value="已归档">已归档</option>
                 </select>
                 <img :src="chevronDownSmall" alt="" class="pointer-events-none absolute right-[12px] top-1/2 h-[13px] w-[13px] -translate-y-1/2" />
               </div>

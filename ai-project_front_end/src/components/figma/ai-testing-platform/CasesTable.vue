@@ -8,7 +8,7 @@ export type Row = {
   title: string
   type: 'API' | 'UI' | 'PERF' | 'MIX'
   priority: 'P0' | 'P1' | 'P2' | 'P3'
-  status: '已评审' | '草稿' | '已弃用'
+  status: '已评审' | '草稿' | '已弃用' | '已归档'
   module: string
   interfaceUrl: string
   method: string
@@ -27,6 +27,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'delete', index: number): void
   (e: 'edit', index: number): void
+  (e: 'archive', index: number): void
   (e: 'update:selectedIds', value: string[]): void
 }>()
 
@@ -81,6 +82,7 @@ function priorityClass(priority: Row['priority']) {
 function statusClass(status: Row['status']) {
   if (status === '已评审') return '#00A63E'
   if (status === '草稿') return '#D08700'
+  if (status === '已归档') return '#6A7282'
   return '#99A1AF'
 }
 
@@ -245,6 +247,14 @@ const rowHeight = '56.67px'
                 @click.stop="emit('edit', index)"
               >
                 编辑
+              </button>
+              <button
+                type="button"
+                class="text-[12px] font-medium leading-[16px] hover:underline"
+                :class="row.status === '已归档' ? 'text-[#00A63E]' : 'text-[#717182]'"
+                @click.stop="emit('archive', index)"
+              >
+                {{ row.status === '已归档' ? '恢复' : '归档' }}
               </button>
               <button
                 type="button"

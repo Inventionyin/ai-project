@@ -27,6 +27,7 @@ from app.schemas.testcase import (
 )
 from app.schemas.testcase_import import TestCaseImportData
 from app.services.testcase import (
+    archive_testcase,
     create_testcase,
     delete_testcase,
     get_latest_case_runs,
@@ -36,6 +37,7 @@ from app.services.testcase import (
     list_testcases,
     list_testcase_owner_options,
     restore_testcase_version,
+    unarchive_testcase,
     update_testcase,
 )
 from app.services.ai_import import create_ai_import_job, get_ai_import_job, upload_ai_import_job_file
@@ -486,6 +488,92 @@ async def delete(
         await db.rollback()
         raise
     return ApiResponse(data={}, requestId=request_id)
+
+
+@router.post("/{id}/archive", response_model=ApiResponse[TestCaseDetail])
+async def archive(
+    id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    request_id: str = Depends(get_request_id),
+) -> ApiResponse[TestCaseDetail]:
+    try:
+        testcase = await archive_testcase(db, user=user, testcase_id=id)
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+
+    owner_name = await get_owner_name(db, user=user, owner_id=testcase.owner_id)
+    return ApiResponse(
+        data=TestCaseDetail(
+            id=str(testcase.id),
+            projectId=str(testcase.project_id),
+            testCaseId=testcase.test_case_id,
+            expectedStatusCode=_extract_expected_status_code(testcase.ai_meta_json),
+            preconditions=_extract_preconditions(testcase.ai_meta_json),
+            postconditions=_extract_postconditions(testcase.ai_meta_json),
+            title=testcase.title,
+            type=testcase.type,
+            priority=testcase.priority,
+            status=testcase.status,
+            tags=testcase.tags_json,
+            ownerId=str(testcase.owner_id) if testcase.owner_id else None,
+            ownerName=owner_name,
+            version=_format_version(testcase.version),
+            contentMd=testcase.content_md,
+            feature=testcase.feature,
+            apiMethod=testcase.api_method,
+            apiUrl=testcase.api_url,
+            apiParams=_extract_api_params(testcase.ai_meta_json),
+            apiHeaders=_extract_api_headers(testcase.ai_meta_json),
+            expectedResult=_extract_expected_result(testcase.ai_meta_json),
+        ),
+        requestId=request_id,
+    )
+
+
+@router.post("/{id}/unarchive", response_model=ApiResponse[TestCaseDetail])
+async def unarchive(
+    id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    request_id: str = Depends(get_request_id),
+) -> ApiResponse[TestCaseDetail]:
+    try:
+        testcase = await unarchive_testcase(db, user=user, testcase_id=id)
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+
+    owner_name = await get_owner_name(db, user=user, owner_id=testcase.owner_id)
+    return ApiResponse(
+        data=TestCaseDetail(
+            id=str(testcase.id),
+            projectId=str(testcase.project_id),
+            testCaseId=testcase.test_case_id,
+            expectedStatusCode=_extract_expected_status_code(testcase.ai_meta_json),
+            preconditions=_extract_preconditions(testcase.ai_meta_json),
+            postconditions=_extract_postconditions(testcase.ai_meta_json),
+            title=testcase.title,
+            type=testcase.type,
+            priority=testcase.priority,
+            status=testcase.status,
+            tags=testcase.tags_json,
+            ownerId=str(testcase.owner_id) if testcase.owner_id else None,
+            ownerName=owner_name,
+            version=_format_version(testcase.version),
+            contentMd=testcase.content_md,
+            feature=testcase.feature,
+            apiMethod=testcase.api_method,
+            apiUrl=testcase.api_url,
+            apiParams=_extract_api_params(testcase.ai_meta_json),
+            apiHeaders=_extract_api_headers(testcase.ai_meta_json),
+            expectedResult=_extract_expected_result(testcase.ai_meta_json),
+        ),
+        requestId=request_id,
+    )
 
 
 @router.get("/{id}/versions", response_model=ApiResponse[list[TestCaseVersionSchema]])

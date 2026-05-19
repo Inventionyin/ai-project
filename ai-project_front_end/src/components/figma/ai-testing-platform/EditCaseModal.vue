@@ -6,7 +6,7 @@ import modalTagsIcon from '@/assets/figma/ai-testing-platform/modal-tags-icon.sv
 
 type CaseType = 'API' | 'UI' | 'PERF' | 'MIX'
 type CasePriority = 'P0' | 'P1' | 'P2' | 'P3'
-type CaseStatus = 'DRAFT' | 'REVIEWED' | 'DEPRECATED'
+type CaseStatus = 'DRAFT' | 'REVIEWED' | 'DEPRECATED' | 'ARCHIVED'
 
 type EditCaseInitialData = {
   testCaseId: string
@@ -67,7 +67,8 @@ const priorityOptions: CasePriority[] = ['P0', 'P1', 'P2', 'P3']
 const statusOptions: Array<{ label: string; value: CaseStatus }> = [
   { label: '草稿', value: 'DRAFT' },
   { label: '已评审', value: 'REVIEWED' },
-  { label: '已弃用', value: 'DEPRECATED' }
+  { label: '已弃用', value: 'DEPRECATED' },
+  { label: '已归档', value: 'ARCHIVED' }
 ]
 
 const feature = ref('')

@@ -67,6 +67,7 @@ docker-compose.yml     Docker Compose 配置
 | DATABASE_URL | PostgreSQL 连接串 |
 | JWT_SECRET_KEY | JWT 签名密钥（>=32字符） |
 | LLM_API_KEY | LLM API 密钥 |
+| SEED_USER_PASSWORD | Seed user password (default: ChangeMe123!) |
 
 ## 运行测试
 

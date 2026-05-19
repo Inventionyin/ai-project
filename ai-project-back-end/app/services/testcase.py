@@ -642,5 +642,69 @@ async def restore_testcase_version(
         testcase=testcase,
         detail={"restoredVersion": version_num, "newVersion": _format_version(testcase.version)},
     )
-    
+
+    return testcase
+
+
+async def archive_testcase(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    testcase_id: uuid.UUID,
+) -> TestCase:
+    testcase = await get_testcase(db, user=user, testcase_id=testcase_id)
+    await _check_project_permission(db, user, testcase.project_id, [ProjectRole.OWNER, ProjectRole.ADMIN, ProjectRole.EDITOR])
+
+    previous_status = testcase.status
+    testcase.status = "ARCHIVED"
+    testcase.version += 1
+    version = TestCaseVersion(
+        tenant_id=user.tenant_id,
+        testcase_id=testcase.id,
+        version=testcase.version,
+        content_md=testcase.content_md,
+        created_by=user.id,
+    )
+    db.add(version)
+    await _create_testcase_audit(
+        db,
+        user=user,
+        project_id=testcase.project_id,
+        action="ARCHIVE_TESTCASE",
+        testcase=testcase,
+        detail={"previousStatus": previous_status, "newStatus": "ARCHIVED"},
+    )
+    return testcase
+
+
+async def unarchive_testcase(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    testcase_id: uuid.UUID,
+) -> TestCase:
+    testcase = await get_testcase(db, user=user, testcase_id=testcase_id)
+    await _check_project_permission(db, user, testcase.project_id, [ProjectRole.OWNER, ProjectRole.ADMIN, ProjectRole.EDITOR])
+
+    if testcase.status != "ARCHIVED":
+        raise HTTPException(status_code=400, detail="TestCase is not archived")
+
+    testcase.status = "DRAFT"
+    testcase.version += 1
+    version = TestCaseVersion(
+        tenant_id=user.tenant_id,
+        testcase_id=testcase.id,
+        version=testcase.version,
+        content_md=testcase.content_md,
+        created_by=user.id,
+    )
+    db.add(version)
+    await _create_testcase_audit(
+        db,
+        user=user,
+        project_id=testcase.project_id,
+        action="UNARCHIVE_TESTCASE",
+        testcase=testcase,
+        detail={"previousStatus": "ARCHIVED", "newStatus": "DRAFT"},
+    )
     return testcase

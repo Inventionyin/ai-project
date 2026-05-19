@@ -31,6 +31,7 @@ class TestCaseStatus(str, Enum):
     DRAFT = "DRAFT"
     REVIEWED = "REVIEWED"
     DEPRECATED = "DEPRECATED"
+    ARCHIVED = "ARCHIVED"
 
 
 class TriggerType(str, Enum):
