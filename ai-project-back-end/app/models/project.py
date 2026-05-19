@@ -29,8 +29,10 @@ class Project(Base, CreatedAtMixin):
     ci_token_allowed_runner_types: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
     ci_token_allowed_testcase_ids: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
     ci_token_max_testcase_count: Mapped[int | None] = mapped_column(nullable=True)
+    org_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=True, index=True)
 
     tenant: Mapped["Tenant"] = relationship(back_populates="projects")
+    organization: Mapped["Organization | None"] = relationship(back_populates="projects")
     owner: Mapped["User"] = relationship(back_populates="owned_projects", foreign_keys=[owner_id])
 
     members: Mapped[list["ProjectMember"]] = relationship(back_populates="project", cascade="all, delete-orphan")

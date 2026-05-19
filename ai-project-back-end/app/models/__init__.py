@@ -22,6 +22,7 @@ from app.models.requirement import (
     RequirementTestPoint,
 )
 from app.models.integration import AiRecord, IssueLink, Notification, NotificationOutbox
+from app.models.organization import Organization
 from app.models.knowledge import KnowledgeRecommendation, KnowledgeRule, KnowledgeTemplate, RetrospectiveRecord
 from app.models.prompt_template import PromptTemplate
 from app.models.platform_record import AiJobRecord
@@ -61,6 +62,7 @@ __all__ = [
     "KnowledgeTemplate",
     "Notification",
     "NotificationOutbox",
+    "Organization",
     "Plugin",
     "PluginInstallation",
     "PromptTemplate",

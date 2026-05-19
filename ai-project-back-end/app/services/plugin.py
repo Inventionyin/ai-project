@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from packaging.version import Version
@@ -386,11 +387,20 @@ async def invoke_plugin_installation(
         project_id=project_id,
         plugin_id=row.plugin_id,
     )
+
+    # Execute plugin in sandboxed mode with timeout
+    sandbox_result = await invoke_plugin_sandboxed(
+        plugin=plugin,
+        installation=installation,
+        payload={},
+    )
+
+    status = "success" if sandbox_result.get("ok") else "failed"
     result = PluginInvokeResponse(
         installationId=str(installation.id),
         pluginId=str(plugin.id),
         pluginSlug=plugin.slug,
-        status="accepted",
+        status=status,
     )
     await create_audit_log(
         db,
@@ -408,6 +418,7 @@ async def invoke_plugin_installation(
             "installation_id": str(installation.id),
             "invoked_by": str(user.id),
             "status": result.status,
+            "sandbox_result": sandbox_result,
         },
     )
     return result
@@ -457,3 +468,55 @@ async def list_plugin_invocations(
             createdAt=int(row.created_at.timestamp()),
         ))
     return total, items
+
+
+async def invoke_plugin_sandboxed(
+    *,
+    plugin: Plugin,
+    installation: PluginInstallation,
+    payload: dict,
+    timeout_seconds: float = 30.0,
+) -> dict:
+    """Invoke a plugin with timeout and error isolation."""
+    try:
+        result = await asyncio.wait_for(
+            _execute_plugin(plugin=plugin, installation=installation, payload=payload),
+            timeout=timeout_seconds,
+        )
+        return {"ok": True, "result": result}
+    except asyncio.TimeoutError:
+        logger.warning(f"Plugin {plugin.slug} timed out after {timeout_seconds}s")
+        return {"ok": False, "error": f"Plugin execution timed out after {timeout_seconds}s"}
+    except Exception as e:
+        logger.error(f"Plugin {plugin.slug} failed: {e}")
+        return {"ok": False, "error": str(e)}
+
+
+async def _execute_plugin(
+    *,
+    plugin: Plugin,
+    installation: PluginInstallation,
+    payload: dict,
+) -> dict:
+    """Execute plugin entry point. This is the actual execution logic."""
+    # For now, plugins are HTTP-based - call their entry_point URL
+    # Future: support Python/JS sandboxed execution
+    import requests
+
+    entry_point = plugin.entry_point
+    if not entry_point:
+        raise ValueError("Plugin has no entry_point configured")
+
+    config = installation.config_json or {}
+
+    try:
+        resp = requests.post(
+            entry_point,
+            json={"payload": payload, "config": config},
+            timeout=25,
+            headers={"Content-Type": "application/json"},
+        )
+        resp.raise_for_status()
+        return resp.json()
+    except requests.RequestException as e:
+        raise RuntimeError(f"Plugin HTTP call failed: {e}")
