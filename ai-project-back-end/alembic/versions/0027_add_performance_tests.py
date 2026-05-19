@@ -1,7 +1,7 @@
 """add performance tests and test runs tables
 
-Revision ID: 0026_add_performance_tests
-Revises: 0025_add_organizations
+Revision ID: 0027_add_performance_tests
+Revises: 0026_add_ui_automation
 Create Date: 2026-05-19
 """
 
@@ -10,8 +10,8 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 
-revision = "0026_add_performance_tests"
-down_revision = "0025_add_organizations"
+revision = "0027_add_performance_tests"
+down_revision = "0026_add_ui_automation"
 branch_labels = None
 depends_on = None
 

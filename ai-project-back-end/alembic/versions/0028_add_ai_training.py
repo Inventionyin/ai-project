@@ -1,7 +1,7 @@
 """add ai training tables
 
 Revision ID: 0028_add_ai_training
-Revises: 0026_add_ui_automation
+Revises: 0027_add_performance_tests
 Create Date: 2026-05-19
 """
 
@@ -11,7 +11,7 @@ from sqlalchemy.dialects import postgresql
 
 
 revision = "0028_add_ai_training"
-down_revision = "0026_add_ui_automation"
+down_revision = "0027_add_performance_tests"
 branch_labels = None
 depends_on = None
 
