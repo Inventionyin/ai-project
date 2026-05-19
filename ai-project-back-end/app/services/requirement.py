@@ -119,6 +119,7 @@ def _to_doc_detail(doc: RequirementDoc) -> RequirementDocDetail:
         ownerId=str(doc.owner_id) if doc.owner_id else None,
         status=doc.status,
         tags=list(doc.tags_json or []),
+        currentVersionId=str(doc.current_version_id) if doc.current_version_id else None,
         createdBy=str(doc.created_by),
         createdAt=to_unix_ts(doc.created_at),
         updatedAt=to_unix_ts(doc.updated_at),
@@ -514,6 +515,89 @@ async def create_requirement_doc_version(db: AsyncSession, *, user: CurrentUser,
     return _to_version_detail(row)
 
 
+async def create_requirement_doc_version_from_bytes(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    doc_id: uuid.UUID,
+    content: bytes,
+    filename: str,
+    change_summary: str = "",
+    effective_scope: str = "",
+) -> RequirementDocVersion:
+    """Create a doc version from raw bytes (used by URL import)."""
+    version_row = await db.scalar(
+        select(RequirementDocVersion).where(
+            RequirementDocVersion.doc_id == doc_id,
+            RequirementDocVersion.tenant_id == user.tenant_id,
+        )
+        .order_by(RequirementDocVersion.version.desc())
+        .limit(1)
+    )
+    if version_row is None:
+        # Verify doc exists
+        doc = await db.scalar(
+            select(RequirementDoc).where(
+                RequirementDoc.id == doc_id,
+                RequirementDoc.tenant_id == user.tenant_id,
+            )
+        )
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document not found")
+        project_id = doc.project_id
+        next_version = 1
+    else:
+        project_id = version_row.project_id
+        next_version = version_row.version + 1
+
+    project = await _get_project(db, user=user, project_id=project_id)
+    await _require_project_write(db, user=user, project=project)
+
+    version_id = uuid.uuid4()
+    file_name = Path(filename).name or "imported-doc"
+    content_hash = hashlib.sha256(content).hexdigest()
+    base_dir = Path("var") / "requirements" / str(project_id) / str(doc_id) / str(version_id)
+    base_dir.mkdir(parents=True, exist_ok=True)
+    source_path = base_dir / file_name
+    source_path.write_bytes(content)
+
+    row = RequirementDocVersion(
+        id=version_id,
+        tenant_id=user.tenant_id,
+        project_id=project_id,
+        doc_id=doc_id,
+        version=next_version,
+        file_name=file_name,
+        file_type=_detect_file_type(file_name),
+        storage_url=str(source_path).replace("\\", "/"),
+        content_hash=content_hash,
+        parsed_text_url=None,
+        parsed_text_preview=None,
+        change_summary=change_summary,
+        effective_scope=effective_scope,
+        created_by=user.id,
+    )
+    db.add(row)
+    await db.flush()
+    await _create_requirement_audit(
+        db,
+        user=user,
+        project_id=project_id,
+        action="IMPORT_URL_VERSION",
+        resource_type="requirement_doc_version",
+        resource_id=str(row.id),
+        summary=f"通过URL导入需求文档版本：{file_name}",
+        detail={
+            "docId": str(doc_id),
+            "version": row.version,
+            "fileName": row.file_name,
+            "fileType": row.file_type,
+            "contentHash": row.content_hash,
+        },
+    )
+    return row
+
+
 async def parse_requirement_doc_version(db: AsyncSession, *, user: CurrentUser, project_id: uuid.UUID, doc_id: uuid.UUID, version_id: uuid.UUID) -> dict[str, str]:
     await get_requirement_doc(db, user=user, project_id=project_id, doc_id=doc_id)
     project = await _get_project(db, user=user, project_id=project_id)
@@ -813,6 +897,59 @@ async def rollback_requirement_analysis_revision(
         detail={"revisionId": str(revision.id), "revisionNo": revision.revision_no},
     )
     return _to_analysis_detail(analysis)
+
+
+async def rollback_requirement_doc_version(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+    doc_id: uuid.UUID,
+    version_id: uuid.UUID,
+) -> RequirementDoc:
+    """Rollback a requirement doc to point to a previous version as current."""
+    project = await _get_project(db, user=user, project_id=project_id)
+    await _require_project_write(db, user=user, project=project)
+    doc = await db.scalar(
+        select(RequirementDoc).where(
+            RequirementDoc.id == doc_id,
+            RequirementDoc.project_id == project_id,
+            RequirementDoc.tenant_id == user.tenant_id,
+        )
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    version = await db.scalar(
+        select(RequirementDocVersion).where(
+            RequirementDocVersion.id == version_id,
+            RequirementDocVersion.doc_id == doc_id,
+            RequirementDocVersion.project_id == project_id,
+            RequirementDocVersion.tenant_id == user.tenant_id,
+        )
+    )
+    if not version:
+        raise HTTPException(status_code=404, detail="Version not found")
+
+    old_version_id = doc.current_version_id
+    doc.current_version_id = version.id
+    await db.flush()
+    await _create_requirement_audit(
+        db,
+        user=user,
+        project_id=project_id,
+        action="ROLLBACK_DOC_VERSION",
+        resource_type="requirement_doc",
+        resource_id=str(doc.id),
+        summary=f"回滚文档「{doc.title}」到版本 v{version.version}",
+        detail={
+            "docId": str(doc_id),
+            "fromVersionId": str(old_version_id) if old_version_id else None,
+            "toVersionId": str(version_id),
+            "toVersion": version.version,
+        },
+    )
+    return doc
 
 
 def normalize_analysis_test_points_payload(payload: object) -> list[dict]:

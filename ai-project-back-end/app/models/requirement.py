@@ -22,6 +22,7 @@ class RequirementDoc(Base, TimestampMixin):
     owner_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="DRAFT")
     tags_json: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    current_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("requirement_doc_versions.id"), nullable=True, index=True)
     created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
 
 

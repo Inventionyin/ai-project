@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, get_current_user, get_request_id
@@ -29,6 +29,7 @@ from app.services.requirement import (
     bulk_approve_case_drafts,
     create_requirement_doc,
     create_requirement_doc_version,
+    create_requirement_doc_version_from_bytes,
     delete_requirement_doc,
     generate_case_drafts_from_analysis,
     generate_requirement_analysis,
@@ -45,6 +46,7 @@ from app.services.requirement import (
     parse_requirement_doc_version,
     sync_requirement_test_points,
     rollback_requirement_analysis_revision,
+    rollback_requirement_doc_version,
     update_requirement_test_point,
     update_requirement_analysis,
     update_requirement_doc,
@@ -180,6 +182,70 @@ async def create_version(
     return ApiResponse(data=data, requestId=request_id)
 
 
+@router.post("/docs/{docId}/versions/import-url", response_model=ApiResponse[dict])
+async def import_doc_version_from_url(
+    projectId: uuid.UUID,
+    docId: uuid.UUID,
+    payload: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    request_id: str = Depends(get_request_id),
+) -> ApiResponse[dict]:
+    """Import a document version from a URL."""
+    import asyncio
+    import requests as req_lib
+    from urllib.parse import urlparse
+
+    url = str(payload.get("url", "")).strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="URL is required")
+
+    change_summary = str(payload.get("changeSummary", "")).strip()
+    effective_scope = str(payload.get("effectiveScope", "")).strip()
+
+    # Fetch content from URL
+    def _fetch() -> tuple[bytes, str]:
+        resp = req_lib.get(url, timeout=30, allow_redirects=True)
+        resp.raise_for_status()
+        return resp.content, resp.headers.get("content-type", "")
+
+    try:
+        content, content_type = await asyncio.to_thread(_fetch)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to fetch URL: {e}")
+
+    # Determine filename from URL
+    parsed = urlparse(url)
+    filename = parsed.path.split("/")[-1] or "imported-doc"
+    if "." not in filename:
+        if "markdown" in content_type or "md" in content_type:
+            filename += ".md"
+        elif "html" in content_type:
+            filename += ".html"
+        elif "pdf" in content_type:
+            filename += ".pdf"
+        else:
+            filename += ".txt"
+
+    # Create version using service
+    try:
+        version = await create_requirement_doc_version_from_bytes(
+            db,
+            user=user,
+            doc_id=docId,
+            content=content,
+            filename=filename,
+            change_summary=change_summary,
+            effective_scope=effective_scope,
+        )
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+
+    return ApiResponse(data={"id": str(version.id), "version": version.version}, requestId=request_id)
+
+
 @router.post("/docs/{docId}/versions/{versionId}/parse", response_model=ApiResponse[dict])
 async def parse_version(
     projectId: uuid.UUID,
@@ -235,6 +301,29 @@ async def analyze_version(
         await db.rollback()
         raise
     return ApiResponse(data=data, requestId=request_id)
+
+
+@router.post("/docs/{docId}/rollback", response_model=ApiResponse[dict])
+async def rollback_doc_version(
+    projectId: uuid.UUID,
+    docId: uuid.UUID,
+    payload: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    request_id: str = Depends(get_request_id),
+) -> ApiResponse[dict]:
+    version_id = uuid.UUID(str(payload.get("versionId", "")))
+    if not version_id:
+        raise HTTPException(status_code=400, detail="versionId is required")
+    try:
+        doc = await rollback_requirement_doc_version(
+            db, user=user, project_id=projectId, doc_id=docId, version_id=version_id,
+        )
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    return ApiResponse(data={"id": str(doc.id), "currentVersionId": str(doc.current_version_id)}, requestId=request_id)
 
 
 @router.get("/analyses", response_model=ApiResponse[list[RequirementAnalysisDetail]])

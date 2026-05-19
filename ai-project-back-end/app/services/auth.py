@@ -8,6 +8,7 @@ from app.core.security import TokenPayload, create_access_token, get_password_ha
 from app.models.enums import UserStatus
 from app.models.tenant import Tenant
 from app.models.user import User
+from app.services.platform_record import create_audit_log
 
 
 async def _get_default_tenant(db: AsyncSession) -> Tenant:
@@ -93,6 +94,12 @@ async def register_user(
     )
     db.add(user)
     await db.flush()
+    await create_audit_log(
+        db, user=user, project_id=None,
+        module="auth", action="REGISTER_USER",
+        resource_type="user", resource_id=str(user.id),
+        summary=normalized_username,
+    )
     return user
 
 
@@ -111,9 +118,27 @@ async def authenticate_user(
     if user is None:
         raise HTTPException(status_code=401, detail="请输入正确的用户名和密码")
     if user.status != UserStatus.ACTIVE:
+        await create_audit_log(
+            db, user=user, project_id=None,
+            module="auth", action="LOGIN_FAILED",
+            resource_type="user", resource_id=str(user.id),
+            summary="User is disabled",
+        )
         raise HTTPException(status_code=403, detail="User is disabled")
     if not verify_password(password, user.hashed_password):
+        await create_audit_log(
+            db, user=user, project_id=None,
+            module="auth", action="LOGIN_FAILED",
+            resource_type="user", resource_id=str(user.id),
+            summary="Invalid password",
+        )
         raise HTTPException(status_code=401, detail="请输入正确的用户名和密码")
+    await create_audit_log(
+        db, user=user, project_id=None,
+        module="auth", action="LOGIN_SUCCESS",
+        resource_type="user", resource_id=str(user.id),
+        summary=user.username,
+    )
     return user
 
 

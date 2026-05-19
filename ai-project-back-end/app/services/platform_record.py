@@ -12,6 +12,7 @@ from app.models.enums import ProjectRole
 from app.models.platform_record import AiJobRecord
 from app.models.project import Project, ProjectMember
 from app.schemas.platform_record import AiJobRecordListItem, AuditLogListItem
+from app.services.security_policy import mask_sensitive_fields
 
 
 def _is_admin(user: CurrentUser) -> bool:
@@ -84,6 +85,7 @@ async def create_audit_log(
     summary: str | None,
     detail: dict | None = None,
 ) -> AuditLog:
+    masked_detail = mask_sensitive_fields(detail) if detail else {}
     row = AuditLog(
         tenant_id=user.tenant_id,
         project_id=project_id,
@@ -93,7 +95,7 @@ async def create_audit_log(
         resource_type=resource_type,
         resource_id=resource_id,
         summary=summary,
-        detail_json=dict(detail or {}),
+        detail_json=masked_detail,
     )
     db.add(row)
     await db.flush()

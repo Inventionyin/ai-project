@@ -99,6 +99,7 @@ class RequirementDocDetail(BaseSchema):
     ownerId: IdStr | None = None
     status: str
     tags: list[str] = Field(default_factory=list)
+    currentVersionId: IdStr | None = None
     createdBy: IdStr
     createdAt: UnixTs
     updatedAt: UnixTs

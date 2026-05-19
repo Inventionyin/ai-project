@@ -251,6 +251,25 @@ export async function uploadRequirementDocVersion(
   })
 }
 
+export async function importRequirementDocVersionFromUrl(
+  projectId: string,
+  docId: string,
+  payload: { url: string; changeSummary?: string; effectiveScope?: string }
+) {
+  const pid = String(projectId || '').trim()
+  const did = String(docId || '').trim()
+  if (!pid) throw new Error('项目 ID 不能为空')
+  if (!did) throw new Error('文档 ID 不能为空')
+  return requestJson<{ id: string; version: number }>(
+    `/projects/${encodeURIComponent(pid)}/requirements/docs/${encodeURIComponent(did)}/versions/import-url`,
+    {
+      method: 'POST',
+      headers: { ...authHeader(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }
+  )
+}
+
 export async function parseRequirementDocVersion(projectId: string, docId: string, versionId: string) {
   const pid = String(projectId || '').trim()
   const did = String(docId || '').trim()
@@ -358,6 +377,27 @@ export async function rollbackRequirementAnalysisRevision(projectId: string, ana
     headers: { ...authHeader(), 'Content-Type': 'application/json' },
     body: JSON.stringify({ revisionId: rid })
   })
+}
+
+export async function rollbackRequirementDocVersion(
+  projectId: string,
+  docId: string,
+  versionId: string
+) {
+  const pid = String(projectId || '').trim()
+  const did = String(docId || '').trim()
+  const vid = String(versionId || '').trim()
+  if (!pid) throw new Error('项目 ID 不能为空')
+  if (!did) throw new Error('文档 ID 不能为空')
+  if (!vid) throw new Error('版本 ID 不能为空')
+  return requestJson<{ id: string; currentVersionId: string }>(
+    `/projects/${encodeURIComponent(pid)}/requirements/docs/${encodeURIComponent(did)}/rollback`,
+    {
+      method: 'POST',
+      headers: { ...authHeader(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ versionId: vid }),
+    }
+  )
 }
 
 function normalizeTestPoint(data: unknown): RequirementTestPoint {

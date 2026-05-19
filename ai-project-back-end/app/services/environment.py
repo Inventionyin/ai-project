@@ -15,6 +15,7 @@ from app.core.config import get_settings
 from app.models.environment import Environment
 from app.models.enums import ProjectRole
 from app.models.project import Project, ProjectMember
+from app.services.platform_record import create_audit_log
 
 
 UNSET = object()
@@ -155,6 +156,13 @@ async def create_environment(
     )
     db.add(env)
     await db.flush()
+    await create_audit_log(
+        db, user=user, project_id=project.id,
+        module="environment", action="CREATE_ENVIRONMENT",
+        resource_type="environment", resource_id=str(env.id),
+        summary=name,
+        detail={"base_url": base_url, "variable_count": len(variables or {})},
+    )
     return env
 
 
@@ -246,6 +254,13 @@ async def update_environment(
         env.health_config_json = health_check
 
     await db.flush()
+    await create_audit_log(
+        db, user=user, project_id=project.id,
+        module="environment", action="UPDATE_ENVIRONMENT",
+        resource_type="environment", resource_id=str(env.id),
+        summary=env.name,
+        detail={"name": name, "base_url": base_url, "variable_count": len(variables) if variables else None},
+    )
     return env
 
 
@@ -269,5 +284,13 @@ async def delete_environment(
     ).scalar_one_or_none()
     if env is None:
         raise HTTPException(status_code=404, detail="Environment not found")
+    env_name = env.name
+    env_id_val = env.id
     await db.delete(env)
     await db.flush()
+    await create_audit_log(
+        db, user=user, project_id=project.id,
+        module="environment", action="DELETE_ENVIRONMENT",
+        resource_type="environment", resource_id=str(env_id_val),
+        summary=env_name,
+    )

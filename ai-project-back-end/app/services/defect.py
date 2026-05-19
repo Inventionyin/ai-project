@@ -13,6 +13,7 @@ from app.api.deps import CurrentUser, to_unix_ts
 from app.models.defect import Defect, DefectEvent
 from app.models.enums import ProjectRole
 from app.models.project import Project, ProjectMember
+from app.services.platform_record import create_audit_log
 from app.schemas.defect import (
     DefectClusterItem,
     DefectCreateRequest,
@@ -279,6 +280,13 @@ async def create_defect(
     )
     db.add(row)
     await db.flush()
+    await create_audit_log(
+        db, user=user, project_id=project_id,
+        module="defect", action="CREATE_DEFECT",
+        resource_type="defect", resource_id=str(row.id),
+        summary=row.title,
+        detail={"severity": row.severity, "status": row.status},
+    )
     return _to_defect_detail(row)
 
 
@@ -411,6 +419,13 @@ async def assign_defect(
         to_assignee_id=assignee_id,
         note=note,
     )
+    await create_audit_log(
+        db, user=user, project_id=project_id,
+        module="defect", action="ASSIGN_DEFECT",
+        resource_type="defect", resource_id=str(row.id),
+        summary=row.title,
+        detail={"from_assignee": str(previous_assignee_id) if previous_assignee_id else None, "to_assignee": str(assignee_id)},
+    )
     return _to_defect_detail(row)
 
 
@@ -440,6 +455,13 @@ async def transition_defect(
         from_status=current_status,
         to_status=target_status,
         note=payload.note,
+    )
+    await create_audit_log(
+        db, user=user, project_id=project_id,
+        module="defect", action="TRANSITION_DEFECT",
+        resource_type="defect", resource_id=str(row.id),
+        summary=row.title,
+        detail={"from_status": current_status, "to_status": target_status},
     )
     return _to_defect_detail(row)
 

@@ -8,7 +8,9 @@ import {
   fetchRequirementDocParsedText,
   fetchRequirementDocVersions,
   generateRequirementAnalysis,
+  importRequirementDocVersionFromUrl,
   parseRequirementDocVersion,
+  rollbackRequirementDocVersion,
   updateRequirementDoc,
   uploadRequirementDocVersion,
   type RequirementDoc,
@@ -45,6 +47,7 @@ const selectedVersionId = ref('')
 const parsedText = ref('')
 const analyses = ref<RequirementAnalysis[]>([])
 const analyzingVersionId = ref('')
+const rollingBackVersionId = ref('')
 const analysisInstruction = ref('')
 const changeSets = ref<RequirementChangeSetDetail[]>([])
 const selectedBaselineVersionId = ref('')
@@ -66,6 +69,13 @@ const uploadForm = ref({
   changeSummary: '',
   effectiveScope: ''
 })
+
+const urlImport = ref({
+  url: '',
+  changeSummary: '',
+  effectiveScope: ''
+})
+const urlImporting = ref(false)
 
 const statusOptions: Array<{ label: string; value: RequirementDocStatus }> = [
   { label: '草稿', value: 'DRAFT' },
@@ -209,6 +219,32 @@ async function submitUploadVersion() {
   }
 }
 
+async function handleUrlImport() {
+  if (!projectId.value || !docId.value) return
+  const url = urlImport.value.url.trim()
+  if (!url) {
+    error.value = '请输入 URL'
+    return
+  }
+  urlImporting.value = true
+  error.value = ''
+  success.value = ''
+  try {
+    await importRequirementDocVersionFromUrl(projectId.value, docId.value, {
+      url,
+      changeSummary: urlImport.value.changeSummary.trim(),
+      effectiveScope: urlImport.value.effectiveScope.trim()
+    })
+    urlImport.value = { url: '', changeSummary: '', effectiveScope: '' }
+    await loadDetail()
+    success.value = 'URL 导入成功'
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'URL 导入失败'
+  } finally {
+    urlImporting.value = false
+  }
+}
+
 async function triggerParse(versionId: string) {
   if (!projectId.value || !docId.value || !versionId) return
   parsingVersionId.value = versionId
@@ -261,6 +297,25 @@ async function createAnalysis(versionId: string) {
 
 function openAnalysis(analysisId: string) {
   void router.push(`/projects/${encodeURIComponent(projectId.value)}/requirements/analyses/${encodeURIComponent(analysisId)}`)
+}
+
+async function handleRollback(versionId: string) {
+  if (!projectId.value || !docId.value || !versionId) return
+  const version = versions.value.find((v) => v.id === versionId)
+  const label = version ? `v${version.version || version.id}` : versionId
+  if (!window.confirm(`确认将文档回滚到 ${label} 吗？`)) return
+  rollingBackVersionId.value = versionId
+  error.value = ''
+  success.value = ''
+  try {
+    await rollbackRequirementDocVersion(projectId.value, docId.value, versionId)
+    await loadDetail()
+    success.value = `已回滚到 ${label}`
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '回滚失败'
+  } finally {
+    rollingBackVersionId.value = ''
+  }
 }
 
 async function createChangeSet() {
@@ -370,6 +425,18 @@ watch(
             <input v-model="uploadForm.effectiveScope" class="h-9 w-full rounded-[8px] border border-black/10 px-3 text-[13px]" placeholder="影响范围" />
             <button class="h-9 rounded-[8px] border border-black/10 px-3 text-[13px] disabled:opacity-60" :disabled="uploading" @click="submitUploadVersion">
               {{ uploading ? '上传中...' : '上传版本' }}
+            </button>
+          </div>
+        </div>
+
+        <div class="mt-4 border-t border-black/10 pt-4">
+          <h3 class="text-[13px] font-medium text-[#0A0A0A]">从 URL 导入</h3>
+          <div class="mt-3 space-y-3">
+            <input v-model="urlImport.url" class="h-9 w-full rounded-[8px] border border-black/10 px-3 text-[13px]" placeholder="输入文档 URL" />
+            <input v-model="urlImport.changeSummary" class="h-9 w-full rounded-[8px] border border-black/10 px-3 text-[13px]" placeholder="变更摘要（可选）" />
+            <input v-model="urlImport.effectiveScope" class="h-9 w-full rounded-[8px] border border-black/10 px-3 text-[13px]" placeholder="影响范围（可选）" />
+            <button class="h-9 rounded-[8px] border border-black/10 px-3 text-[13px] disabled:opacity-60" :disabled="urlImporting" @click="handleUrlImport">
+              {{ urlImporting ? '导入中...' : '从 URL 导入' }}
             </button>
           </div>
         </div>

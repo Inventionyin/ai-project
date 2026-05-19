@@ -20,6 +20,7 @@ from app.models.suite import Suite, SuiteItem
 from app.models.test_data_set import TestDataSet
 from app.models.testcase import TestCase, TestCaseVersion
 from app.models.testcase_binding import TestcaseBinding
+from app.services.platform_record import create_audit_log
 
 
 def _is_admin(user: CurrentUser) -> bool:
@@ -67,6 +68,12 @@ async def create_project(
     project = Project(tenant_id=user.tenant_id, name=name, description=description, owner_id=owner_id)
     db.add(project)
     await db.flush()
+    await create_audit_log(
+        db, user=user, project_id=project.id,
+        module="project", action="CREATE_PROJECT",
+        resource_type="project", resource_id=str(project.id),
+        summary=project.name,
+    )
     return project
 
 
@@ -347,6 +354,13 @@ async def update_project(
         project.owner_id = owner_id
 
     await db.flush()
+    await create_audit_log(
+        db, user=user, project_id=project.id,
+        module="project", action="UPDATE_PROJECT",
+        resource_type="project", resource_id=str(project.id),
+        summary=project.name,
+        detail={"name": name, "description": description, "owner_id": str(owner_id) if owner_id else None},
+    )
     return project, member_count
 
 
@@ -553,6 +567,14 @@ async def delete_project(
         )
     )
 
+    project_name = project.name
+    project_id_val = project.id
     await db.delete(project)
     await db.flush()
+    await create_audit_log(
+        db, user=user, project_id=project_id_val,
+        module="project", action="DELETE_PROJECT",
+        resource_type="project", resource_id=str(project_id_val),
+        summary=project_name,
+    )
 
