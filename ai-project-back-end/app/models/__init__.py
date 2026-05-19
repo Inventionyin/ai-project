@@ -1,4 +1,5 @@
 from app.models.ai_import import AiImportItem, AiImportJob
+from app.models.ai_training import AiTrainingDataset, AiTrainingJob
 from app.models.audit import AuditLog
 from app.models.api import ApiCollection, ApiCollectionGroup, ApiRequest
 from app.models.api_target import ApiTarget
@@ -33,6 +34,8 @@ from app.models.tenant import Tenant
 from app.models.test_data_set import TestDataSet
 from app.models.testcase import TestCase, TestCaseVersion
 from app.models.testcase_binding import TestcaseBinding
+from app.models.performance_test import PerformanceTest, PerformanceTestRun
+from app.models.ui_automation import UiTestRun, UiTestScript
 from app.models.user import User
 from app.models.worker import Worker
 
@@ -40,6 +43,8 @@ __all__ = [
     "AiRecord",
     "AiImportItem",
     "AiImportJob",
+    "AiTrainingDataset",
+    "AiTrainingJob",
     "ApiCollection",
     "ApiCollectionGroup",
     "ApiRequest",
@@ -63,6 +68,8 @@ __all__ = [
     "Notification",
     "NotificationOutbox",
     "Organization",
+    "PerformanceTest",
+    "PerformanceTestRun",
     "Plugin",
     "PluginInstallation",
     "PromptTemplate",
@@ -88,6 +95,8 @@ __all__ = [
     "TestCaseVersion",
     "TestcaseBinding",
     "TestDataSet",
+    "UiTestRun",
+    "UiTestScript",
     "User",
     "Worker",
 ]

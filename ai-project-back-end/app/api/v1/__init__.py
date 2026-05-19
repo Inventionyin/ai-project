@@ -32,6 +32,9 @@ from app.api.v1.endpoints.members import router as members_router
 from app.api.v1.endpoints.defect_providers import router as defect_providers_router
 from app.api.v1.endpoints.organizations import router as organizations_router
 from app.api.v1.endpoints.performance import router as performance_router
+from app.api.v1.endpoints.performance_tests import router as performance_tests_router
+from app.api.v1.endpoints.ui_automation import router as ui_automation_router
+from app.api.v1.endpoints.ai_training import router as ai_training_router
 
 router = APIRouter()
 router.include_router(auth_router, tags=["auth"])
@@ -66,3 +69,6 @@ router.include_router(members_router, prefix="/projects/{projectId}/members", ta
 router.include_router(defect_providers_router, prefix="/projects/{projectId}/defect-providers", tags=["defect-providers"])
 router.include_router(organizations_router, tags=["organizations"])
 router.include_router(performance_router, tags=["performance"])
+router.include_router(performance_tests_router, tags=["performance-tests"])
+router.include_router(ui_automation_router, tags=["ui-automation"])
+router.include_router(ai_training_router, tags=["ai-training"])

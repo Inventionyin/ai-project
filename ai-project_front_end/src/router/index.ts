@@ -43,6 +43,9 @@ const DefectProviders = defineAsyncComponent(() => import('@/views/settings/Defe
 const NotificationProviders = defineAsyncComponent(() => import('@/views/settings/NotificationProviders.vue'))
 const CiCdConfig = defineAsyncComponent(() => import('@/views/settings/CiCdConfig.vue'))
 const ApiDocs = defineAsyncComponent(() => import('@/views/settings/ApiDocs.vue'))
+const UiAutomation = defineAsyncComponent(() => import('@/views/settings/UiAutomation.vue'))
+const PerformanceTests = defineAsyncComponent(() => import('@/views/settings/PerformanceTests.vue'))
+const AiTraining = defineAsyncComponent(() => import('@/views/settings/AiTraining.vue'))
 const KnowledgeTemplates = defineAsyncComponent(() => import('@/views/knowledge/KnowledgeTemplates.vue'))
 
 function createProjectShellPage(activeAssetChild: string, Content: Parameters<typeof h>[0]) {
@@ -234,6 +237,18 @@ const router = createRouter({
     {
       path: '/projects/:projectId/settings/api-docs',
       component: createProjectShellPage('API 文档', ApiDocs)
+    },
+    {
+      path: '/projects/:projectId/settings/ui-automation',
+      component: createProjectShellPage('UI 自动化录制', UiAutomation)
+    },
+    {
+      path: '/projects/:projectId/settings/performance-tests',
+      component: createProjectShellPage('性能测试平台', PerformanceTests)
+    },
+    {
+      path: '/projects/:projectId/settings/ai-training',
+      component: createProjectShellPage('AI 模型训练', AiTraining)
     },
     {
       path: '/projects/:projectId/requirements/docs',
