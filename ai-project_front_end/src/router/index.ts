@@ -39,6 +39,9 @@ const CiTokenGovernance = defineAsyncComponent(() => import('@/views/settings/Ci
 const AiCapabilities = defineAsyncComponent(() => import('@/views/settings/AiCapabilities.vue'))
 const TaskQueue = defineAsyncComponent(() => import('@/views/settings/TaskQueue.vue'))
 const AlertRules = defineAsyncComponent(() => import('@/views/settings/AlertRules.vue'))
+const DefectProviders = defineAsyncComponent(() => import('@/views/settings/DefectProviders.vue'))
+const NotificationProviders = defineAsyncComponent(() => import('@/views/settings/NotificationProviders.vue'))
+const CiCdConfig = defineAsyncComponent(() => import('@/views/settings/CiCdConfig.vue'))
 const KnowledgeTemplates = defineAsyncComponent(() => import('@/views/knowledge/KnowledgeTemplates.vue'))
 
 function createProjectShellPage(activeAssetChild: string, Content: Parameters<typeof h>[0]) {
@@ -214,6 +217,18 @@ const router = createRouter({
     {
       path: '/projects/:projectId/settings/alert-rules',
       component: createProjectShellPage('告警规则', AlertRules)
+    },
+    {
+      path: '/projects/:projectId/settings/defect-providers',
+      component: createProjectShellPage('缺陷系统对接', DefectProviders)
+    },
+    {
+      path: '/projects/:projectId/settings/notification-providers',
+      component: createProjectShellPage('通知 Provider 配置', NotificationProviders)
+    },
+    {
+      path: '/projects/:projectId/settings/cicd-config',
+      component: createProjectShellPage('CI/CD 配置中心', CiCdConfig)
     },
     {
       path: '/projects/:projectId/requirements/docs',

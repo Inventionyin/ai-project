@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, ForeignKey, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -57,6 +57,23 @@ class Notification(Base, CreatedAtMixin):
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     project: Mapped["Project"] = relationship(back_populates="notifications")
+
+
+class DefectProviderConfig(Base, TimestampMixin):
+    __tablename__ = "defect_provider_configs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
+    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False, index=True)
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)  # JIRA, ZENTAO, TEAMBITION
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    base_url: Mapped[str] = mapped_column(String(512), nullable=False)
+    auth_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)  # {apiToken, username, etc}
+    config_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)  # {projectKey, boardId, etc}
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    last_sync_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    sync_status: Mapped[str] = mapped_column(String(32), nullable=False, default="IDLE")  # IDLE/SYNCING/ERROR
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class NotificationOutbox(Base, TimestampMixin):
