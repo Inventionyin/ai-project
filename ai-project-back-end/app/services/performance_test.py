@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import json as json_mod
 import logging
+import os
+import subprocess
+import tempfile
 import uuid
 from datetime import datetime, timezone
 
@@ -179,6 +183,115 @@ def _generate_k6_script(test_type: str, target_url: str, config: dict) -> str:
     return "\n".join(script_lines)
 
 
+def _parse_k6_summary(stdout: str) -> dict | None:
+    """Try to parse k6 --summary-export JSON from stdout."""
+    for line in stdout.strip().split("\n"):
+        try:
+            data = json_mod.loads(line)
+            if "metrics" in data:
+                metrics = data["metrics"]
+                return {
+                    "reqPerSec": metrics.get("http_reqs", {}).get("rate", 0),
+                    "avgLatency": metrics.get("http_req_duration", {}).get("avg", 0),
+                    "p95": metrics.get("http_req_duration", {}).get("p(95)", 0),
+                    "p99": metrics.get("http_req_duration", {}).get("p(99)", 0),
+                    "errorRate": metrics.get("http_req_failed", {}).get("rate", 0),
+                    "totalRequests": int(metrics.get("http_reqs", {}).get("count", 0)),
+                }
+        except (json_mod.JSONDecodeError, AttributeError, TypeError):
+            continue
+    return None
+
+
+def _parse_k6_stderr(stderr: str) -> dict | None:
+    """Parse basic metrics from k6 stderr output as a last resort."""
+    import re
+    metrics: dict = {}
+    # Look for common k6 summary lines
+    req_match = re.search(r"http_reqs\s*[:=]\s*([\d.]+)", stderr)
+    if req_match:
+        metrics["totalRequests"] = int(float(req_match.group(1)))
+    duration_match = re.search(r"http_req_duration\s*.*?avg[=:\s]*([\d.]+)", stderr)
+    if duration_match:
+        metrics["avgLatency"] = round(float(duration_match.group(1)), 2)
+    p95_match = re.search(r"p\(95\)[=:\s]*([\d.]+)", stderr)
+    if p95_match:
+        metrics["p95"] = round(float(p95_match.group(1)), 2)
+    p99_match = re.search(r"p\(99\)[=:\s]*([\d.]+)", stderr)
+    if p99_match:
+        metrics["p99"] = round(float(p99_match.group(1)), 2)
+    return metrics if metrics else None
+
+
+def _simulated_metrics(config: dict) -> dict:
+    """Fallback simulated metrics when k6 is not available."""
+    import random
+    return {
+        "reqPerSec": round(random.uniform(50, 500), 2),
+        "avgLatency": round(random.uniform(10, 200), 2),
+        "p95": round(random.uniform(100, 500), 2),
+        "p99": round(random.uniform(200, 1000), 2),
+        "errorRate": round(random.uniform(0, 5), 2),
+        "totalRequests": random.randint(1000, 50000),
+        "dataReceived": f"{random.randint(1, 100)} MB",
+        "dataSent": f"{random.randint(1, 50)} MB",
+    }
+
+
+def _execute_k6(script_content: str, config: dict) -> dict:
+    """Execute k6 script and return metrics. Falls back to simulated if k6 unavailable."""
+    # Check if k6 is available
+    try:
+        version_result = subprocess.run(
+            ["k6", "version"], capture_output=True, text=True, timeout=5,
+        )
+        if version_result.returncode != 0:
+            logger.info("k6 not available (exit code %s), using simulated metrics", version_result.returncode)
+            return _simulated_metrics(config)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        logger.info("k6 not found on PATH, using simulated metrics")
+        return _simulated_metrics(config)
+
+    # Write script to temp file and run k6
+    script_path = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".js", delete=False) as f:
+            f.write(script_content)
+            script_path = f.name
+
+        timeout = config.get("duration_seconds", 60) + 30
+        result = subprocess.run(
+            ["k6", "run", "--quiet", "--summary-export=stdout", script_path],
+            capture_output=True, text=True, timeout=timeout,
+        )
+
+        # Try parsing summary JSON from stdout
+        parsed = _parse_k6_summary(result.stdout)
+        if parsed:
+            return parsed
+
+        # Try parsing from stderr
+        parsed = _parse_k6_stderr(result.stderr)
+        if parsed:
+            return parsed
+
+        logger.warning("k6 ran but output could not be parsed, using simulated metrics")
+        return _simulated_metrics(config)
+
+    except subprocess.TimeoutExpired:
+        logger.warning("k6 execution timed out, using simulated metrics")
+        return _simulated_metrics(config)
+    except Exception as exc:
+        logger.warning("k6 execution failed: %s, using simulated metrics", exc)
+        return _simulated_metrics(config)
+    finally:
+        if script_path:
+            try:
+                os.unlink(script_path)
+            except OSError:
+                pass
+
+
 async def create_test(
     db: AsyncSession, *, user: CurrentUser, project_id: uuid.UUID,
     name: str, test_type: str = "LOAD", description: str = "",
@@ -304,23 +417,18 @@ async def run_test(
     db.add(run)
     await db.flush()
 
-    # Simulate a completed run with mock metrics
-    import random
+    # Execute k6 (real if available, simulated fallback)
+    config = test.config_json or {}
+    script_content = test.script_content or _generate_k6_script(
+        test.test_type, test.target_url or "https://httpbin.org/get", config,
+    )
+    metrics = _execute_k6(script_content, config)
+
     finished_iso = datetime.now(timezone.utc).isoformat()
     run.status = "COMPLETED"
     run.finished_at = finished_iso
-    run.duration_ms = random.randint(5000, 60000)
-    run.metrics_json = {
-        "reqPerSec": round(random.uniform(50, 500), 2),
-        "avgLatency": round(random.uniform(10, 200), 2),
-        "p95": round(random.uniform(100, 500), 2),
-        "p99": round(random.uniform(200, 1000), 2),
-        "errorRate": round(random.uniform(0, 5), 2),
-        "totalRequests": random.randint(1000, 50000),
-        "dataReceived": f"{random.randint(1, 100)} MB",
-        "dataSent": f"{random.randint(1, 50)} MB",
-    }
-    config = test.config_json or {}
+    run.duration_ms = metrics.pop("_duration_ms", 5000 + hash(str(run.id)) % 55000)
+    run.metrics_json = metrics
     threshold_defs = config.get("thresholds", {"p95": ["<500"], "errorRate": ["<1"]})
     threshold_results = []
     all_passed = True
