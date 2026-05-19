@@ -269,6 +269,50 @@ async def revoke_ci_token_(
     return ApiResponse(data=_to_ci_token_status(project), requestId=request_id)
 
 
+@router.get("/ci-tokens", response_model=ApiResponse[list[dict]])
+async def list_ci_tokens(
+    projectId: uuid.UUID = Query(...),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    request_id: str = Depends(get_request_id),
+):
+    """List CI tokens for the project (masked). Supports multi-token via ci_tokens_json."""
+    from app.models.project import Project
+
+    project = await db.scalar(
+        select(Project).where(Project.id == projectId, Project.tenant_id == user.tenant_id)
+    )
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    tokens: list[dict] = []
+
+    # Multi-token support via ci_tokens_json (future extension)
+    ci_tokens_json = getattr(project, "ci_tokens_json", None)
+    if ci_tokens_json and isinstance(ci_tokens_json, list):
+        for t in ci_tokens_json:
+            raw_token = t.get("token", "") if isinstance(t, dict) else ""
+            tokens.append({
+                "id": t.get("id", ""),
+                "name": t.get("name", ""),
+                "maskedToken": (raw_token[:8] + "***") if raw_token else "***",
+                "enabled": t.get("enabled", True),
+                "createdAt": t.get("createdAt"),
+            })
+
+    # Include existing single token as a default entry
+    if project.ci_token_hash:
+        tokens.append({
+            "id": "default",
+            "name": "Default CI Token",
+            "maskedToken": project.ci_token_hint or "***",
+            "enabled": True,
+            "createdAt": to_unix_ts(project.ci_token_rotated_at) if project.ci_token_rotated_at else None,
+        })
+
+    return ApiResponse(data=tokens, requestId=request_id)
+
+
 @router.post("/ci-trigger", response_model=ApiResponse[RunDetailData])
 async def ci_trigger_(
     payload: RunCiTriggerRequest,

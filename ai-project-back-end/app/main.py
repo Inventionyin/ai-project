@@ -30,26 +30,34 @@ from app.api.deps import get_request_id
 from app.api.router import api_router
 from app.api.health import router as health_router
 from app.core.config import get_settings
+from app.core.observability import init_trace
 
 logger = logging.getLogger(__name__)
 
-# Request logging middleware
+# Request logging + tracing middleware
 async def log_requests(request: Request, call_next):
     request_id = await get_request_id(request)
+    trace_info = init_trace(request_id)
+
     path = request.url.path
     if request.query_params:
         path += f"?{request.query_params}"
-    
+
     logger.info(f"[{request_id}] Incoming request: {request.method} {path}")
-    
+
     import time
     start_time = time.time()
-    
+
     response = await call_next(request)
-    
+
     process_time = (time.time() - start_time) * 1000
     logger.info(f"[{request_id}] Completed request: {request.method} {path} - Status: {response.status_code} - Time: {process_time:.2f}ms")
-    
+
+    # Inject trace headers so callers can correlate requests
+    response.headers["X-Trace-Id"] = trace_info["traceId"]
+    response.headers["X-Span-Id"] = trace_info["spanId"]
+    response.headers["X-Request-Id"] = request_id
+
     return response
 
 
