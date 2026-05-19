@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, File, Query, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, get_current_user, get_request_id, to_unix_ts
@@ -41,6 +41,7 @@ from app.services.collection import (
     list_groups_and_requests,
     reorder_groups,
     run_collection_quick,
+    run_collection_scenario,
     run_request_quick,
     update_collection,
     update_group,
@@ -469,6 +470,23 @@ async def run_collection_(
         iterations=payload.iterations,
     )
     return ApiResponse(data=data, requestId=request_id)
+
+
+@router.post("/{collectionId}/scenario/run", response_model=ApiResponse[dict])
+async def run_scenario(
+    collectionId: uuid.UUID,
+    payload: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    request_id: str = Depends(get_request_id),
+) -> ApiResponse[dict]:
+    scenario = payload.get("steps", [])
+    env_id = uuid.UUID(str(payload["envId"])) if payload.get("envId") else None
+    result = await run_collection_scenario(
+        db, user=user, collection_id=collectionId, env_id=env_id, scenario=scenario
+    )
+    await db.commit()
+    return ApiResponse(data=result, requestId=request_id)
 
 
 @router.post("/{collectionId}/requests/{requestId}/run", response_model=ApiResponse[dict])

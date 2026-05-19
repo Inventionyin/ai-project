@@ -1314,6 +1314,163 @@ async def run_collection_quick(
     }
 
 
+async def run_collection_scenario(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    collection_id: uuid.UUID,
+    env_id: uuid.UUID | None,
+    scenario: list[dict],
+) -> dict[str, Any]:
+    """Run a collection scenario with variable passing between requests.
+
+    Each step in *scenario* should be a dict with keys:
+      - requestId: str (required)
+      - extractVars: dict[str, str] mapping variable names to simple dot-path
+        expressions (e.g. ``"$.data.id"``) that will be evaluated against the
+        JSON response body and stored in the shared variable map.
+      - stopOnFailure: bool (default True) -- if the step fails and this is
+        True the scenario stops immediately.
+    """
+    collection = await get_collection(db, user=user, collection_id=collection_id)
+    project = await _get_project(db, user=user, project_id=collection.project_id)
+    await _require_project_write(db, user=user, project=project)
+
+    env: Environment | None = None
+    if env_id is not None:
+        env = await db.scalar(
+            select(Environment).where(
+                Environment.id == env_id, Environment.tenant_id == user.tenant_id
+            )
+        )
+        if env is None or env.project_id != collection.project_id:
+            raise HTTPException(status_code=404, detail="Environment not found")
+
+    vars_map: dict[str, Any] = dict(collection.variables_json or {})
+    if env is not None:
+        vars_map.update(dict(env.variables_json or {}))
+
+    results: list[dict[str, Any]] = []
+    all_ok = True
+
+    for step in scenario:
+        req_id = step.get("requestId")
+        if not req_id:
+            continue
+
+        req = await db.scalar(
+            select(ApiRequest).where(
+                ApiRequest.id == uuid.UUID(str(req_id)),
+                ApiRequest.collection_id == collection.id,
+            )
+        )
+        if not req:
+            results.append(
+                {"requestId": str(req_id), "error": "Request not found", "ok": False}
+            )
+            all_ok = False
+            continue
+
+        full_url = _apply_vars(
+            _build_full_url(env.base_url if env else "", req.url), vars_map
+        )
+        headers = {
+            str(k): _apply_vars(str(v), vars_map)
+            for k, v in (req.headers_json or {}).items()
+        }
+        headers.update(
+            {
+                k: _apply_vars(v, vars_map)
+                for k, v in _auth_to_headers(dict(req.auth_json or {})).items()
+            }
+        )
+
+        body_bytes: bytes | None = None
+        if req.body_json:
+            raw = req.body_json.get("raw") if isinstance(req.body_json, dict) else None
+            if isinstance(raw, str):
+                body_bytes = _apply_vars(raw, vars_map).encode("utf-8")
+            else:
+                body_bytes = _apply_vars(
+                    json.dumps(req.body_json, ensure_ascii=False), vars_map
+                ).encode("utf-8")
+            if "Content-Type" not in {k.lower() for k in headers}:
+                headers["Content-Type"] = "application/json"
+
+        result = await asyncio.to_thread(
+            _execute_http,
+            method=req.method,
+            url=full_url,
+            headers=headers,
+            body_bytes=body_bytes,
+            timeout_sec=30.0,
+        )
+
+        ok = result.error is None and (
+            result.status is not None and 200 <= result.status < 400
+        )
+
+        # Extract variables from response
+        extract_vars = step.get("extractVars", {})
+        if extract_vars and result.body:
+            try:
+                body_obj = json.loads(result.body) if isinstance(result.body, str) else result.body
+                for var_name, json_path in extract_vars.items():
+                    node: Any = body_obj
+                    for part in str(json_path).lstrip("$.").split("."):
+                        if not part:
+                            continue
+                        if isinstance(node, dict):
+                            node = node.get(part)
+                        elif isinstance(node, list) and part.isdigit():
+                            node = node[int(part)]
+                        else:
+                            node = None
+                            break
+                    if node is not None:
+                        vars_map[var_name] = str(node)
+            except (json.JSONDecodeError, AttributeError, TypeError):
+                pass
+
+        results.append(
+            {
+                "requestId": str(req.id),
+                "name": req.name,
+                "status": result.status,
+                "elapsedMs": result.elapsed_ms,
+                "ok": ok,
+                "error": result.error,
+            }
+        )
+
+        if not ok and step.get("stopOnFailure", True):
+            all_ok = False
+            break
+
+    await _create_collection_audit(
+        db,
+        user=user,
+        project_id=collection.project_id,
+        action="RUN_SCENARIO",
+        resource_type="api_collection",
+        resource_id=str(collection.id),
+        summary=collection.name,
+        detail={
+            "totalSteps": len(scenario),
+            "passedSteps": sum(1 for r in results if r.get("ok")),
+            "ok": all_ok,
+        },
+    )
+
+    return {
+        "collectionId": str(collection.id),
+        "ok": all_ok,
+        "steps": results,
+        "totalSteps": len(scenario),
+        "passedSteps": sum(1 for r in results if r.get("ok")),
+    }
+
+
 async def export_collection(
     db: AsyncSession,
     *,
