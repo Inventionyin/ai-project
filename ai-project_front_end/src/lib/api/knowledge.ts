@@ -175,3 +175,30 @@ export async function updateKnowledgeRetrospective(projectId: string, retrospect
     }
   )
 }
+
+export async function fetchKnowledgeTemplates(projectId: string) {
+  const pid = String(projectId || '').trim()
+  if (!pid) return []
+  return requestJson<any[]>(`/projects/${encodeURIComponent(pid)}/knowledge/templates`, {
+    method: 'GET',
+    headers: authHeader(),
+  })
+}
+
+export async function createKnowledgeTemplate(projectId: string, payload: { name: string; content: string; category?: string }) {
+  const pid = requireId(projectId, '项目 ID 不能为空')
+  return requestJson<any>(`/projects/${encodeURIComponent(pid)}/knowledge/templates`, {
+    method: 'POST',
+    headers: { ...authHeader(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function fetchKnowledgeRules(projectId: string) {
+  const pid = String(projectId || '').trim()
+  if (!pid) return []
+  return requestJson<any[]>(`/projects/${encodeURIComponent(pid)}/knowledge/rules`, {
+    method: 'GET',
+    headers: authHeader(),
+  })
+}

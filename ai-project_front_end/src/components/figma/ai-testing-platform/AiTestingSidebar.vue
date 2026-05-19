@@ -76,6 +76,8 @@ const resolvedActiveAssetChild = computed(() => {
   if (route.path.startsWith(`/projects/${projectId.value}/settings/security-audit`)) return '安全审计'
   if (route.path.startsWith(`/projects/${projectId.value}/settings/ci-token-governance`)) return 'CI Token 治理'
   if (route.path.startsWith(`/projects/${projectId.value}/settings/ai-capabilities`)) return 'AI 能力中心'
+  if (route.path.startsWith(`/projects/${projectId.value}/settings/task-queue`)) return '任务队列监控'
+  if (route.path.startsWith(`/projects/${projectId.value}/settings/alert-rules`)) return '告警规则'
   if (route.path.startsWith('/figma/untitled-47-1415')) return '测试套件'
   if (route.path.startsWith('/figma/untitled-34-158')) return '用例管理'
   if (route.path.startsWith('/figma/untitled-9-3')) return '用例管理'
@@ -132,6 +134,7 @@ const extraLinks = computed<LinkItem[]>(() => [
   { label: '需求文档中心', icon: navAudit, to: `/projects/${projectId.value}/requirements/docs` },
   { label: '缺陷管理', icon: navAudit, to: `/projects/${projectId.value}/defects` },
   { label: '知识中心', icon: navAudit, to: `/projects/${projectId.value}/knowledge/retrospectives` },
+  { label: '知识模板', icon: navAudit, to: `/projects/${projectId.value}/knowledge/templates` },
   { label: 'AI 助手', icon: navAiAssistant, to: `/projects/${projectId.value}/ai-assistant` }
 ])
 
@@ -147,7 +150,9 @@ const settingsLinks = computed<LinkItem[]>(() => [
   { label: '插件市场', icon: navAsset, to: `/projects/${projectId.value}/settings/plugins` },
   { label: '安全审计', icon: navAudit, to: `/projects/${projectId.value}/settings/security-audit` },
   { label: 'CI Token 治理', icon: navIntegrations, to: `/projects/${projectId.value}/settings/ci-token-governance` },
-  { label: 'AI 能力中心', icon: navAsset, to: `/projects/${projectId.value}/settings/ai-capabilities` }
+  { label: 'AI 能力中心', icon: navAsset, to: `/projects/${projectId.value}/settings/ai-capabilities` },
+  { label: '任务队列', icon: navAudit, to: `/projects/${projectId.value}/settings/task-queue` },
+  { label: '告警规则', icon: navAudit, to: `/projects/${projectId.value}/settings/alert-rules` }
 ])
 </script>
 
