@@ -123,6 +123,26 @@ def test_verify_external_integrations_supports_business_closure_guardrails():
     assert not missing, f"Missing expected business closure tokens: {missing}"
 
 
+def test_verify_external_integrations_business_closure_has_provider_specific_fallbacks():
+    repo_root = Path(__file__).resolve().parents[2]
+    script = repo_root / "scripts" / "verify_external_integrations.ps1"
+    content = script.read_text(encoding="utf-8")
+
+    required_tokens = [
+        "Get-ExternalErrorMessage",
+        "Get-JiraIssueTypeName",
+        "$BaseUrl/rest/api/3/issue/createmeta",
+        "Invoke-JenkinsBuild",
+        'buildWithParameters?WEITESTING_CLOSURE_ID=$stamp',
+        '$BaseUrl/job/$JobName/build',
+        "openedBuild",
+        '$BaseUrl/api.php/v1/products/$product/branches',
+    ]
+
+    missing = [token for token in required_tokens if token not in content]
+    assert not missing, f"Missing expected provider-specific business closure fallbacks: {missing}"
+
+
 def test_verify_external_integrations_uses_non_reserved_github_env_aliases():
     repo_root = Path(__file__).resolve().parents[2]
     script = repo_root / "scripts" / "verify_external_integrations.ps1"
