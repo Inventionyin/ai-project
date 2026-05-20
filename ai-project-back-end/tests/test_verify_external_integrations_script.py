@@ -9,6 +9,9 @@ _INTEGRATION_ENV_NAMES = [
     "GITHUB_TOKEN",
     "GITHUB_REPOSITORY",
     "GITHUB_WORKFLOW_FILE",
+    "WEITESTING_GITHUB_TOKEN",
+    "WEITESTING_GITHUB_REPOSITORY",
+    "WEITESTING_GITHUB_WORKFLOW_FILE",
     "JENKINS_BASE_URL",
     "JENKINS_JOB_NAME",
     "JENKINS_USERNAME",
@@ -94,3 +97,29 @@ def test_verify_external_integrations_dry_run_shows_missing():
     assert "[Zentao] MISSING" in output
     assert "Missing env: DINGTALK_WEBHOOK_URL" in output
     assert "No external API calls were made." in output
+
+
+def test_verify_external_integrations_uses_non_reserved_github_env_aliases():
+    repo_root = Path(__file__).resolve().parents[2]
+    script = repo_root / "scripts" / "verify_external_integrations.ps1"
+
+    env = _clean_env()
+    env.update(
+        {
+            "WEITESTING_GITHUB_TOKEN": "token",
+            "WEITESTING_GITHUB_REPOSITORY": "Inventionyin/ai-project",
+            "WEITESTING_GITHUB_WORKFLOW_FILE": ".github/workflows/real-e2e.yml",
+        }
+    )
+    result = subprocess.run(
+        [_powershell_executable(), "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), "-DryRun"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env=env,
+    )
+    output = f"{result.stdout}\n{result.stderr}"
+
+    assert result.returncode == 0
+    assert "[GitHub Actions] READY" in output
+    assert "Missing env: WEITESTING_GITHUB_TOKEN" not in output

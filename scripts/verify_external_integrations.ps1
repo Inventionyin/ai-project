@@ -20,7 +20,9 @@ function Write-Usage {
     Write-Host ""
     Write-Host "Environment variables:"
     Write-Host "  DINGTALK_WEBHOOK_URL, optional DINGTALK_WEBHOOK_SECRET"
-    Write-Host "  GITHUB_TOKEN, GITHUB_REPOSITORY, GITHUB_WORKFLOW_FILE"
+    Write-Host "  WEITESTING_GITHUB_TOKEN or GITHUB_TOKEN"
+    Write-Host "  WEITESTING_GITHUB_REPOSITORY or GITHUB_REPOSITORY"
+    Write-Host "  WEITESTING_GITHUB_WORKFLOW_FILE or GITHUB_WORKFLOW_FILE"
     Write-Host "  JENKINS_BASE_URL, JENKINS_JOB_NAME, JENKINS_USERNAME, JENKINS_API_TOKEN"
     Write-Host "  JIRA_BASE_URL, JIRA_PROJECT_KEY, JIRA_EMAIL, JIRA_TOKEN"
     Write-Host "  ZENTAO_BASE_URL, ZENTAO_PRODUCT, ZENTAO_TOKEN"
@@ -46,6 +48,7 @@ function Get-RedactedMessage {
         "DINGTALK_WEBHOOK_URL",
         "DINGTALK_WEBHOOK_SECRET",
         "GITHUB_TOKEN",
+        "WEITESTING_GITHUB_TOKEN",
         "JENKINS_API_TOKEN",
         "JIRA_TOKEN",
         "ZENTAO_TOKEN"
@@ -62,6 +65,19 @@ function Get-RedactedMessage {
         '$1=***REDACTED***'
     )
     return $redacted
+}
+
+function Get-EnvValue {
+    param([string[]]$Names)
+
+    foreach ($name in $Names) {
+        $value = [Environment]::GetEnvironmentVariable($name)
+        if (-not [string]::IsNullOrWhiteSpace($value)) {
+            return $value
+        }
+    }
+
+    return $null
 }
 
 function Get-DingTalkSignedWebhookUrl {
@@ -93,20 +109,23 @@ function Get-DingTalkSignedWebhookUrl {
 function Get-IntegrationStatus {
     param(
         [string]$Name,
-        [string[]]$RequiredEnvNames
+        [object[]]$RequiredEnvGroups
     )
 
     $missing = @()
-    foreach ($envName in $RequiredEnvNames) {
-        $value = [Environment]::GetEnvironmentVariable($envName)
+    $requiredLabels = @()
+    foreach ($envGroup in $RequiredEnvGroups) {
+        $names = @($envGroup)
+        $requiredLabels += ($names -join " or ")
+        $value = Get-EnvValue -Names $names
         if ([string]::IsNullOrWhiteSpace($value)) {
-            $missing += $envName
+            $missing += ($names -join " or ")
         }
     }
 
     return [PSCustomObject]@{
         Name = $Name
-        Required = $RequiredEnvNames
+        Required = $requiredLabels
         Missing = $missing
         Ready = ($missing.Count -eq 0)
     }
@@ -142,9 +161,9 @@ function Invoke-SmokeChecks {
             }
             "GitHub Actions" {
                 try {
-                    $repo = [Environment]::GetEnvironmentVariable("GITHUB_REPOSITORY")
-                    $workflow = [Environment]::GetEnvironmentVariable("GITHUB_WORKFLOW_FILE")
-                    $token = [Environment]::GetEnvironmentVariable("GITHUB_TOKEN")
+                    $repo = Get-EnvValue -Names @("WEITESTING_GITHUB_REPOSITORY", "GITHUB_REPOSITORY")
+                    $workflow = Get-EnvValue -Names @("WEITESTING_GITHUB_WORKFLOW_FILE", "GITHUB_WORKFLOW_FILE")
+                    $token = Get-EnvValue -Names @("WEITESTING_GITHUB_TOKEN", "GITHUB_TOKEN")
                     $headers = @{
                         Authorization = "Bearer $token"
                         Accept = "application/vnd.github+json"
@@ -224,7 +243,11 @@ if ($Help) {
 
 $definitions = @(
     @{ Name = "DingTalk"; Required = @("DINGTALK_WEBHOOK_URL") },
-    @{ Name = "GitHub Actions"; Required = @("GITHUB_TOKEN", "GITHUB_REPOSITORY", "GITHUB_WORKFLOW_FILE") },
+    @{ Name = "GitHub Actions"; Required = @(
+        @("WEITESTING_GITHUB_TOKEN", "GITHUB_TOKEN"),
+        @("WEITESTING_GITHUB_REPOSITORY", "GITHUB_REPOSITORY"),
+        @("WEITESTING_GITHUB_WORKFLOW_FILE", "GITHUB_WORKFLOW_FILE")
+    ) },
     @{ Name = "Jenkins"; Required = @("JENKINS_BASE_URL", "JENKINS_JOB_NAME", "JENKINS_USERNAME", "JENKINS_API_TOKEN") },
     @{ Name = "Jira"; Required = @("JIRA_BASE_URL", "JIRA_PROJECT_KEY", "JIRA_EMAIL", "JIRA_TOKEN") },
     @{ Name = "Zentao"; Required = @("ZENTAO_BASE_URL", "ZENTAO_PRODUCT", "ZENTAO_TOKEN") }
@@ -232,7 +255,7 @@ $definitions = @(
 
 $statuses = New-Object System.Collections.Generic.List[object]
 foreach ($definition in $definitions) {
-    $statuses.Add((Get-IntegrationStatus -Name $definition.Name -RequiredEnvNames $definition.Required))
+    $statuses.Add((Get-IntegrationStatus -Name $definition.Name -RequiredEnvGroups $definition.Required))
 }
 
 $hasMissing = $false

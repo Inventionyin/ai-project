@@ -40,9 +40,9 @@
 1. DingTalk
    `DINGTALK_WEBHOOK_URL`
 2. GitHub Actions
-   `GITHUB_TOKEN`
-   `GITHUB_REPOSITORY`（格式：`owner/repo`）
-   `GITHUB_WORKFLOW_FILE`（例如：`.github/workflows/ci.yml`）
+   `WEITESTING_GITHUB_TOKEN` 或 `GITHUB_TOKEN`
+   `WEITESTING_GITHUB_REPOSITORY` 或 `GITHUB_REPOSITORY`（格式：`owner/repo`）
+   `WEITESTING_GITHUB_WORKFLOW_FILE` 或 `GITHUB_WORKFLOW_FILE`（例如：`.github/workflows/real-e2e.yml`）
 3. Jenkins
    `JENKINS_BASE_URL`
    `JENKINS_JOB_NAME`
@@ -109,24 +109,28 @@ $env:DINGTALK_WEBHOOK_SECRET = "SEC..."
 
 ### 3.2 GitHub Actions
 
+GitHub 仓库 Settings -> Secrets and variables -> Actions **不能手动创建 `GITHUB_` 开头的 Variables**，这是 GitHub 的保留前缀。
+本仓库的 CI 已经会自动注入 `WEITESTING_GITHUB_*`，正常跑 GitHub Actions 时不需要你额外填写 GitHub 仓库名和 workflow 文件。
+
 去哪里拿：
 
-1. `GITHUB_TOKEN`：GitHub -> 右上角头像 -> Settings -> Developer settings -> Personal access tokens。
+1. `WEITESTING_GITHUB_TOKEN`：GitHub -> 右上角头像 -> Settings -> Developer settings -> Personal access tokens。
    建议最小权限：`repo`、`workflow`（按你的仓库策略微调）。
-2. `GITHUB_REPOSITORY`：你的仓库路径，例如 `Inventionyin/ai-project`。
-3. `GITHUB_WORKFLOW_FILE`：仓库里 workflow 文件相对路径，如 `.github/workflows/real-e2e.yml`。
+   仅本地手动 smoke GitHub REST API 时需要；在 GitHub Actions 内会自动用 `${{ github.token }}`。
+2. `WEITESTING_GITHUB_REPOSITORY`：你的仓库路径，例如 `Inventionyin/ai-project`。
+3. `WEITESTING_GITHUB_WORKFLOW_FILE`：仓库里 workflow 文件相对路径，如 `.github/workflows/real-e2e.yml`。
 
 填哪里：
 
 ```powershell
-$env:GITHUB_TOKEN = "ghp_xxx"
-$env:GITHUB_REPOSITORY = "Inventionyin/ai-project"
-$env:GITHUB_WORKFLOW_FILE = ".github/workflows/real-e2e.yml"
+$env:WEITESTING_GITHUB_TOKEN = "github_pat_xxx"
+$env:WEITESTING_GITHUB_REPOSITORY = "Inventionyin/ai-project"
+$env:WEITESTING_GITHUB_WORKFLOW_FILE = ".github/workflows/real-e2e.yml"
 ```
 
 GitHub MCP 与这个脚本不是一回事：
 
-1. `verify_external_integrations.ps1` 调 GitHub REST API，只需要 `GITHUB_TOKEN`、`GITHUB_REPOSITORY`、`GITHUB_WORKFLOW_FILE`。
+1. `verify_external_integrations.ps1` 调 GitHub REST API，优先读取 `WEITESTING_GITHUB_TOKEN`、`WEITESTING_GITHUB_REPOSITORY`、`WEITESTING_GITHUB_WORKFLOW_FILE`，也兼容 GitHub Actions 自带的 `GITHUB_TOKEN`、`GITHUB_REPOSITORY`、`GITHUB_WORKFLOW_FILE`。
 2. GitHub MCP 是 Codex/开发助手用来帮你读 PR、查 Actions、合并代码的工具，不是 CI 必需配置。
 3. 本仓库的 GitHub Actions 正常运行不依赖 MCP。
 
@@ -228,7 +232,7 @@ dry-run 成功示例：
 ```text
 [DingTalk] READY
 [GitHub Actions] MISSING
-  Missing env: GITHUB_TOKEN, GITHUB_REPOSITORY, GITHUB_WORKFLOW_FILE
+  Missing env: WEITESTING_GITHUB_TOKEN or GITHUB_TOKEN, WEITESTING_GITHUB_REPOSITORY or GITHUB_REPOSITORY, WEITESTING_GITHUB_WORKFLOW_FILE or GITHUB_WORKFLOW_FILE
 [DryRun] Configuration validation finished. No external API calls were made.
 ```
 
@@ -281,7 +285,7 @@ https://github.com/Inventionyin/ai-project/settings/secrets/actions
 ```text
 DINGTALK_WEBHOOK_URL
 DINGTALK_WEBHOOK_SECRET
-GITHUB_TOKEN
+WEITESTING_GITHUB_TOKEN
 JENKINS_API_TOKEN
 JIRA_TOKEN
 ZENTAO_TOKEN
@@ -290,8 +294,10 @@ ZENTAO_TOKEN
 建议放到 **Variables**：
 
 ```text
-GITHUB_REPOSITORY=Inventionyin/ai-project
-GITHUB_WORKFLOW_FILE=.github/workflows/real-e2e.yml
+# GitHub Actions 自动注入 WEITESTING_GITHUB_*；仓库设置里不要手动创建 GITHUB_* 变量。
+# 如果本地跑 smoke，才需要在本地终端设置：
+# WEITESTING_GITHUB_REPOSITORY=Inventionyin/ai-project
+# WEITESTING_GITHUB_WORKFLOW_FILE=.github/workflows/real-e2e.yml
 JENKINS_BASE_URL
 JENKINS_JOB_NAME
 JENKINS_USERNAME
