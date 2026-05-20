@@ -11,8 +11,12 @@ on:
   pull_request:
   push:
     branches:
+      - dev
       - main
       - master
+  schedule:
+    # Run the full real E2E path nightly on the default branch.
+    - cron: "30 18 * * *"
 
 jobs:
   verify:
@@ -39,15 +43,15 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "20"
           cache: "npm"
@@ -89,8 +93,8 @@ jobs:
         run: |
           Write-Host "scripts/verify_external_integrations.ps1 not found; skipped external integration diagnostics dry-run."
 
-      - name: Run frontend real E2E (workflow_dispatch only)
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.includeFrontendRealE2E }}
+      - name: Run frontend real E2E (workflow_dispatch or nightly)
+        if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.includeFrontendRealE2E) }}
         shell: pwsh
         run: |
           Set-StrictMode -Version Latest

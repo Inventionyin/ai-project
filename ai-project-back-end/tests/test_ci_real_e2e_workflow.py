@@ -13,7 +13,15 @@ def test_real_e2e_workflow_contains_required_ci_entrypoints():
         "./scripts/run_performance_baseline.ps1 -DryRun",
         "Run external integrations diagnostics dry-run (if script exists)",
         "./scripts/verify_external_integrations.ps1 -DryRun",
-        "Run frontend real E2E (workflow_dispatch only)",
+        "Run frontend real E2E (workflow_dispatch or nightly)",
+        "github.event_name == 'schedule'",
+        "includeFrontendRealE2E",
+        "actions/checkout@v6",
+        "actions/setup-python@v6",
+        "actions/setup-node@v6",
+        "- dev",
+        "- main",
+        "- master",
     ]
 
     missing = [token for token in required_tokens if token not in content]

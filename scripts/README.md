@@ -161,8 +161,9 @@ GitHub Actions workflow: `.github/workflows/real-e2e.yml`
 Triggers:
 
 - `pull_request`
-- `push` to `main` or `master`
+- `push` to `dev`, `main`, or `master`
 - `workflow_dispatch` (manual)
+- nightly `schedule`
 
 Default CI phases (same gate as local script):
 
@@ -178,11 +179,11 @@ PostgreSQL service is provided in CI as:
 postgresql+asyncpg://postgres:postgres@localhost:5432/ai_test_platform_e2e
 ```
 
-### Frontend real E2E in CI (manual only)
+### Frontend real E2E in CI
 
 The workflow includes input `includeFrontendRealE2E` for `workflow_dispatch`.
 
-When enabled:
+When enabled, or when the nightly schedule runs:
 
 - starts backend (`uvicorn app.main:app`) and frontend preview (`npm run preview`)
 - runs:
@@ -191,4 +192,15 @@ When enabled:
 .\scripts\verify_real_e2e.ps1 -SkipBackend -SkipFrontendBuild -SkipGeneratedE2E -WithFrontendRealE2E
 ```
 
-This keeps frontend real E2E gated behind manual orchestration while normal CI keeps backend pytest + frontend build + generated Playwright E2E always on.
+This keeps frontend real E2E out of every PR by default while still giving you a repeatable manual run and a scheduled mainline safety net.
+
+Useful `gh` commands:
+
+```powershell
+gh workflow run real-e2e --repo Inventionyin/ai-project --ref dev -f includeFrontendRealE2E=false
+gh workflow run real-e2e --repo Inventionyin/ai-project --ref dev -f includeFrontendRealE2E=true
+gh run list --repo Inventionyin/ai-project --workflow real-e2e --limit 10
+gh run watch <run-id> --repo Inventionyin/ai-project --exit-status
+gh run view <run-id> --repo Inventionyin/ai-project --log-failed
+gh run rerun <run-id> --repo Inventionyin/ai-project --failed
+```
