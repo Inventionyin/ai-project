@@ -19,13 +19,17 @@
 
 # 配置通过后，做可选 API smoke（会访问外网）
 .\scripts\verify_external_integrations.ps1 -EnableSmoke
+
+# 生产闸门模式：任何 smoke 失败都返回非 0
+.\scripts\verify_external_integrations.ps1 -EnableSmoke -FailOnSmokeError
 ```
 
 行为说明：
 
 1. `-DryRun`：只输出每个系统 `READY/MISSING`，并列出缺失变量，不会访问外部网络。
 2. 默认不做 API 调用；只有加 `-EnableSmoke` 才会做最小探测。
-3. token 不会持久化到 repo，日志只输出脱敏信息。
+3. `-FailOnSmokeError` 会把任意 smoke 失败变成脚本失败，适合 CI/上线闸门。
+4. token 不会持久化到 repo，日志只输出脱敏信息。
 
 ---
 
@@ -200,6 +204,12 @@ $env:ZENTAO_TOKEN = "your-zentao-token"
 
 ```powershell
 .\scripts\verify_external_integrations.ps1 -EnableSmoke
+```
+
+如果你希望任何 smoke warning 都直接拦住流程：
+
+```powershell
+.\scripts\verify_external_integrations.ps1 -EnableSmoke -FailOnSmokeError
 ```
 
 dry-run 成功示例：

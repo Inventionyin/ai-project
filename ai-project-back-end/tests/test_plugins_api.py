@@ -410,6 +410,121 @@ async def test_create_plugin_rejects_invalid_sandbox_policy_permissions() -> Non
 
 
 @pytest.mark.anyio
+async def test_create_plugin_accepts_allowlist_sandbox_hosts() -> None:
+    from app.services.plugin import invoke_plugin_installation
+
+    user = CurrentUser(
+        id=uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+        tenant_id=uuid.UUID("11111111-1111-1111-1111-111111111111"),
+        roles=frozenset({"ADMIN"}),
+    )
+    installation, plugin = _plugin_installation_pair()
+    installation.config_json = {
+        "sandboxPolicy": {
+            "permissions": ["RUN_TEST"],
+            "timeoutMs": 1000,
+            "networkMode": "ALLOWLIST",
+            "allowedHosts": ["api.example.com", "internal-service"],
+            "maxPayloadBytes": 4096,
+        }
+    }
+
+    result = await invoke_plugin_installation(
+        _InvokeSession(installation, (installation, plugin)),
+        user=user,
+        project_id=installation.project_id,
+        installation_id=installation.id,
+    )
+
+    assert result.sandboxPolicy.networkMode == "ALLOWLIST"
+    assert result.sandboxPolicy.allowedHosts == ["api.example.com", "internal-service"]
+
+
+@pytest.mark.anyio
+async def test_create_plugin_rejects_allowlist_sandbox_without_hosts() -> None:
+    from app.services.plugin import create_plugin
+
+    class _CreateSession:
+        async def scalar(self, _stmt):
+            return None
+
+        def add(self, _row):
+            return None
+
+        async def flush(self):
+            return None
+
+    user = CurrentUser(
+        id=uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+        tenant_id=uuid.UUID("11111111-1111-1111-1111-111111111111"),
+        roles=frozenset({"ADMIN"}),
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await create_plugin(
+            _CreateSession(),
+            user=user,
+            name="allowlist",
+            slug="allowlist",
+            version="1.0.0",
+            config_schema={
+                "sandboxPolicy": {
+                    "permissions": ["RUN_TEST"],
+                    "timeoutMs": 1000,
+                    "networkMode": "ALLOWLIST",
+                    "allowedHosts": [],
+                    "maxPayloadBytes": 4096,
+                }
+            },
+        )
+
+    assert exc.value.status_code == 400
+    assert "allowedHosts required" in str(exc.value.detail)
+
+
+@pytest.mark.anyio
+async def test_create_plugin_rejects_allowlist_sandbox_invalid_hosts() -> None:
+    from app.services.plugin import create_plugin
+
+    class _CreateSession:
+        async def scalar(self, _stmt):
+            return None
+
+        def add(self, _row):
+            return None
+
+        async def flush(self):
+            return None
+
+    user = CurrentUser(
+        id=uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+        tenant_id=uuid.UUID("11111111-1111-1111-1111-111111111111"),
+        roles=frozenset({"ADMIN"}),
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await create_plugin(
+            _CreateSession(),
+            user=user,
+            name="bad-host",
+            slug="bad-host",
+            version="1.0.0",
+            config_schema={
+                "sandboxPolicy": {
+                    "permissions": ["RUN_TEST"],
+                    "timeoutMs": 1000,
+                    "networkMode": "ALLOWLIST",
+                    "allowedHosts": ["https://api.example.com", "bad host"],
+                    "maxPayloadBytes": 4096,
+                }
+            },
+        )
+
+    assert exc.value.status_code == 400
+    assert "invalid hostname" in str(exc.value.detail)
+
+
+@pytest.mark.anyio
 async def test_invoke_plugin_installation_rejects_disabled_plugin() -> None:
     from app.services.plugin import invoke_plugin_installation
 

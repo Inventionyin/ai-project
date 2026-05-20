@@ -2,22 +2,24 @@
 param(
     [switch]$Help,
     [switch]$DryRun,
-    [switch]$EnableSmoke
+    [switch]$EnableSmoke,
+    [switch]$FailOnSmokeError
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 function Write-Usage {
-    Write-Host "Usage: .\scripts\verify_external_integrations.ps1 [-DryRun] [-EnableSmoke]"
+    Write-Host "Usage: .\scripts\verify_external_integrations.ps1 [-DryRun] [-EnableSmoke] [-FailOnSmokeError]"
     Write-Host ""
     Write-Host "Options:"
     Write-Host "  -Help      Show this help message."
     Write-Host "  -DryRun    Only check configuration, never call external APIs."
     Write-Host "  -EnableSmoke  Run minimal API smoke checks after config READY."
+    Write-Host "  -FailOnSmokeError  Return non-zero when any enabled smoke check fails."
     Write-Host ""
     Write-Host "Environment variables:"
-    Write-Host "  DINGTALK_WEBHOOK_URL"
+    Write-Host "  DINGTALK_WEBHOOK_URL, optional DINGTALK_WEBHOOK_SECRET"
     Write-Host "  GITHUB_TOKEN, GITHUB_REPOSITORY, GITHUB_WORKFLOW_FILE"
     Write-Host "  JENKINS_BASE_URL, JENKINS_JOB_NAME, JENKINS_USERNAME, JENKINS_API_TOKEN"
     Write-Host "  JIRA_BASE_URL, JIRA_PROJECT_KEY, JIRA_EMAIL, JIRA_TOKEN"
@@ -42,6 +44,7 @@ function Get-RedactedMessage {
     $redacted = [string]$Message
     $secretEnvNames = @(
         "DINGTALK_WEBHOOK_URL",
+        "DINGTALK_WEBHOOK_SECRET",
         "GITHUB_TOKEN",
         "JENKINS_API_TOKEN",
         "JIRA_TOKEN",
@@ -59,6 +62,32 @@ function Get-RedactedMessage {
         '$1=***REDACTED***'
     )
     return $redacted
+}
+
+function Get-DingTalkSignedWebhookUrl {
+    param(
+        [string]$WebhookUrl,
+        [string]$Secret
+    )
+
+    if ([string]::IsNullOrWhiteSpace($WebhookUrl) -or [string]::IsNullOrWhiteSpace($Secret)) {
+        return $WebhookUrl
+    }
+
+    $timestamp = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    $stringToSign = "$timestamp`n$Secret"
+    $secretBytes = [System.Text.Encoding]::UTF8.GetBytes($Secret)
+    $signBytes = [System.Text.Encoding]::UTF8.GetBytes($stringToSign)
+    $hmac = [System.Security.Cryptography.HMACSHA256]::new($secretBytes)
+    try {
+        $signature = [Convert]::ToBase64String($hmac.ComputeHash($signBytes))
+    }
+    finally {
+        $hmac.Dispose()
+    }
+    $encodedSignature = [System.Net.WebUtility]::UrlEncode($signature)
+    $separator = if ($WebhookUrl.Contains("?")) { "&" } else { "?" }
+    return "$WebhookUrl${separator}timestamp=$timestamp&sign=$encodedSignature"
 }
 
 function Get-IntegrationStatus {
@@ -86,6 +115,7 @@ function Get-IntegrationStatus {
 function Invoke-SmokeChecks {
     param([System.Collections.Generic.List[object]]$Statuses)
 
+    $failures = New-Object System.Collections.Generic.List[string]
     foreach ($status in $Statuses) {
         if (-not $status.Ready) {
             continue
@@ -94,10 +124,19 @@ function Invoke-SmokeChecks {
             "DingTalk" {
                 try {
                     $webhook = [Environment]::GetEnvironmentVariable("DINGTALK_WEBHOOK_URL")
-                    Invoke-WebRequest -Uri $webhook -Method Head -TimeoutSec 8 | Out-Null
-                    Write-Host "[SMOKE] DingTalk webhook reachable."
+                    $secret = [Environment]::GetEnvironmentVariable("DINGTALK_WEBHOOK_SECRET")
+                    $signedWebhook = Get-DingTalkSignedWebhookUrl -WebhookUrl $webhook -Secret $secret
+                    $payload = @{
+                        msgtype = "text"
+                        text = @{
+                            content = "WeiTesting external integration smoke"
+                        }
+                    } | ConvertTo-Json -Depth 4
+                    Invoke-RestMethod -Method Post -Uri $signedWebhook -ContentType "application/json; charset=utf-8" -Body $payload -TimeoutSec 8 | Out-Null
+                    Write-Host "[SMOKE] DingTalk webhook accepted message."
                 }
                 catch {
+                    $failures.Add($status.Name) | Out-Null
                     Write-Warning ("[SMOKE] DingTalk failed: {0}" -f (Get-RedactedMessage -Message $_.Exception.Message))
                 }
             }
@@ -116,6 +155,7 @@ function Invoke-SmokeChecks {
                     Write-Host "[SMOKE] GitHub workflow metadata reachable."
                 }
                 catch {
+                    $failures.Add($status.Name) | Out-Null
                     Write-Warning ("[SMOKE] GitHub Actions failed: {0}" -f (Get-RedactedMessage -Message $_.Exception.Message))
                 }
             }
@@ -134,6 +174,7 @@ function Invoke-SmokeChecks {
                     Write-Host "[SMOKE] Jenkins job metadata reachable."
                 }
                 catch {
+                    $failures.Add($status.Name) | Out-Null
                     Write-Warning ("[SMOKE] Jenkins failed: {0}" -f (Get-RedactedMessage -Message $_.Exception.Message))
                 }
             }
@@ -151,6 +192,7 @@ function Invoke-SmokeChecks {
                     Write-Host "[SMOKE] Jira account API reachable."
                 }
                 catch {
+                    $failures.Add($status.Name) | Out-Null
                     Write-Warning ("[SMOKE] Jira failed: {0}" -f (Get-RedactedMessage -Message $_.Exception.Message))
                 }
             }
@@ -165,11 +207,14 @@ function Invoke-SmokeChecks {
                     Write-Host "[SMOKE] Zentao product API reachable. token=$maskedToken"
                 }
                 catch {
+                    $failures.Add($status.Name) | Out-Null
                     Write-Warning ("[SMOKE] Zentao failed: {0}" -f (Get-RedactedMessage -Message $_.Exception.Message))
                 }
             }
         }
     }
+
+    return $failures
 }
 
 if ($Help) {
@@ -209,7 +254,10 @@ if ($DryRun) {
 
 if ($EnableSmoke) {
     Write-Host "[INFO] -EnableSmoke is on. Running minimal API smoke checks..."
-    Invoke-SmokeChecks -Statuses $statuses
+    $smokeFailures = Invoke-SmokeChecks -Statuses $statuses
+    if ($FailOnSmokeError -and $smokeFailures.Count -gt 0) {
+        Write-Error ("Smoke checks failed: {0}" -f ($smokeFailures -join ", "))
+    }
 }
 else {
     Write-Host "[INFO] Smoke checks are disabled by default. Use -EnableSmoke to run optional API probes."
