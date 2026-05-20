@@ -2,9 +2,30 @@ from app.models.ai_import import AiImportItem, AiImportJob
 from app.models.audit import AuditLog
 from app.models.api import ApiCollection, ApiCollectionGroup, ApiRequest
 from app.models.api_target import ApiTarget
+from app.models.defect import Defect, DefectEvent
+from app.models.devops_pipeline import DevOpsPipeline, DevOpsRun
+from app.models.doc_parse_job import DocParseJob
 from app.models.environment import Environment
-from app.models.integration import AiRecord, IssueLink, Notification
-from app.models.project import Project, ProjectMember
+from app.models.executor import Executor
+from app.models.plugin import Plugin, PluginInstallation
+from app.models.requirement import (
+    GeneratedCaseDraft,
+    RequirementAnalysis,
+    RequirementAnalysisRevision,
+    RequirementCaseLink,
+    RequirementChangeItem,
+    RequirementChangeSet,
+    RequirementDoc,
+    RequirementDocVersion,
+    RequirementRegressionCase,
+    RequirementRegressionSet,
+    RequirementTestPoint,
+)
+from app.models.integration import AiRecord, IssueLink, Notification, NotificationOutbox
+from app.models.knowledge import KnowledgeRecommendation, KnowledgeRule, KnowledgeTemplate, RetrospectiveRecord
+from app.models.prompt_template import PromptTemplate
+from app.models.platform_record import AiJobRecord
+from app.models.project import Project, ProjectCiToken, ProjectMember
 from app.models.run import Artifact, CaseRun, Job, Run
 from app.models.suite import Suite, SuiteItem
 from app.models.tenant import Tenant
@@ -22,15 +43,42 @@ __all__ = [
     "ApiCollectionGroup",
     "ApiRequest",
     "ApiTarget",
+    "AiJobRecord",
     "Artifact",
     "AuditLog",
     "CaseRun",
+    "Defect",
+    "DefectEvent",
+    "DevOpsPipeline",
+    "DevOpsRun",
+    "DocParseJob",
     "Environment",
+    "Executor",
     "IssueLink",
     "Job",
+    "KnowledgeRecommendation",
+    "KnowledgeRule",
+    "KnowledgeTemplate",
     "Notification",
+    "NotificationOutbox",
+    "Plugin",
+    "PluginInstallation",
+    "PromptTemplate",
     "Project",
+    "ProjectCiToken",
     "ProjectMember",
+    "RetrospectiveRecord",
+    "GeneratedCaseDraft",
+    "RequirementAnalysis",
+    "RequirementAnalysisRevision",
+    "RequirementCaseLink",
+    "RequirementChangeItem",
+    "RequirementChangeSet",
+    "RequirementDoc",
+    "RequirementDocVersion",
+    "RequirementRegressionCase",
+    "RequirementRegressionSet",
+    "RequirementTestPoint",
     "Run",
     "Suite",
     "SuiteItem",

@@ -1,0 +1,77 @@
+import os
+import shutil
+from pathlib import Path
+import subprocess
+
+
+_INTEGRATION_ENV_NAMES = [
+    "DINGTALK_WEBHOOK_URL",
+    "GITHUB_TOKEN",
+    "GITHUB_REPOSITORY",
+    "GITHUB_WORKFLOW_FILE",
+    "JENKINS_BASE_URL",
+    "JENKINS_JOB_NAME",
+    "JENKINS_USERNAME",
+    "JENKINS_API_TOKEN",
+    "JIRA_BASE_URL",
+    "JIRA_PROJECT_KEY",
+    "JIRA_EMAIL",
+    "JIRA_TOKEN",
+    "ZENTAO_BASE_URL",
+    "ZENTAO_PRODUCT",
+    "ZENTAO_TOKEN",
+]
+
+
+def _powershell_executable() -> str:
+    executable = shutil.which("pwsh") or shutil.which("powershell")
+    if executable is None:
+        raise AssertionError("PowerShell executable not found")
+    return executable
+
+
+def _clean_env() -> dict[str, str]:
+    env = os.environ.copy()
+    for name in _INTEGRATION_ENV_NAMES:
+        env.pop(name, None)
+    return env
+
+
+def _run_ps(script: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [_powershell_executable(), "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), *args],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env=_clean_env(),
+    )
+
+
+def test_verify_external_integrations_help():
+    repo_root = Path(__file__).resolve().parents[2]
+    script = repo_root / "scripts" / "verify_external_integrations.ps1"
+
+    result = _run_ps(script, ["-Help"])
+    output = f"{result.stdout}\n{result.stderr}"
+
+    assert result.returncode == 0
+    assert "Usage: .\\scripts\\verify_external_integrations.ps1" in output
+    assert "-DryRun" in output
+    assert "DINGTALK_WEBHOOK_URL" in output
+
+
+def test_verify_external_integrations_dry_run_shows_missing():
+    repo_root = Path(__file__).resolve().parents[2]
+    script = repo_root / "scripts" / "verify_external_integrations.ps1"
+
+    result = _run_ps(script, ["-DryRun"])
+    output = f"{result.stdout}\n{result.stderr}"
+
+    assert result.returncode == 0
+    assert "[DingTalk] MISSING" in output
+    assert "[GitHub Actions] MISSING" in output
+    assert "[Jenkins] MISSING" in output
+    assert "[Jira] MISSING" in output
+    assert "[Zentao] MISSING" in output
+    assert "Missing env: DINGTALK_WEBHOOK_URL" in output
+    assert "No external API calls were made." in output

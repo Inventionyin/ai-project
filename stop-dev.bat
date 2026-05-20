@@ -3,7 +3,7 @@ setlocal EnableDelayedExpansion
 set "KILLED=0"
 set "SEEN_PIDS= "
 
-for %%P in (8000 5173) do (
+for %%P in (8000 5173 4173) do (
   for /f "tokens=5" %%A in ('netstat -ano ^| findstr /R /C:":%%P .*LISTENING"') do (
     set "PID=%%A"
     echo !SEEN_PIDS! | find " !PID! " >nul
@@ -19,7 +19,7 @@ for %%P in (8000 5173) do (
 )
 
 if "!KILLED!"=="0" (
-  echo No dev process found on ports 8000 or 5173.
+  echo No dev process found on ports 8000, 5173, or 4173.
 ) else (
   echo Stopped !KILLED! process^(es^).
 )

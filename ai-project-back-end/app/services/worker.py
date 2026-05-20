@@ -23,10 +23,13 @@ from app.schemas.worker import (
     JobItem,
     JobPayload,
     JobSuiteConfig,
+    WorkerAdminDetailData,
+    WorkerAdminListItem,
     WorkerPollData,
     WorkerRegisterRequest,
 )
 from app.services.environment import get_secret_keys
+from app.services.integration_delivery import dispatch_run_terminal_notification
 
 _WORKER_CAPABILITIES = {"API", "UI", "PERF"}
 _TERMINAL_CASE_STATUS = {CaseRunStatus.PASSED, CaseRunStatus.FAILED, CaseRunStatus.SKIPPED}
@@ -54,6 +57,23 @@ def _token_hash(raw_token: str) -> str:
 
 def _new_worker_token() -> str:
     return f"wk_{secrets.token_urlsafe(32)}"
+
+
+def _to_unix_ts(dt: datetime | None) -> int | None:
+    return int(dt.timestamp()) if dt is not None else None
+
+
+def _to_worker_admin_item(worker: Worker) -> WorkerAdminListItem:
+    return WorkerAdminListItem(
+        id=str(worker.id),
+        name=worker.name,
+        status=worker.status,
+        slots=worker.slots,
+        capabilities=sorted(_normalize_capabilities(list(worker.capabilities_json or []))),
+        lastSeenAt=_to_unix_ts(worker.last_seen_at),
+        version=worker.version,
+        updatedAt=_to_unix_ts(worker.updated_at) or 0,
+    )
 
 
 def _require_worker_payload_identity(payload_worker_id: str, worker: CurrentWorker) -> None:
@@ -144,6 +164,44 @@ async def register_worker(
     db.add(worker)
     await db.flush()
     return worker.id, token
+
+
+async def list_workers_admin(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    page: int,
+    page_size: int,
+    status: str | None,
+) -> tuple[int, list[WorkerAdminListItem]]:
+    query = select(Worker).where(Worker.tenant_id == tenant_id)
+    count_query = select(func.count(Worker.id)).where(Worker.tenant_id == tenant_id)
+    if status:
+        status_enum = WorkerStatus(status)
+        query = query.where(Worker.status == status_enum)
+        count_query = count_query.where(Worker.status == status_enum)
+
+    total = int((await db.execute(count_query)).scalar_one() or 0)
+    rows = (
+        await db.execute(
+            query.order_by(Worker.updated_at.desc(), Worker.id.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+    ).scalars()
+    return total, [_to_worker_admin_item(w) for w in rows.all()]
+
+
+async def get_worker_admin(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    worker_id: uuid.UUID,
+) -> WorkerAdminDetailData:
+    worker = await db.scalar(select(Worker).where(Worker.id == worker_id, Worker.tenant_id == tenant_id))
+    if worker is None:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    return WorkerAdminDetailData(**_to_worker_admin_item(worker).model_dump())
 
 
 async def heartbeat_worker(
@@ -479,5 +537,10 @@ async def report_job_result(
         )
         run.status = RunStatus.FAILED if failed_count > 0 else RunStatus.PASSED
         run.end_at = now
+    if run.status in (RunStatus.PASSED, RunStatus.FAILED, RunStatus.CANCELED):
+        try:
+            await dispatch_run_terminal_notification(db, run=run)
+        except Exception:
+            pass
 
     await db.flush()

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 
-from sqlalchemy import ForeignKey, Index, Integer, String
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -36,7 +37,24 @@ class TestcaseBinding(Base, TimestampMixin):
         ForeignKey("api_targets.id"),
         nullable=True,
     )
+    request_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("api_requests.id"),
+        nullable=True,
+        index=True,
+    )
+    collection_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("api_collections.id"),
+        nullable=True,
+        index=True,
+    )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    link_type: Mapped[str] = mapped_column(String(32), nullable=False, default="API_TARGET")
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False, default="MANUAL")
+    assert_summary: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    last_run_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     params_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
     enabled: Mapped[bool] = mapped_column(nullable=False, default=True)

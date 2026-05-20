@@ -290,7 +290,7 @@ const toggleRegisterConfirmPassword = () => {
       
       <!-- Text -->
       <div class="text-center">
-        <h1 class="text-2xl font-semibold text-white mb-2">AI 测试平台</h1>
+        <h1 class="text-2xl font-semibold text-white mb-2">WeiTesting</h1>
         <p class="text-brand-text-gray text-sm">智能化测试资产管理与执行编排</p>
       </div>
     </div>
@@ -570,7 +570,7 @@ const toggleRegisterConfirmPassword = () => {
 
     <!-- Footer -->
     <div class="text-center">
-      <p class="text-xs text-[#45556C]">© 2024 AI Testing Platform · 企业内部测试工具</p>
+      <p class="text-xs text-[#45556C]">© 2024 WeiTesting · 企业内部测试工具</p>
     </div>
   </div>
 </template>

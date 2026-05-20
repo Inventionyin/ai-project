@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import apiImport from '@/assets/figma/ai-testing-platform/api-import.svg'
 import apiSearch from '@/assets/figma/ai-testing-platform/api-search.svg'
 import apiCollection from '@/assets/figma/ai-testing-platform/api-collection.svg'
@@ -47,6 +47,7 @@ type CollectionNode = {
 }
 
 const route = useRoute()
+const router = useRouter()
 const collectionIcons = [apiCollection, apiCollection2, apiCollection3]
 const collections = ref<CollectionNode[]>([])
 const activeCollectionId = ref('')
@@ -144,8 +145,8 @@ async function loadCollections() {
   loading.value = true
   try {
     const list = await fetchCollections(pid, 1, 200)
-    const details = await Promise.all(list.map((item) => fetchCollectionDetail(item.id)))
-    collections.value = details.map((detail, index) => toCollectionNode(detail, index))
+    const details = await Promise.all(list.map((item: { id: string }) => fetchCollectionDetail(item.id)))
+    collections.value = details.map((detail: CollectionDetail, index: number) => toCollectionNode(detail, index))
     initActiveSelection()
   } catch (error) {
     collections.value = []
@@ -207,6 +208,8 @@ function toggleFolder(collection: CollectionNode, folder: FolderNode) {
 function selectEndpoint(collection: CollectionNode, endpoint: ApiEndpoint) {
   activeCollectionId.value = collection.id
   activeEndpointId.value = endpoint.id
+  if (!projectId.value) return
+  void router.push(`/projects/${projectId.value}/assets/apis/${collection.id}?requestId=${encodeURIComponent(endpoint.id)}`)
 }
 
 function findCollection(collectionId: string) {

@@ -99,9 +99,9 @@ const isCollapsedForPreview = computed(() => true);
     <div class="p-4 border-b border-gray-100 cursor-pointer" @click="router.push('/home')">
       <div class="flex items-center gap-2 mb-1" :class="{'justify-center': isCollapsedForPreview}">
         <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center flex-shrink-0">
-          <span class="text-white font-bold text-lg">AI</span>
+          <span class="text-white font-bold text-lg">W</span>
         </div>
-        <span v-if="!isCollapsedForPreview" class="font-bold text-gray-800 text-lg">AI 测试平台</span>
+        <span v-if="!isCollapsedForPreview" class="font-bold text-gray-800 text-lg">WeiTesting</span>
       </div>
       <div v-if="!isCollapsedForPreview" class="text-xs text-gray-500 ml-10">v1.0.0</div>
     </div>

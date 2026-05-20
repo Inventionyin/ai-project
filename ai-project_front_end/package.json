@@ -1,5 +1,5 @@
 {
-  "name": "ai-testing-platform",
+  "name": "weitesting",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -8,6 +8,7 @@
     "build": "vue-tsc && vite build",
     "preview": "vite preview",
     "test:e2e": "playwright test",
+    "test:e2e:real": "playwright test --config playwright.real.config.ts",
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:report": "playwright show-report"
   },

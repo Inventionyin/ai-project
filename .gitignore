@@ -1,0 +1,21 @@
+.worktrees/
+
+# Local logs and runtime artifacts
+*.log
+*.out.log
+*.err.log
+artifacts/
+var/
+ai-project-back-end/var/
+
+# Test/build reports
+test-results/
+playwright-report/
+ai-project_front_end/test-results/
+ai-project_front_end/tests/ui/reports/
+ai-project_front_end/dist/
+
+# Temporary debug captures
+*.tmp.png
+tmp-*.png
+ai-project_front_end/tmp-*.png

@@ -792,7 +792,7 @@ class PytestAllureRunnerService:
             env_lines.append(f"env.{key}={job.env.variables[key]}")
         (allure_results_dir / "environment.properties").write_text("\n".join(env_lines) + "\n", encoding="utf-8")
         executor_payload = {
-            "name": "AI Testing Platform",
+            "name": "WeiTesting",
             "type": "pytest",
             "buildName": f"Run {job.runId}",
             "buildOrder": int(time.time()),

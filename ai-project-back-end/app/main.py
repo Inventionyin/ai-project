@@ -14,7 +14,11 @@ if sys.platform == 'win32':
 
 import logging
 from pathlib import Path
-import asyncpg
+
+try:
+    import asyncpg
+except ModuleNotFoundError:  # pragma: no cover - optional dependency in test env
+    asyncpg = None
 
 from alembic import command
 from alembic.config import Config
@@ -30,6 +34,10 @@ from app.api.deps import get_request_id
 from app.api.router import api_router
 from app.api.health import router as health_router
 from app.core.config import get_settings
+from app.core.database import get_sessionmaker
+from app.core.observability import mask_sensitive_mapping, mask_sensitive_text
+from app.services.integration_delivery import run_notification_outbox_consumer
+from app.services.doc_parse_job import run_doc_parse_job_consumer
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +46,7 @@ async def log_requests(request: Request, call_next):
     request_id = await get_request_id(request)
     path = request.url.path
     if request.query_params:
-        path += f"?{request.query_params}"
+        path += f"?{mask_sensitive_mapping(dict(request.query_params))}"
     
     logger.info(f"[{request_id}] Incoming request: {request.method} {path}")
     
@@ -46,6 +54,7 @@ async def log_requests(request: Request, call_next):
     start_time = time.time()
     
     response = await call_next(request)
+    response.headers["X-Request-Id"] = request_id
     
     process_time = (time.time() - start_time) * 1000
     logger.info(f"[{request_id}] Completed request: {request.method} {path} - Status: {response.status_code} - Time: {process_time:.2f}ms")
@@ -75,6 +84,63 @@ def create_app() -> FastAPI:
             await asyncio.to_thread(_run_migrations)
         except Exception as exc:
             logger.exception("Failed to run startup migrations", exc_info=exc)
+
+    @application.on_event("startup")
+    async def start_notification_outbox_consumer() -> None:
+        if settings.env != "local" or not settings.notification_outbox_consumer_enabled:
+            return
+        stop_event = asyncio.Event()
+        task = asyncio.create_task(
+            run_notification_outbox_consumer(
+                stop_event=stop_event,
+                sessionmaker=get_sessionmaker(),
+                poll_interval_seconds=settings.notification_outbox_poll_interval_seconds,
+                batch_size=settings.notification_outbox_batch_size,
+                retry_base_seconds=settings.notification_outbox_retry_base_seconds,
+            )
+        )
+        application.state.notification_outbox_stop_event = stop_event
+        application.state.notification_outbox_task = task
+
+    @application.on_event("startup")
+    async def start_doc_parse_job_consumer() -> None:
+        if settings.env != "local":
+            return
+        stop_event = asyncio.Event()
+        task = asyncio.create_task(
+            run_doc_parse_job_consumer(
+                stop_event=stop_event,
+                sessionmaker=get_sessionmaker(),
+                poll_interval_seconds=3.0,
+                batch_size=5,
+            )
+        )
+        application.state.doc_parse_stop_event = stop_event
+        application.state.doc_parse_task = task
+
+    @application.on_event("shutdown")
+    async def stop_notification_outbox_consumer() -> None:
+        stop_event = getattr(application.state, "notification_outbox_stop_event", None)
+        task = getattr(application.state, "notification_outbox_task", None)
+        if stop_event is None or task is None:
+            return
+        stop_event.set()
+        try:
+            await task
+        except Exception:
+            logger.exception("Notification outbox consumer shutdown failed")
+
+    @application.on_event("shutdown")
+    async def stop_doc_parse_job_consumer() -> None:
+        stop_event = getattr(application.state, "doc_parse_stop_event", None)
+        task = getattr(application.state, "doc_parse_task", None)
+        if stop_event is None or task is None:
+            return
+        stop_event.set()
+        try:
+            await task
+        except Exception:
+            logger.exception("Doc parse job consumer shutdown failed")
 
     cors_origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
     cors_allow_methods = [m.strip() for m in settings.cors_allow_methods.split(",") if m.strip()]
@@ -138,19 +204,20 @@ def create_app() -> FastAPI:
             },
         )
 
-    @application.exception_handler(asyncpg.PostgresError)
-    async def asyncpg_exception_handler(request: Request, exc: asyncpg.PostgresError) -> JSONResponse:
-        logger.exception("Database error", exc_info=exc)
-        request_id = await get_request_id(request)
-        return JSONResponse(
-            status_code=200,
-            content={
-                "code": 50301,
-                "message": "db_unavailable",
-                "data": None,
-                "requestId": request_id,
-            },
-        )
+    if asyncpg is not None:
+        @application.exception_handler(asyncpg.PostgresError)
+        async def asyncpg_exception_handler(request: Request, exc: asyncpg.PostgresError) -> JSONResponse:
+            logger.exception("Database error", exc_info=exc)
+            request_id = await get_request_id(request)
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "code": 50301,
+                    "message": "db_unavailable",
+                    "data": None,
+                    "requestId": request_id,
+                },
+            )
 
     @application.exception_handler(SQLAlchemyError)
     async def sqlalchemy_exception_handler(request: Request, exc: SQLAlchemyError) -> JSONResponse:
