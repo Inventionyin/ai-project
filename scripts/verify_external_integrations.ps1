@@ -306,7 +306,7 @@ if ($DryRun) {
 
 if ($EnableSmoke) {
     Write-Host "[INFO] -EnableSmoke is on. Running minimal API smoke checks..."
-    $smokeFailures = Invoke-SmokeChecks -Statuses $statuses
+    $smokeFailures = @(Invoke-SmokeChecks -Statuses $statuses)
     if ($FailOnSmokeError -and $smokeFailures.Count -gt 0) {
         Write-Error ("Smoke checks failed: {0}" -f ($smokeFailures -join ", "))
     }
