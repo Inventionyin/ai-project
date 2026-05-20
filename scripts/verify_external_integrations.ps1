@@ -73,6 +73,38 @@ function Get-RedactedMessage {
     return $redacted
 }
 
+function Get-ExternalErrorMessage {
+    param([object]$ErrorRecord)
+
+    $message = [string]$ErrorRecord.Exception.Message
+    $response = $ErrorRecord.Exception.Response
+    if ($null -ne $response) {
+        try {
+            $body = $null
+            if ($null -ne $response.Content) {
+                $body = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+            }
+            elseif ($response.PSObject.Methods["GetResponseStream"]) {
+                $stream = $response.GetResponseStream()
+                if ($null -ne $stream) {
+                    $reader = [System.IO.StreamReader]::new($stream)
+                    try {
+                        $body = $reader.ReadToEnd()
+                    }
+                    finally {
+                        $reader.Dispose()
+                    }
+                }
+            }
+            if (-not [string]::IsNullOrWhiteSpace($body)) {
+                $message = "$message Body: $body"
+            }
+        }
+        catch {}
+    }
+    return Get-RedactedMessage -Message $message
+}
+
 function Get-ZentaoToken {
     param([string]$BaseUrl)
 
@@ -305,6 +337,80 @@ function Get-ObjectPropertyValue {
     return $property.Value
 }
 
+function Get-JiraIssueTypeName {
+    param(
+        [string]$BaseUrl,
+        [hashtable]$Headers,
+        [string]$ProjectKey,
+        [string]$PreferredIssueType
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($PreferredIssueType)) {
+        return $PreferredIssueType
+    }
+
+    $encodedProjectKey = [System.Uri]::EscapeDataString($ProjectKey)
+    try {
+        $meta = Invoke-RestMethod -Method Get -Uri "$BaseUrl/rest/api/3/issue/createmeta?projectKeys=$encodedProjectKey&expand=projects.issuetypes" -Headers $Headers -TimeoutSec 10
+        $project = @($meta.projects)[0]
+        $issueTypes = @($project.issuetypes)
+        foreach ($name in @("Task", "任务", "Bug", "故障", "Story", "故事")) {
+            $matched = $issueTypes | Where-Object { $_.name -eq $name } | Select-Object -First 1
+            if ($null -ne $matched) {
+                return [string]$matched.name
+            }
+        }
+        if ($issueTypes.Count -gt 0) {
+            return [string]$issueTypes[0].name
+        }
+    }
+    catch {}
+
+    return "Task"
+}
+
+function Invoke-JenkinsBuild {
+    param(
+        [string]$BaseUrl,
+        [string]$JobName,
+        [hashtable]$Headers,
+        [string]$Stamp
+    )
+
+    try {
+        Invoke-WebRequest -Method Post -Uri "$BaseUrl/job/$JobName/buildWithParameters?WEITESTING_CLOSURE_ID=$stamp" -Headers $Headers -TimeoutSec 10 | Out-Null
+        return
+    }
+    catch {
+        $message = Get-ExternalErrorMessage -ErrorRecord $_
+        if ($message -notmatch "400|Bad Request") {
+            throw
+        }
+    }
+
+    Invoke-WebRequest -Method Post -Uri "$BaseUrl/job/$JobName/build" -Headers $Headers -TimeoutSec 10 | Out-Null
+}
+
+function Get-ZentaoOpenedBuild {
+    param(
+        [string]$BaseUrl,
+        [string]$Token,
+        [int]$Product
+    )
+
+    try {
+        Invoke-RestMethod -Method Get -Uri "$BaseUrl/api.php/v1/products/$product/branches" -Headers @{ token = $Token } -TimeoutSec 10 | Out-Null
+    }
+    catch {}
+
+    $configuredBuild = [Environment]::GetEnvironmentVariable("ZENTAO_OPENED_BUILD")
+    if (-not [string]::IsNullOrWhiteSpace($configuredBuild)) {
+        return $configuredBuild
+    }
+
+    return "trunk"
+}
+
 function Invoke-BusinessClosureChecks {
     param([System.Collections.Generic.List[object]]$Statuses)
 
@@ -326,11 +432,10 @@ function Invoke-BusinessClosureChecks {
                     $projectKey = [Environment]::GetEnvironmentVariable("JIRA_PROJECT_KEY")
                     $email = [Environment]::GetEnvironmentVariable("JIRA_EMAIL")
                     $token = [Environment]::GetEnvironmentVariable("JIRA_TOKEN")
-                    $issueType = [Environment]::GetEnvironmentVariable("JIRA_ISSUE_TYPE")
-                    if ([string]::IsNullOrWhiteSpace($issueType)) { $issueType = "Task" }
                     $pair = "{0}:{1}" -f $email, $token
                     $basic = [System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($pair))
                     $headers = @{ Authorization = "Basic $basic"; Accept = "application/json" }
+                    $issueType = Get-JiraIssueTypeName -BaseUrl $base -Headers $headers -ProjectKey $projectKey -PreferredIssueType ([Environment]::GetEnvironmentVariable("JIRA_ISSUE_TYPE"))
                     $body = @{
                         fields = @{
                             project = @{ key = $projectKey }
@@ -358,7 +463,7 @@ function Invoke-BusinessClosureChecks {
                 }
                 catch {
                     $failures.Add($status.Name) | Out-Null
-                    Write-Warning ("[BUSINESS] Jira failed: {0}" -f (Get-RedactedMessage -Message $_.Exception.Message))
+                    Write-Warning ("[BUSINESS] Jira failed: {0}" -f (Get-ExternalErrorMessage -ErrorRecord $_))
                 }
             }
             "Jenkins" {
@@ -376,12 +481,12 @@ function Invoke-BusinessClosureChecks {
                         $headers[$crumbInfo.crumbRequestField] = $crumb
                     }
                     catch {}
-                    Invoke-WebRequest -Method Post -Uri "$base/job/$job/buildWithParameters?WEITESTING_CLOSURE_ID=$stamp" -Headers $headers -TimeoutSec 10 | Out-Null
+                    Invoke-JenkinsBuild -BaseUrl $base -JobName $job -Headers $headers -Stamp $stamp
                     Write-Host "[BUSINESS] Jenkins build trigger accepted."
                 }
                 catch {
                     $failures.Add($status.Name) | Out-Null
-                    Write-Warning ("[BUSINESS] Jenkins failed: {0}" -f (Get-RedactedMessage -Message $_.Exception.Message))
+                    Write-Warning ("[BUSINESS] Jenkins failed: {0}" -f (Get-ExternalErrorMessage -ErrorRecord $_))
                 }
             }
             "Zentao" {
@@ -391,12 +496,15 @@ function Invoke-BusinessClosureChecks {
                     $product = [Environment]::GetEnvironmentVariable("ZENTAO_PRODUCT")
                     $module = [Environment]::GetEnvironmentVariable("ZENTAO_MODULE")
                     if ([string]::IsNullOrWhiteSpace($module)) { $module = "0" }
+                    $openedBuild = Get-ZentaoOpenedBuild -BaseUrl $base -Token $token -Product ([int]$product)
                     $body = @{
                         product = [int]$product
                         module = [int]$module
                         title = "$prefix Zentao $stamp"
                         severity = 3
                         pri = 3
+                        openedBuild = $openedBuild
+                        type = "codeerror"
                         steps = "Created by WeiTesting external business closure smoke."
                     } | ConvertTo-Json -Depth 8
                     $created = Invoke-RestMethod -Method Post -Uri "$base/api.php/v1/bugs" -Headers @{ token = $token } -ContentType "application/json" -Body $body -TimeoutSec 10
@@ -421,7 +529,7 @@ function Invoke-BusinessClosureChecks {
                 }
                 catch {
                     $failures.Add($status.Name) | Out-Null
-                    Write-Warning ("[BUSINESS] Zentao failed: {0}" -f (Get-RedactedMessage -Message $_.Exception.Message))
+                    Write-Warning ("[BUSINESS] Zentao failed: {0}" -f (Get-ExternalErrorMessage -ErrorRecord $_))
                 }
             }
         }
