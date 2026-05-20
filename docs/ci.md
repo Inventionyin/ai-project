@@ -63,6 +63,26 @@ GitHub MCP and `gh` CLI are developer tooling. They are useful for creating PRs,
 CI should pass without real third-party secrets.
 External integration checks in CI must use dry-run/configuration diagnostics mode.
 
+## CI Security Baseline
+
+The `real-e2e` workflow keeps a small security baseline:
+
+- `permissions: contents: read`
+- `concurrency` per workflow/ref with `cancel-in-progress: true`
+- `timeout-minutes: 45` on the verification job
+- third-party actions use current major runtime tags (`actions/*@v6`)
+
+For higher-assurance environments, pin third-party actions to immutable commit SHAs and review the pin on a scheduled cadence.
+
+External smoke checks are opt-in:
+
+```powershell
+.\scripts\verify_external_integrations.ps1 -EnableSmoke
+.\scripts\verify_external_integrations.ps1 -EnableSmoke -FailOnSmokeError
+```
+
+Use `-FailOnSmokeError` only when the target external systems are expected to be reachable and the token set is complete.
+
 ## Delivery Commands
 
 ```powershell

@@ -60,6 +60,25 @@ def test_verify_external_integrations_help():
     assert "DINGTALK_WEBHOOK_URL" in output
 
 
+def test_verify_external_integrations_supports_signed_dingtalk_smoke():
+    repo_root = Path(__file__).resolve().parents[2]
+    script = repo_root / "scripts" / "verify_external_integrations.ps1"
+    content = script.read_text(encoding="utf-8")
+
+    required_tokens = [
+        "DINGTALK_WEBHOOK_SECRET",
+        "Get-DingTalkSignedWebhookUrl",
+        "[System.Security.Cryptography.HMACSHA256]::new",
+        "timestamp=",
+        "sign=",
+        "Invoke-RestMethod -Method Post -Uri $signedWebhook",
+        "WeiTesting external integration smoke",
+    ]
+
+    missing = [token for token in required_tokens if token not in content]
+    assert not missing, f"Missing expected DingTalk signature smoke tokens: {missing}"
+
+
 def test_verify_external_integrations_dry_run_shows_missing():
     repo_root = Path(__file__).resolve().parents[2]
     script = repo_root / "scripts" / "verify_external_integrations.ps1"

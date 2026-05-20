@@ -1,5 +1,8 @@
 name: real-e2e
 
+permissions:
+  contents: read
+
 on:
   workflow_dispatch:
     inputs:
@@ -21,6 +24,10 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+    concurrency:
+      group: real-e2e-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
     services:
       postgres:
         image: postgres:16
