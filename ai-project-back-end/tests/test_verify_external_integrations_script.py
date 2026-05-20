@@ -151,3 +151,11 @@ def test_verify_external_integrations_can_target_jira_only():
     assert "[Jira] READY" in output
     assert "[DingTalk]" not in output
     assert "[Jenkins]" not in output
+
+
+def test_verify_external_integrations_handles_empty_smoke_failures_list():
+    repo_root = Path(__file__).resolve().parents[2]
+    script = repo_root / "scripts" / "verify_external_integrations.ps1"
+    content = script.read_text(encoding="utf-8")
+
+    assert "@(Invoke-SmokeChecks -Statuses $statuses)" in content
