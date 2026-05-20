@@ -23,6 +23,11 @@ The workflow now provides these entrypoints:
 4. Optional/manual + nightly frontend real E2E
    - Runs full frontend real E2E when manually requested with `includeFrontendRealE2E=true`.
    - Runs full frontend real E2E on the nightly schedule.
+5. Optional/manual external integration smoke
+   - Runs live external API probes only when manually requested with `includeExternalSmoke=true`.
+   - Defaults to `externalSmokeTargets=Jira`, so partially configured repositories can verify Jira first without requiring DingTalk/Jenkins/Zentao.
+   - Injects repository Secrets/Variables into `verify_external_integrations.ps1 -EnableSmoke -FailOnSmokeError`.
+   - Normal pull request, push, and nightly CI keep using dry-run diagnostics and do not call third-party systems.
 
 ## GitHub Repository Settings
 
@@ -84,11 +89,18 @@ External smoke checks are opt-in:
 
 Use `-FailOnSmokeError` only when the target external systems are expected to be reachable and the token set is complete.
 
+To run live external smoke from GitHub Actions:
+
+```powershell
+gh workflow run real-e2e --repo Inventionyin/ai-project --ref dev -f includeFrontendRealE2E=false -f includeExternalSmoke=true -f externalSmokeTargets=Jira
+```
+
 ## Delivery Commands
 
 ```powershell
 gh workflow run real-e2e --repo Inventionyin/ai-project --ref dev -f includeFrontendRealE2E=false
 gh workflow run real-e2e --repo Inventionyin/ai-project --ref dev -f includeFrontendRealE2E=true
+gh workflow run real-e2e --repo Inventionyin/ai-project --ref dev -f includeFrontendRealE2E=false -f includeExternalSmoke=true -f externalSmokeTargets=Jira
 gh run list --repo Inventionyin/ai-project --workflow real-e2e --limit 10
 gh run watch <run-id> --repo Inventionyin/ai-project --exit-status
 gh run view <run-id> --repo Inventionyin/ai-project --log-failed
