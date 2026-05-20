@@ -4,6 +4,7 @@ param(
     [switch]$DryRun,
     [switch]$EnableSmoke,
     [switch]$FailOnSmokeError,
+    [switch]$EnableBusinessClosure,
     [string]$Targets = ""
 )
 
@@ -11,13 +12,14 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 function Write-Usage {
-    Write-Host "Usage: .\scripts\verify_external_integrations.ps1 [-DryRun] [-EnableSmoke] [-FailOnSmokeError] [-Targets <names>]"
+    Write-Host "Usage: .\scripts\verify_external_integrations.ps1 [-DryRun] [-EnableSmoke] [-FailOnSmokeError] [-EnableBusinessClosure] [-Targets <names>]"
     Write-Host ""
     Write-Host "Options:"
     Write-Host "  -Help      Show this help message."
     Write-Host "  -DryRun    Only check configuration, never call external APIs."
     Write-Host "  -EnableSmoke  Run minimal API smoke checks after config READY."
     Write-Host "  -FailOnSmokeError  Return non-zero when any enabled smoke check fails."
+    Write-Host "  -EnableBusinessClosure  Create reversible Jira/Zentao/Jenkins business probes."
     Write-Host "  -Targets   Optional comma-separated target names: DingTalk, GitHub Actions, Jenkins, Jira, Zentao."
     Write-Host ""
     Write-Host "Environment variables:"
@@ -28,6 +30,7 @@ function Write-Usage {
     Write-Host "  JENKINS_BASE_URL, JENKINS_JOB_NAME, JENKINS_USERNAME, JENKINS_API_TOKEN"
     Write-Host "  JIRA_BASE_URL, JIRA_PROJECT_KEY, JIRA_EMAIL, JIRA_TOKEN"
     Write-Host "  ZENTAO_BASE_URL, ZENTAO_PRODUCT, ZENTAO_TOKEN or ZENTAO_ACCOUNT + ZENTAO_PASSWORD"
+    Write-Host "  Optional business closure: WEITESTING_BUSINESS_CLOSURE_PREFIX, JIRA_ISSUE_TYPE, ZENTAO_MODULE"
 }
 
 function Get-MaskedValue {
@@ -286,6 +289,147 @@ function Invoke-SmokeChecks {
     return $failures
 }
 
+function Get-ObjectPropertyValue {
+    param(
+        [object]$Object,
+        [string]$PropertyName
+    )
+
+    if ($null -eq $Object) {
+        return $null
+    }
+    $property = $Object.PSObject.Properties[$PropertyName]
+    if ($null -eq $property) {
+        return $null
+    }
+    return $property.Value
+}
+
+function Invoke-BusinessClosureChecks {
+    param([System.Collections.Generic.List[object]]$Statuses)
+
+    $failures = New-Object System.Collections.Generic.List[string]
+    $prefix = [Environment]::GetEnvironmentVariable("WEITESTING_BUSINESS_CLOSURE_PREFIX")
+    if ([string]::IsNullOrWhiteSpace($prefix)) {
+        $prefix = "WeiTesting CI closure"
+    }
+    $stamp = [DateTimeOffset]::UtcNow.ToString("yyyyMMdd-HHmmss")
+
+    foreach ($status in $Statuses) {
+        if (-not $status.Ready) {
+            continue
+        }
+        switch ($status.Name) {
+            "Jira" {
+                try {
+                    $base = [Environment]::GetEnvironmentVariable("JIRA_BASE_URL").TrimEnd("/")
+                    $projectKey = [Environment]::GetEnvironmentVariable("JIRA_PROJECT_KEY")
+                    $email = [Environment]::GetEnvironmentVariable("JIRA_EMAIL")
+                    $token = [Environment]::GetEnvironmentVariable("JIRA_TOKEN")
+                    $issueType = [Environment]::GetEnvironmentVariable("JIRA_ISSUE_TYPE")
+                    if ([string]::IsNullOrWhiteSpace($issueType)) { $issueType = "Task" }
+                    $pair = "{0}:{1}" -f $email, $token
+                    $basic = [System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($pair))
+                    $headers = @{ Authorization = "Basic $basic"; Accept = "application/json" }
+                    $body = @{
+                        fields = @{
+                            project = @{ key = $projectKey }
+                            summary = "$prefix Jira $stamp"
+                            description = @{
+                                type = "doc"
+                                version = 1
+                                content = @(@{
+                                    type = "paragraph"
+                                    content = @(@{ type = "text"; text = "Created by WeiTesting external business closure smoke." })
+                                })
+                            }
+                            issuetype = @{ name = $issueType }
+                        }
+                    } | ConvertTo-Json -Depth 12
+                    $created = Invoke-RestMethod -Method Post -Uri "$base/rest/api/3/issue" -Headers $headers -ContentType "application/json" -Body $body -TimeoutSec 10
+                    Write-Host ("[BUSINESS] Jira issue created: {0}" -f $created.key)
+                    try {
+                        Invoke-RestMethod -Method Delete -Uri "$base/rest/api/3/issue/$($created.key)" -Headers $headers -TimeoutSec 10 | Out-Null
+                        Write-Host ("[BUSINESS] Jira issue deleted: {0}" -f $created.key)
+                    }
+                    catch {
+                        Write-Warning ("[BUSINESS] Jira cleanup failed: {0}" -f (Get-RedactedMessage -Message $_.Exception.Message))
+                    }
+                }
+                catch {
+                    $failures.Add($status.Name) | Out-Null
+                    Write-Warning ("[BUSINESS] Jira failed: {0}" -f (Get-RedactedMessage -Message $_.Exception.Message))
+                }
+            }
+            "Jenkins" {
+                try {
+                    $base = [Environment]::GetEnvironmentVariable("JENKINS_BASE_URL").TrimEnd("/")
+                    $job = [Environment]::GetEnvironmentVariable("JENKINS_JOB_NAME")
+                    $username = [Environment]::GetEnvironmentVariable("JENKINS_USERNAME")
+                    $token = [Environment]::GetEnvironmentVariable("JENKINS_API_TOKEN")
+                    $basic = [System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes(("{0}:{1}" -f $username, $token)))
+                    $headers = @{ Authorization = "Basic $basic" }
+                    $crumb = $null
+                    try {
+                        $crumbInfo = Invoke-RestMethod -Method Get -Uri "$base/crumbIssuer/api/json" -Headers $headers -TimeoutSec 10
+                        $crumb = $crumbInfo.crumb
+                        $headers[$crumbInfo.crumbRequestField] = $crumb
+                    }
+                    catch {}
+                    Invoke-WebRequest -Method Post -Uri "$base/job/$job/buildWithParameters?WEITESTING_CLOSURE_ID=$stamp" -Headers $headers -TimeoutSec 10 | Out-Null
+                    Write-Host "[BUSINESS] Jenkins build trigger accepted."
+                }
+                catch {
+                    $failures.Add($status.Name) | Out-Null
+                    Write-Warning ("[BUSINESS] Jenkins failed: {0}" -f (Get-RedactedMessage -Message $_.Exception.Message))
+                }
+            }
+            "Zentao" {
+                try {
+                    $base = [Environment]::GetEnvironmentVariable("ZENTAO_BASE_URL").TrimEnd("/")
+                    $token = Get-ZentaoToken -BaseUrl $base
+                    $product = [Environment]::GetEnvironmentVariable("ZENTAO_PRODUCT")
+                    $module = [Environment]::GetEnvironmentVariable("ZENTAO_MODULE")
+                    if ([string]::IsNullOrWhiteSpace($module)) { $module = "0" }
+                    $body = @{
+                        product = [int]$product
+                        module = [int]$module
+                        title = "$prefix Zentao $stamp"
+                        severity = 3
+                        pri = 3
+                        steps = "Created by WeiTesting external business closure smoke."
+                    } | ConvertTo-Json -Depth 8
+                    $created = Invoke-RestMethod -Method Post -Uri "$base/api.php/v1/bugs" -Headers @{ token = $token } -ContentType "application/json" -Body $body -TimeoutSec 10
+                    $bugId = Get-ObjectPropertyValue -Object $created -PropertyName "id"
+                    if ($null -eq $bugId) {
+                        $bug = Get-ObjectPropertyValue -Object $created -PropertyName "bug"
+                        $bugId = Get-ObjectPropertyValue -Object $bug -PropertyName "id"
+                    }
+                    if ($null -eq $bugId) {
+                        $bugId = "<unknown>"
+                    }
+                    Write-Host ("[BUSINESS] Zentao bug created: {0}" -f $bugId)
+                    if ($bugId -ne "<unknown>") {
+                        try {
+                            Invoke-RestMethod -Method Delete -Uri "$base/api.php/v1/bugs/$bugId" -Headers @{ token = $token } -TimeoutSec 10 | Out-Null
+                            Write-Host ("[BUSINESS] Zentao bug deleted: {0}" -f $bugId)
+                        }
+                        catch {
+                            Write-Warning ("[BUSINESS] Zentao cleanup failed: {0}" -f (Get-RedactedMessage -Message $_.Exception.Message))
+                        }
+                    }
+                }
+                catch {
+                    $failures.Add($status.Name) | Out-Null
+                    Write-Warning ("[BUSINESS] Zentao failed: {0}" -f (Get-RedactedMessage -Message $_.Exception.Message))
+                }
+            }
+        }
+    }
+
+    return $failures
+}
+
 function Get-TargetSet {
     param([string]$TargetNames)
 
@@ -361,6 +505,17 @@ if ($EnableSmoke) {
 }
 else {
     Write-Host "[INFO] Smoke checks are disabled by default. Use -EnableSmoke to run optional API probes."
+}
+
+if ($EnableBusinessClosure) {
+    Write-Host "[INFO] -EnableBusinessClosure is on. Running reversible business closure checks..."
+    $businessFailures = @(Invoke-BusinessClosureChecks -Statuses $statuses)
+    if ($FailOnSmokeError -and $businessFailures.Count -gt 0) {
+        Write-Error ("Business closure checks failed: {0}" -f ($businessFailures -join ", "))
+    }
+}
+else {
+    Write-Host "[INFO] Business closure is disabled by default. Use -EnableBusinessClosure for reversible create/trigger probes."
 }
 
 if ($hasMissing) {

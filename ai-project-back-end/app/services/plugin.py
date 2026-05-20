@@ -17,6 +17,7 @@ from app.models.project import Project, ProjectMember
 from app.models.audit import AuditLog
 from app.schemas.plugin import PluginDetail, PluginInstallationDetail, PluginInvokeRecordDetail, PluginInvokeResponse, SandboxPolicy
 from app.services.platform_record import create_audit_log
+from app.services.plugin_sandbox import run_plugin_sandbox
 
 logger = logging.getLogger(__name__)
 
@@ -482,12 +483,28 @@ async def invoke_plugin_installation(
     policy = normalized_config["sandboxPolicy"]
     if _json_size_bytes(payload) > int(policy["maxPayloadBytes"]):
         raise HTTPException(status_code=400, detail="Invocation payload exceeds sandboxPolicy.maxPayloadBytes")
+    execution = None
+    status = "accepted"
+    if plugin.entry_point:
+        execution = await run_plugin_sandbox(
+            plugin_slug=plugin.slug,
+            entry_point=plugin.entry_point,
+            payload=payload,
+            sandbox_policy=policy,
+        )
+        status = execution.status
     result = PluginInvokeResponse(
         installationId=str(installation.id),
         pluginId=str(plugin.id),
         pluginSlug=plugin.slug,
-        status="accepted",
+        status=status,
         sandboxPolicy=SandboxPolicy.model_validate(policy),
+        executionId=execution.execution_id if execution else None,
+        exitCode=execution.exit_code if execution else None,
+        durationMs=execution.duration_ms if execution else None,
+        timedOut=execution.timed_out if execution else False,
+        output=execution.output if execution else None,
+        error=execution.error if execution else None,
     )
     await create_audit_log(
         db,
@@ -507,6 +524,14 @@ async def invoke_plugin_installation(
             "status": result.status,
             "sandbox_policy": policy,
             "payload_bytes": _json_size_bytes(payload),
+            "execution": {
+                "execution_id": execution.execution_id,
+                "status": execution.status,
+                "exit_code": execution.exit_code,
+                "duration_ms": execution.duration_ms,
+                "timed_out": execution.timed_out,
+                "error": execution.error,
+            } if execution else None,
         },
     )
     return result

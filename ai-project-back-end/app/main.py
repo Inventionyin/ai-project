@@ -25,7 +25,7 @@ from alembic.config import Config
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -36,6 +36,7 @@ from app.api.health import router as health_router
 from app.core.config import get_settings
 from app.core.database import get_sessionmaker
 from app.core.observability import mask_sensitive_mapping, mask_sensitive_text
+from app.core.metrics import record_http_request, render_prometheus_metrics
 from app.services.integration_delivery import run_notification_outbox_consumer
 from app.services.doc_parse_job import run_doc_parse_job_consumer
 
@@ -57,6 +58,7 @@ async def log_requests(request: Request, call_next):
     response.headers["X-Request-Id"] = request_id
     
     process_time = (time.time() - start_time) * 1000
+    record_http_request(request.method, request.url.path, response.status_code, process_time / 1000.0)
     logger.info(f"[{request_id}] Completed request: {request.method} {path} - Status: {response.status_code} - Time: {process_time:.2f}ms")
     
     return response
@@ -75,6 +77,10 @@ def create_app() -> FastAPI:
 
     # Add request logging middleware
     application.middleware("http")(log_requests)
+
+    @application.get("/metrics", include_in_schema=False)
+    async def metrics_endpoint() -> PlainTextResponse:
+        return PlainTextResponse(render_prometheus_metrics(), media_type="text/plain; version=0.0.4; charset=utf-8")
 
     @application.on_event("startup")
     async def run_startup_migrations() -> None:

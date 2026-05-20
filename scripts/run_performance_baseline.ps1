@@ -10,6 +10,8 @@ param(
     [switch]$SkipFrontendSmoke,
     [ValidateRange(1, 1000)]
     [int]$Iterations = 10,
+    [string]$BusinessPaths = "/api/ops/health/summary",
+    [string]$TrendPath = ".\artifacts\performance-baseline\trend-summary.json",
     [string]$DingTalkWebhookUrl = $env:DINGTALK_WEBHOOK_URL,
     [string]$DingTalkWebhookSecret = $env:DINGTALK_WEBHOOK_SECRET
 )
@@ -26,6 +28,7 @@ if ($Help) {
     Write-Host "Options:"
     Write-Host "  -ApiBaseUrl <url> -FrontendUrl <url> -OutputPath <path>"
     Write-Host "  -SkipBackendSmoke -SkipFrontendSmoke -Iterations <1..1000>"
+    Write-Host "  -BusinessPaths <comma-separated API paths> -TrendPath <path>"
     Write-Host "  -FailOnWarn (exit non-zero when conclusion is WARN or BLOCKED)"
     Write-Host "  -DryRun (print planned checks only)"
     Write-Host "  -DingTalkWebhookUrl <url> (or env DINGTALK_WEBHOOK_URL)"
@@ -97,6 +100,8 @@ if ($DryRun) {
     Write-Host "[DryRun] Backend target: $($ApiBaseUrl.TrimEnd('/'))/health (skip=$([bool]$SkipBackendSmoke))"
     Write-Host "[DryRun] Frontend target: $FrontendUrl (skip=$([bool]$SkipFrontendSmoke))"
     Write-Host "[DryRun] Iterations: $Iterations"
+    Write-Host "[DryRun] Business paths: $BusinessPaths"
+    Write-Host "[DryRun] TrendPath: $TrendPath"
     Write-Host "[DryRun] OutputPath: $OutputPath"
     Write-Host "[DryRun] FailOnWarn: $([bool]$FailOnWarn)"
     exit 0
@@ -216,6 +221,20 @@ else {
     Measure-EndpointLatency -Name "frontend-root" -Url $FrontendUrl -Count $Iterations
 }
 
+$businessResults = @()
+if (-not $SkipBackendSmoke -and -not [string]::IsNullOrWhiteSpace($BusinessPaths)) {
+    foreach ($path in ($BusinessPaths -split ",")) {
+        $normalizedPath = $path.Trim()
+        if ([string]::IsNullOrWhiteSpace($normalizedPath)) {
+            continue
+        }
+        if (-not $normalizedPath.StartsWith("/")) {
+            $normalizedPath = "/$normalizedPath"
+        }
+        $businessResults += Measure-EndpointLatency -Name ("business:{0}" -f $normalizedPath) -Url "$($ApiBaseUrl.TrimEnd('/'))$normalizedPath" -Count $Iterations
+    }
+}
+
 $conclusion = "READY"
 if ($backendResult.skipped -and $frontendResult.skipped) {
     $conclusion = "BLOCKED"
@@ -225,6 +244,9 @@ elseif ((-not $backendResult.skipped -and $backendResult.successfulSamples -eq 0
     $conclusion = "BLOCKED"
 }
 elseif (($backendResult.errorCount -gt 0) -or ($frontendResult.errorCount -gt 0)) {
+    $conclusion = "WARN"
+}
+elseif (($businessResults | Where-Object { $_.errorCount -gt 0 -or $_.successfulSamples -eq 0 } | Measure-Object).Count -gt 0) {
     $conclusion = "WARN"
 }
 elseif ((-not $backendResult.skipped -and $backendResult.p95Ms -gt $backendThresholdP95Ms) -or
@@ -238,6 +260,7 @@ $report = [PSCustomObject]@{
         apiBaseUrl = $ApiBaseUrl
         backendHealthUrl = $backendHealthUrl
         frontendUrl = $FrontendUrl
+        businessPaths = @($BusinessPaths -split "," | ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
         iterations = $Iterations
         skipBackendSmoke = [bool]$SkipBackendSmoke
         skipFrontendSmoke = [bool]$SkipFrontendSmoke
@@ -245,6 +268,7 @@ $report = [PSCustomObject]@{
     results = [PSCustomObject]@{
         backend = $backendResult
         frontend = $frontendResult
+        business = $businessResults
     }
     thresholds = [PSCustomObject]@{
         backendP95Ms = $backendThresholdP95Ms
@@ -265,7 +289,55 @@ if ($outputDirectory -and -not (Test-Path -LiteralPath $outputDirectory)) {
 
 $report | ConvertTo-Json -Depth 8 | Set-Content -Path $OutputPath -Encoding UTF8
 
+function Update-TrendSummary {
+    param(
+        [string]$Path,
+        [object]$Report,
+        [string]$ReportPath
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return $null
+    }
+    $trendDirectory = Split-Path -Parent $Path
+    if ($trendDirectory -and -not (Test-Path -LiteralPath $trendDirectory)) {
+        New-Item -ItemType Directory -Path $trendDirectory -Force | Out-Null
+    }
+    $history = @()
+    if (Test-Path -LiteralPath $Path) {
+        try {
+            $existing = Get-Content -Raw -Path $Path | ConvertFrom-Json
+            if ($existing.history) {
+                $history = @($existing.history)
+            }
+        }
+        catch {
+            $history = @()
+        }
+    }
+    $history += [PSCustomObject]@{
+        generatedAt = $Report.generatedAt
+        reportPath = $ReportPath
+        conclusion = $Report.conclusion
+        backendP95Ms = $Report.results.backend.p95Ms
+        frontendP95Ms = $Report.results.frontend.p95Ms
+        businessCount = @($Report.results.business).Count
+        businessWarnCount = @($Report.results.business | Where-Object { $_.errorCount -gt 0 -or $_.successfulSamples -eq 0 }).Count
+    }
+    $trend = [PSCustomObject]@{
+        generatedAt = [DateTimeOffset]::UtcNow.ToString("o")
+        history = @($history | Select-Object -Last 100)
+    }
+    $trend | ConvertTo-Json -Depth 6 | Set-Content -Path $Path -Encoding UTF8
+    return $trend
+}
+
+$trend = Update-TrendSummary -Path $TrendPath -Report $report -ReportPath $OutputPath
+$report | Add-Member -NotePropertyName trend -NotePropertyValue ([PSCustomObject]@{ path = $TrendPath; historyCount = if ($trend) { @($trend.history).Count } else { 0 } })
+$report | ConvertTo-Json -Depth 8 | Set-Content -Path $OutputPath -Encoding UTF8
+
 Write-Host ("Performance baseline written to: {0}" -f (Resolve-Path -LiteralPath $OutputPath))
+Write-Host ("Performance trend written to: {0}" -f (Resolve-Path -LiteralPath $TrendPath))
 Write-Host ("Conclusion: {0}" -f $conclusion)
 Send-DingTalkSummary -WebhookUrl $DingTalkWebhookUrl -Secret $DingTalkWebhookSecret -Status $conclusion -Message ("Output: {0}" -f $OutputPath)
 

@@ -16,6 +16,11 @@ on:
         required: false
         default: false
         type: boolean
+      includeExternalBusinessClosure:
+        description: "Run reversible Jira/Zentao create-cleanup and Jenkins trigger checks"
+        required: false
+        default: false
+        type: boolean
       externalSmokeTargets:
         description: "Comma-separated external smoke targets"
         required: false
@@ -119,16 +124,24 @@ jobs:
           JENKINS_API_TOKEN: ${{ secrets.JENKINS_API_TOKEN }}
           JIRA_BASE_URL: ${{ vars.JIRA_BASE_URL }}
           JIRA_PROJECT_KEY: ${{ vars.JIRA_PROJECT_KEY }}
+          JIRA_ISSUE_TYPE: ${{ vars.JIRA_ISSUE_TYPE }}
           JIRA_EMAIL: ${{ vars.JIRA_EMAIL }}
           JIRA_TOKEN: ${{ secrets.JIRA_TOKEN }}
           EXTERNAL_SMOKE_TARGETS: ${{ inputs.externalSmokeTargets }}
+          ENABLE_EXTERNAL_BUSINESS_CLOSURE: ${{ inputs.includeExternalBusinessClosure }}
+          WEITESTING_BUSINESS_CLOSURE_PREFIX: ${{ vars.WEITESTING_BUSINESS_CLOSURE_PREFIX }}
           ZENTAO_BASE_URL: ${{ vars.ZENTAO_BASE_URL }}
           ZENTAO_PRODUCT: ${{ vars.ZENTAO_PRODUCT }}
+          ZENTAO_MODULE: ${{ vars.ZENTAO_MODULE }}
           ZENTAO_TOKEN: ${{ secrets.ZENTAO_TOKEN }}
           ZENTAO_ACCOUNT: ${{ secrets.ZENTAO_ACCOUNT }}
           ZENTAO_PASSWORD: ${{ secrets.ZENTAO_PASSWORD }}
         run: |
-          ./scripts/verify_external_integrations.ps1 -Targets $env:EXTERNAL_SMOKE_TARGETS -EnableSmoke -FailOnSmokeError
+          $args = @("-Targets", $env:EXTERNAL_SMOKE_TARGETS, "-EnableSmoke", "-FailOnSmokeError")
+          if ($env:ENABLE_EXTERNAL_BUSINESS_CLOSURE -eq "true") {
+            $args += "-EnableBusinessClosure"
+          }
+          ./scripts/verify_external_integrations.ps1 @args
 
       - name: External integrations diagnostics script missing notice
         if: ${{ hashFiles('scripts/verify_external_integrations.ps1') == '' }}
