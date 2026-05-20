@@ -108,4 +108,148 @@ test.describe('integrations diagnostics smoke', () => {
     await expect(page.getByText('MISSING_SECRET')).toBeVisible()
     await expect(page.getByRole('cell', { name: 'timeout' })).toBeVisible()
   })
+
+  test('联调诊断接口失败时展示错误信息', async ({ page }) => {
+    await page.route('**/*', async (route) => {
+      const req = route.request()
+      const url = new URL(req.url())
+      const path = url.pathname
+      const isApiLike = req.resourceType() !== 'document'
+      if (!isApiLike) {
+        await route.continue()
+        return
+      }
+
+      if (path === '/api/projects/1' || path === '/projects/1') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ code: 0, data: { id: '1', name: 'P1', ownerId: 'e2e-owner' } })
+        })
+        return
+      }
+      if (path === '/api/projects/1/integrations/notifications' || path === '/projects/1/integrations/notifications') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ code: 0, data: [] })
+        })
+        return
+      }
+      if (path.startsWith('/api/projects/1/integrations/notifications/deliveries') || path.startsWith('/projects/1/integrations/notifications/deliveries')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ code: 0, data: { items: [], total: 0, page: 1, pageSize: 20 } })
+        })
+        return
+      }
+      if (path.startsWith('/api/projects/1/prompt-templates/governance') || path.startsWith('/projects/1/prompt-templates/governance')) {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ code: 0, data: { items: [] } }) })
+        return
+      }
+      if (path.startsWith('/api/projects/1/prompt-templates') || path.startsWith('/projects/1/prompt-templates')) {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ code: 0, data: [] }) })
+        return
+      }
+      if (path.endsWith('/integrations/notifications/strategy-center')) {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ code: 0, data: [] }) })
+        return
+      }
+      if (path.endsWith('/integrations/notifications/diagnostics')) {
+        await route.fulfill({
+          status: 500,
+          contentType: 'application/json',
+          body: JSON.stringify({ code: 1, message: 'diagnostics service unavailable' })
+        })
+        return
+      }
+      await route.continue()
+    })
+
+    await page.addInitScript(() => {
+      localStorage.setItem('accessToken', 'e2e-smoke-token')
+      localStorage.setItem('accessTokenExpiresAt', String(Date.now() + 60 * 60 * 1000))
+    })
+
+    await page.goto('/projects/1/settings/integrations', { waitUntil: 'domcontentloaded' })
+    await expect(page.getByText('diagnostics service unavailable')).toBeVisible()
+  })
+
+  test('联调诊断空态展示 checks/provider/failures 占位文案', async ({ page }) => {
+    await page.route('**/*', async (route) => {
+      const req = route.request()
+      const url = new URL(req.url())
+      const path = url.pathname
+      const isApiLike = req.resourceType() !== 'document'
+      if (!isApiLike) {
+        await route.continue()
+        return
+      }
+
+      if (path === '/api/projects/1' || path === '/projects/1') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ code: 0, data: { id: '1', name: 'P1', ownerId: 'e2e-owner' } })
+        })
+        return
+      }
+      if (path === '/api/projects/1/integrations/notifications' || path === '/projects/1/integrations/notifications') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ code: 0, data: [] })
+        })
+        return
+      }
+      if (path.startsWith('/api/projects/1/integrations/notifications/deliveries') || path.startsWith('/projects/1/integrations/notifications/deliveries')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ code: 0, data: { items: [], total: 0, page: 1, pageSize: 20 } })
+        })
+        return
+      }
+      if (path.startsWith('/api/projects/1/prompt-templates/governance') || path.startsWith('/projects/1/prompt-templates/governance')) {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ code: 0, data: { items: [] } }) })
+        return
+      }
+      if (path.startsWith('/api/projects/1/prompt-templates') || path.startsWith('/projects/1/prompt-templates')) {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ code: 0, data: [] }) })
+        return
+      }
+      if (path.endsWith('/integrations/notifications/strategy-center')) {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ code: 0, data: [] }) })
+        return
+      }
+      if (path.endsWith('/integrations/notifications/diagnostics')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            code: 0,
+            data: {
+              summary: { status: 'READY', total: 0, blocking: 0, warnings: 0, ready: 0, failedDeliveries: 0 },
+              checks: [],
+              providerReadiness: [],
+              recentFailures: []
+            }
+          })
+        })
+        return
+      }
+      await route.continue()
+    })
+
+    await page.addInitScript(() => {
+      localStorage.setItem('accessToken', 'e2e-smoke-token')
+      localStorage.setItem('accessTokenExpiresAt', String(Date.now() + 60 * 60 * 1000))
+    })
+
+    await page.goto('/projects/1/settings/integrations', { waitUntil: 'domcontentloaded' })
+    await expect(page.getByText('暂无诊断检查项')).toBeVisible()
+    await expect(page.getByText('暂无 provider 就绪信息')).toBeVisible()
+    await expect(page.getByText('暂无最近失败记录')).toBeVisible()
+  })
 })

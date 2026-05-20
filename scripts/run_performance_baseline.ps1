@@ -2,6 +2,7 @@
 param(
     [switch]$Help,
     [switch]$DryRun,
+    [switch]$FailOnWarn,
     [string]$ApiBaseUrl = "http://127.0.0.1:8000",
     [string]$FrontendUrl = "http://127.0.0.1:4173",
     [string]$OutputPath = ".\artifacts\performance-baseline\baseline-report.json",
@@ -25,6 +26,7 @@ if ($Help) {
     Write-Host "Options:"
     Write-Host "  -ApiBaseUrl <url> -FrontendUrl <url> -OutputPath <path>"
     Write-Host "  -SkipBackendSmoke -SkipFrontendSmoke -Iterations <1..1000>"
+    Write-Host "  -FailOnWarn (exit non-zero when conclusion is WARN or BLOCKED)"
     Write-Host "  -DryRun (print planned checks only)"
     Write-Host "  -DingTalkWebhookUrl <url> (or env DINGTALK_WEBHOOK_URL)"
     Write-Host "  -DingTalkWebhookSecret <secret> (or env DINGTALK_WEBHOOK_SECRET)"
@@ -96,6 +98,7 @@ if ($DryRun) {
     Write-Host "[DryRun] Frontend target: $FrontendUrl (skip=$([bool]$SkipFrontendSmoke))"
     Write-Host "[DryRun] Iterations: $Iterations"
     Write-Host "[DryRun] OutputPath: $OutputPath"
+    Write-Host "[DryRun] FailOnWarn: $([bool]$FailOnWarn)"
     exit 0
 }
 
@@ -248,6 +251,11 @@ $report = [PSCustomObject]@{
         frontendP95Ms = $frontendThresholdP95Ms
     }
     conclusion = $conclusion
+    gate = [PSCustomObject]@{
+        failOnWarn = [bool]$FailOnWarn
+        shouldFail = [bool]($FailOnWarn -and ($conclusion -eq "WARN" -or $conclusion -eq "BLOCKED"))
+        exitCode = if ($FailOnWarn -and ($conclusion -eq "WARN" -or $conclusion -eq "BLOCKED")) { 2 } else { 0 }
+    }
 }
 
 $outputDirectory = Split-Path -Parent $OutputPath
@@ -260,3 +268,8 @@ $report | ConvertTo-Json -Depth 8 | Set-Content -Path $OutputPath -Encoding UTF8
 Write-Host ("Performance baseline written to: {0}" -f (Resolve-Path -LiteralPath $OutputPath))
 Write-Host ("Conclusion: {0}" -f $conclusion)
 Send-DingTalkSummary -WebhookUrl $DingTalkWebhookUrl -Secret $DingTalkWebhookSecret -Status $conclusion -Message ("Output: {0}" -f $OutputPath)
+
+if ($report.gate.shouldFail) {
+    Write-Host "Performance baseline gate failed (FailOnWarn enabled). Conclusion=$conclusion" -ForegroundColor Red
+    exit $report.gate.exitCode
+}

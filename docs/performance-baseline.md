@@ -51,6 +51,14 @@ Example with explicit output and higher iteration count:
   -OutputPath ".\artifacts\performance-baseline\baseline-$(Get-Date -Format yyyyMMdd-HHmmss).json"
 ```
 
+Optional strict gate mode (CI-friendly):
+
+```powershell
+.\scripts\run_performance_baseline.ps1 -FailOnWarn
+```
+
+When `-FailOnWarn` is enabled, the script exits with code `2` if the conclusion is `WARN` or `BLOCKED`; otherwise exit code is `0`.
+
 ## Report schema (JSON)
 
 The script writes one JSON file containing:
@@ -62,6 +70,10 @@ The script writes one JSON file containing:
   - `frontend`
 - `thresholds`
 - `conclusion`
+- `gate`
+  - `failOnWarn`
+  - `shouldFail`
+  - `exitCode`
 
 Each result includes samples and summary metrics so the file can be archived and compared later.
 

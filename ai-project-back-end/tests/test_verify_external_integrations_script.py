@@ -159,3 +159,20 @@ def test_verify_external_integrations_handles_empty_smoke_failures_list():
     content = script.read_text(encoding="utf-8")
 
     assert "@(Invoke-SmokeChecks -Statuses $statuses)" in content
+
+
+def test_verify_external_integrations_supports_jira_project_level_smoke():
+    repo_root = Path(__file__).resolve().parents[2]
+    script = repo_root / "scripts" / "verify_external_integrations.ps1"
+    content = script.read_text(encoding="utf-8")
+
+    required_tokens = [
+        '$projectKey = [Environment]::GetEnvironmentVariable("JIRA_PROJECT_KEY")',
+        '$encodedProjectKey = [System.Uri]::EscapeDataString($projectKey)',
+        '$projectUri = "$base/rest/api/3/project/$encodedProjectKey"',
+        'Invoke-RestMethod -Method Get -Uri $projectUri -Headers $headers -TimeoutSec 10 | Out-Null',
+        'Write-Host ("[SMOKE] Jira project {0} reachable." -f $projectKey)',
+    ]
+
+    missing = [token for token in required_tokens if token not in content]
+    assert not missing, f"Missing expected Jira project smoke tokens: {missing}"

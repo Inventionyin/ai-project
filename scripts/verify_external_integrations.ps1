@@ -202,15 +202,20 @@ function Invoke-SmokeChecks {
             "Jira" {
                 try {
                     $base = [Environment]::GetEnvironmentVariable("JIRA_BASE_URL").TrimEnd("/")
+                    $projectKey = [Environment]::GetEnvironmentVariable("JIRA_PROJECT_KEY")
                     $email = [Environment]::GetEnvironmentVariable("JIRA_EMAIL")
                     $token = [Environment]::GetEnvironmentVariable("JIRA_TOKEN")
                     $pair = "{0}:{1}" -f $email, $token
                     $bytes = [System.Text.Encoding]::UTF8.GetBytes($pair)
                     $basic = [System.Convert]::ToBase64String($bytes)
                     $headers = @{ Authorization = "Basic $basic" }
-                    $uri = "$base/rest/api/3/myself"
-                    Invoke-RestMethod -Method Get -Uri $uri -Headers $headers -TimeoutSec 10 | Out-Null
+                    $accountUri = "$base/rest/api/3/myself"
+                    Invoke-RestMethod -Method Get -Uri $accountUri -Headers $headers -TimeoutSec 10 | Out-Null
                     Write-Host "[SMOKE] Jira account API reachable."
+                    $encodedProjectKey = [System.Uri]::EscapeDataString($projectKey)
+                    $projectUri = "$base/rest/api/3/project/$encodedProjectKey"
+                    Invoke-RestMethod -Method Get -Uri $projectUri -Headers $headers -TimeoutSec 10 | Out-Null
+                    Write-Host ("[SMOKE] Jira project {0} reachable." -f $projectKey)
                 }
                 catch {
                     $failures.Add($status.Name) | Out-Null

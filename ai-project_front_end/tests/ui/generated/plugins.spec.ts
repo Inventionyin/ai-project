@@ -237,4 +237,43 @@ test.describe('plugins 管理页冒烟', () => {
     await expect(page.getByText('inv-001')).toBeVisible()
     await expect(page.getByText('user-1')).toBeVisible()
   })
+
+  test('插件列表接口异常时页面保持可操作并回落空状态', async ({ page }) => {
+    await page.route('**/*', async (route) => {
+      const req = route.request()
+      const url = new URL(req.url())
+      const path = url.pathname
+      if (req.resourceType() === 'document') {
+        await route.continue()
+        return
+      }
+      if (path.startsWith('/api/plugins')) {
+        await route.fulfill({
+          status: 500,
+          contentType: 'application/json',
+          body: JSON.stringify({ code: 1, message: 'plugins unavailable' })
+        })
+        return
+      }
+      if (path.startsWith('/api/projects/1/plugins')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ code: 0, data: { page: 1, pageSize: 20, total: 0, items: [] } })
+        })
+        return
+      }
+      await route.continue()
+    })
+
+    await page.addInitScript(() => {
+      localStorage.setItem('accessToken', 'e2e-smoke-token')
+      localStorage.setItem('accessTokenExpiresAt', String(Date.now() + 60 * 60 * 1000))
+    })
+
+    await page.goto('/projects/1/settings/plugins', { waitUntil: 'domcontentloaded' })
+    await expect(page.getByRole('button', { name: '插件市场' })).toBeVisible()
+    await expect(page.getByRole('button', { name: '已安装' })).toBeVisible()
+    await expect(page.getByText('暂无可用插件')).toBeVisible()
+  })
 })
