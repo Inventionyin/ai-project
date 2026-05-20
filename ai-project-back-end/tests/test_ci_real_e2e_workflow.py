@@ -1,0 +1,20 @@
+from pathlib import Path
+
+
+def test_real_e2e_workflow_contains_required_ci_entrypoints():
+    repo_root = Path(__file__).resolve().parents[2]
+    workflow_path = repo_root / ".github" / "workflows" / "real-e2e.yml"
+    content = workflow_path.read_text(encoding="utf-8")
+
+    required_tokens = [
+        "Run backend pytest + frontend build + generated E2E",
+        "./scripts/verify_real_e2e.ps1",
+        "Run performance baseline dry-run",
+        "./scripts/run_performance_baseline.ps1 -DryRun",
+        "Run external integrations diagnostics dry-run (if script exists)",
+        "./scripts/verify_external_integrations.ps1 -DryRun",
+        "Run frontend real E2E (workflow_dispatch only)",
+    ]
+
+    missing = [token for token in required_tokens if token not in content]
+    assert not missing, f"Missing expected workflow tokens: {missing}"

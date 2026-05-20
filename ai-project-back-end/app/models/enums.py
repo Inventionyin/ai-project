@@ -91,3 +91,52 @@ class AiImportJobStatus(str, Enum):
     SUCCEEDED = "SUCCEEDED"
     FAILED = "FAILED"
     COMMITTED = "COMMITTED"
+
+
+# --- A: Async doc parse job status ---
+class DocParseJobStatus(str, Enum):
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    SUCCESS = "SUCCESS"
+    FAILED = "FAILED"
+
+
+# --- B: DevOps pipeline status ---
+class DevOpsPipelineStatus(str, Enum):
+    IDLE = "IDLE"
+    RUNNING = "RUNNING"
+    SUCCESS = "SUCCESS"
+    FAILED = "FAILED"
+    CANCELED = "CANCELED"
+
+
+class DevOpsRunStatus(str, Enum):
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    SUCCESS = "SUCCESS"
+    FAILED = "FAILED"
+    CANCELED = "CANCELED"
+
+
+# --- D: Executor type ---
+class ExecutorType(str, Enum):
+    PYTEST = "PYTEST"
+    K6 = "K6"
+    PLAYWRIGHT = "PLAYWRIGHT"
+    JMETER = "JMETER"
+    POSTMAN = "POSTMAN"
+
+
+# --- E: Plugin status ---
+class PluginStatus(str, Enum):
+    AVAILABLE = "AVAILABLE"
+    INSTALLED = "INSTALLED"
+    ENABLED = "ENABLED"
+    DISABLED = "DISABLED"
+
+
+class PluginInstallStatus(str, Enum):
+    INSTALLING = "INSTALLING"
+    INSTALLED = "INSTALLED"
+    FAILED = "FAILED"
+    UNINSTALLED = "UNINSTALLED"

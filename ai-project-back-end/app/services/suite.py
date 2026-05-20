@@ -13,10 +13,35 @@ from app.models.enums import ProjectRole
 from app.models.project import Project, ProjectMember
 from app.models.suite import Suite, SuiteItem
 from app.models.testcase import TestCase
+from app.services.platform_record import create_audit_log
 
 
 def _is_admin(user: CurrentUser) -> bool:
     return "Admin" in user.roles or "ADMIN" in user.roles
+
+
+async def _create_suite_audit(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+    action: str,
+    suite: Suite | None = None,
+    resource_id: str | None = None,
+    summary: str | None = None,
+    detail: dict | None = None,
+) -> None:
+    await create_audit_log(
+        db,
+        user=user,
+        project_id=project_id,
+        module="SUITE",
+        action=action,
+        resource_type="suite",
+        resource_id=resource_id or (str(suite.id) if suite is not None else ""),
+        summary=summary or (suite.name if suite is not None else None),
+        detail=detail,
+    )
 
 
 async def _get_project(
@@ -122,6 +147,14 @@ async def create_suite(
     )
     db.add(suite)
     await db.flush()
+    await _create_suite_audit(
+        db,
+        user=user,
+        project_id=project.id,
+        action="CREATE_SUITE",
+        suite=suite,
+        detail={"name": suite.name},
+    )
     return suite
 
 
@@ -212,6 +245,14 @@ async def update_suite(
     suite.name = name
     suite.config_json = config_json
     await db.flush()
+    await _create_suite_audit(
+        db,
+        user=user,
+        project_id=suite.project_id,
+        action="UPDATE_SUITE",
+        suite=suite,
+        detail={"name": suite.name},
+    )
     return suite
 
 
@@ -224,8 +265,19 @@ async def delete_suite(
     suite = await get_suite(db, user=user, suite_id=suite_id)
     project = await _get_project(db, user=user, project_id=suite.project_id)
     await _require_project_write(db, user=user, project=project)
+    project_id = suite.project_id
+    name = suite.name
     await db.delete(suite)
     await db.flush()
+    await _create_suite_audit(
+        db,
+        user=user,
+        project_id=project_id,
+        action="DELETE_SUITE",
+        resource_id=str(suite_id),
+        summary=name,
+        detail={"name": name},
+    )
 
 
 async def upsert_suite_items(
@@ -273,6 +325,14 @@ async def upsert_suite_items(
         )
 
     await db.flush()
+    await _create_suite_audit(
+        db,
+        user=user,
+        project_id=suite.project_id,
+        action="UPSERT_SUITE_ITEMS",
+        suite=suite,
+        detail={"itemCount": len(items)},
+    )
 
 
 async def list_suite_items(

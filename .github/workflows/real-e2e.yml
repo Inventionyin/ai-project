@@ -1,0 +1,160 @@
+name: real-e2e
+
+on:
+  workflow_dispatch:
+    inputs:
+      includeFrontendRealE2E:
+        description: "Run frontend real E2E against live backend/frontend processes"
+        required: false
+        default: false
+        type: boolean
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ai_test_platform_e2e
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d ai_test_platform_e2e"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      TEST_DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/ai_test_platform_e2e
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/ai_test_platform_e2e
+      PYTHONPATH: .
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: ai-project_front_end/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: ai-project-back-end
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install frontend dependencies
+        working-directory: ai-project_front_end
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        working-directory: ai-project_front_end
+        run: npx playwright install --with-deps chromium
+
+      - name: Run backend pytest + frontend build + generated E2E
+        shell: pwsh
+        run: |
+          ./scripts/verify_real_e2e.ps1
+
+      - name: Run performance baseline dry-run
+        shell: pwsh
+        run: |
+          ./scripts/run_performance_baseline.ps1 -DryRun
+
+      - name: Run external integrations diagnostics dry-run (if script exists)
+        if: ${{ hashFiles('scripts/verify_external_integrations.ps1') != '' }}
+        shell: pwsh
+        run: |
+          ./scripts/verify_external_integrations.ps1 -DryRun
+
+      - name: External integrations diagnostics script missing notice
+        if: ${{ hashFiles('scripts/verify_external_integrations.ps1') == '' }}
+        shell: pwsh
+        run: |
+          Write-Host "scripts/verify_external_integrations.ps1 not found; skipped external integration diagnostics dry-run."
+
+      - name: Run frontend real E2E (workflow_dispatch only)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.includeFrontendRealE2E }}
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          $root = Get-Location
+          $backendDir = Join-Path $root "ai-project-back-end"
+          $frontendDir = Join-Path $root "ai-project_front_end"
+
+          $backendJob = Start-Job -ScriptBlock {
+            param($dir, $dbUrl)
+            Set-Location $dir
+            $env:PYTHONPATH = "."
+            $env:TEST_DATABASE_URL = $dbUrl
+            $env:DATABASE_URL = $dbUrl
+            python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+          } -ArgumentList $backendDir, $env:TEST_DATABASE_URL
+
+          $frontendJob = Start-Job -ScriptBlock {
+            param($dir)
+            Set-Location $dir
+            npm run preview -- --host 127.0.0.1 --port 4173
+          } -ArgumentList $frontendDir
+
+          try {
+          $backendReady = $false
+          for ($i = 0; $i -lt 60; $i++) {
+            try {
+              Invoke-WebRequest -Uri "http://127.0.0.1:8000/health" -UseBasicParsing -TimeoutSec 2 | Out-Null
+              $backendReady = $true
+              break
+            }
+            catch {
+              Start-Sleep -Seconds 2
+            }
+          }
+
+            if (-not $backendReady) {
+              throw "Backend health endpoint did not become ready at http://127.0.0.1:8000/health"
+            }
+
+            $frontendReady = $false
+            for ($i = 0; $i -lt 60; $i++) {
+              try {
+                Invoke-WebRequest -Uri "http://127.0.0.1:4173" -UseBasicParsing -TimeoutSec 2 | Out-Null
+                $frontendReady = $true
+                break
+              }
+              catch {
+                Start-Sleep -Seconds 2
+              }
+            }
+
+            if (-not $frontendReady) {
+              throw "Frontend preview did not become ready at http://127.0.0.1:4173"
+            }
+
+            ./scripts/verify_real_e2e.ps1 -SkipBackend -SkipFrontendBuild -SkipGeneratedE2E -WithFrontendRealE2E -ApiBaseUrl "http://127.0.0.1:8000" -FrontendUrl "http://127.0.0.1:4173"
+          }
+          finally {
+            foreach ($job in @($backendJob, $frontendJob)) {
+              if ($null -ne $job) {
+                Stop-Job -Job $job -ErrorAction SilentlyContinue
+                Receive-Job -Job $job -Keep -ErrorAction SilentlyContinue | Out-Host
+                Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
+              }
+            }
+          }

@@ -12,6 +12,7 @@ const { activeAssetChild = '用例管理' } = defineProps<{
 }>()
 
 const isSidebarOpen = ref(false)
+const isDesktopSidebarCollapsed = ref(false)
 const route = useRoute()
 const slots = useSlots()
 const hasDefaultSlot = computed(() => typeof slots.default === 'function')
@@ -56,6 +57,10 @@ function openSidebar() {
 
 function closeSidebar() {
   isSidebarOpen.value = false
+}
+
+function handleDesktopSidebarCollapseChange(collapsed: boolean) {
+  isDesktopSidebarCollapsed.value = collapsed
 }
 
 function openCreateRun() {
@@ -162,8 +167,12 @@ watch(projectId, () => {
 <template>
   <div class="min-h-screen w-full bg-white">
     <div class="flex min-h-screen w-full">
-      <div class="hidden w-[224px] shrink-0 md:block">
-        <AiTestingSidebar :active-asset-child="activeAssetChild" :project-name="projectName" />
+      <div class="hidden shrink-0 transition-[width] duration-300 md:block" :class="isDesktopSidebarCollapsed ? 'w-[64px]' : 'w-[224px]'">
+        <AiTestingSidebar
+          :active-asset-child="activeAssetChild"
+          :project-name="projectName"
+          @collapse-change="handleDesktopSidebarCollapseChange"
+        />
       </div>
 
       <div class="min-w-0 flex-1">

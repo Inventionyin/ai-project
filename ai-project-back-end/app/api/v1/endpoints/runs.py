@@ -4,6 +4,7 @@ import asyncio
 import mimetypes
 import uuid
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -16,14 +17,27 @@ from app.api.deps import CurrentUser, get_current_user, get_request_id, to_unix_
 from app.core.database import get_db
 from app.core.security import decode_access_token
 from app.models.enums import ArtifactType, CaseRunStatus, RunStatus
-from app.models.run import Artifact, Job, Run
+from app.models.run import Artifact, CaseRun, Job, Run
 from app.schemas.common import ApiResponse, PageData
 from app.schemas.run import (
     CaseRunListItem,
+    ProjectCiTokenListData,
+    ProjectCiTokenManageRequest,
+    ProjectCiTokenNamedManageRequest,
+    ProjectCiTokenNamedPolicyUpdateRequest,
+    ProjectCiTokenNamedRotateData,
+    ProjectCiTokenNamedRotateRequest,
+    ProjectCiTokenRotateData,
+    ProjectCiTokenPolicyData,
+    ProjectCiTokenPolicyUpdateRequest,
+    ProjectCiTokenRecordData,
+    ProjectCiTokenStatusData,
+    ProjectCiTokenRotateRequest,
     RunAllureReportGenerateData,
     RunAllureReportDeleteData,
     RunAllureReportListItem,
     RunCancelResponseData,
+    RunCiTriggerRequest,
     RunCreateRequest,
     RunDetailData,
     RunFromTestcasesHttpRequest,
@@ -33,14 +47,30 @@ from app.schemas.run import (
     RunRetryRequest,
 )
 from app.services.run import (
+    CiTokenPolicyDenied,
     cancel_run,
+    create_run_via_ci_token,
     create_run,
     create_run_from_testcases,
     create_run_from_testcases_http,
     delete_run_allure_report,
+    get_project_ci_token_status,
+    get_project_ci_token_policy,
+    get_project_ci_token_record_policy,
     get_run,
+    list_project_ci_token_records,
     list_case_runs,
     list_runs,
+    report_project_ci_token_leak,
+    report_project_ci_token_record_leak,
+    resolve_ci_token_state,
+    resolve_project_ci_token_record_state,
+    revoke_project_ci_token,
+    revoke_project_ci_token_record,
+    rotate_project_ci_token,
+    rotate_project_ci_token_record,
+    update_project_ci_token_policy,
+    update_project_ci_token_record_policy,
     retry_run,
 )
 from app.services.runner_pytest_allure import generate_allure_report_for_run, resolve_run_allure_paths
@@ -130,6 +160,360 @@ def _to_run_detail(run, done: int, total: int, passed: int, failed: int, skipped
         envId=str(run.env_id) if run.env_id else None,
         startAt=to_unix_ts(start_at),
     )
+
+
+def _to_utc_unix_ts(dt) -> int:
+    if dt.tzinfo is not None:
+        return int(dt.astimezone(timezone.utc).timestamp())
+    return int(dt.replace(tzinfo=timezone.utc).timestamp())
+
+
+async def _load_run_case_metrics(db: AsyncSession, *, run: Run) -> tuple[int, int, int, int, int]:
+    total = int(
+        (
+            await db.execute(
+                select(func.count(CaseRun.id)).where(CaseRun.run_id == run.id, CaseRun.tenant_id == run.tenant_id)
+            )
+        ).scalar_one()
+        or 0
+    )
+    grouped = (
+        await db.execute(
+            select(CaseRun.status, func.count(CaseRun.id))
+            .where(CaseRun.run_id == run.id, CaseRun.tenant_id == run.tenant_id)
+            .group_by(CaseRun.status)
+        )
+    ).all()
+    counts = {status: int(cnt or 0) for status, cnt in grouped}
+    passed = int(counts.get(CaseRunStatus.PASSED, 0))
+    failed = int(counts.get(CaseRunStatus.FAILED, 0))
+    skipped = int(counts.get(CaseRunStatus.SKIPPED, 0))
+    done = passed + failed + skipped
+    return done, total, passed, failed, skipped
+
+
+def _to_ci_token_status(project) -> ProjectCiTokenStatusData:
+    state = resolve_ci_token_state(project)
+    return ProjectCiTokenStatusData(
+        projectId=str(project.id),
+        enabled=state == "active",
+        state=state,
+        hint=getattr(project, "ci_token_hint", None),
+        rotatedAt=_to_utc_unix_ts(project.ci_token_rotated_at) if getattr(project, "ci_token_rotated_at", None) else None,
+        lastUsedAt=_to_utc_unix_ts(project.ci_token_last_used_at) if getattr(project, "ci_token_last_used_at", None) else None,
+        rotatedBy=str(project.ci_token_rotated_by) if getattr(project, "ci_token_rotated_by", None) else None,
+        expiresAt=_to_utc_unix_ts(project.ci_token_expires_at) if getattr(project, "ci_token_expires_at", None) else None,
+        revokedAt=_to_utc_unix_ts(project.ci_token_revoked_at) if getattr(project, "ci_token_revoked_at", None) else None,
+        revokedBy=str(project.ci_token_revoked_by) if getattr(project, "ci_token_revoked_by", None) else None,
+        revokedReason=getattr(project, "ci_token_revoked_reason", None),
+        leakReportedAt=_to_utc_unix_ts(project.ci_token_leak_reported_at) if getattr(project, "ci_token_leak_reported_at", None) else None,
+        leakReportedBy=str(project.ci_token_leak_reported_by) if getattr(project, "ci_token_leak_reported_by", None) else None,
+        leakReportReason=getattr(project, "ci_token_leak_report_reason", None),
+        policy=_to_ci_token_policy(project),
+    )
+
+
+def _to_ci_token_policy(project) -> ProjectCiTokenPolicyData:
+    policy = get_project_ci_token_policy(project)
+    return ProjectCiTokenPolicyData(
+        allowedRunnerTypes=list(policy["allowedRunnerTypes"]),
+        allowedTestCaseIds=list(policy["allowedTestCaseIds"]),
+        maxTestCaseCount=policy["maxTestCaseCount"],
+    )
+
+
+def _to_ci_token_record_policy(token) -> ProjectCiTokenPolicyData:
+    policy = get_project_ci_token_record_policy(token)
+    return ProjectCiTokenPolicyData(
+        allowedRunnerTypes=list(policy["allowedRunnerTypes"]),
+        allowedTestCaseIds=list(policy["allowedTestCaseIds"]),
+        maxTestCaseCount=policy["maxTestCaseCount"],
+    )
+
+
+def _to_ci_token_record(token) -> ProjectCiTokenRecordData:
+    state = resolve_project_ci_token_record_state(token)
+    return ProjectCiTokenRecordData(
+        id=str(token.id),
+        projectId=str(token.project_id),
+        name=str(token.name),
+        primary=bool(token.is_primary),
+        enabled=state == "active",
+        state=state,
+        hint=getattr(token, "token_hint", None),
+        rotatedAt=_to_utc_unix_ts(token.rotated_at) if getattr(token, "rotated_at", None) else None,
+        lastUsedAt=_to_utc_unix_ts(token.last_used_at) if getattr(token, "last_used_at", None) else None,
+        rotatedBy=str(token.rotated_by) if getattr(token, "rotated_by", None) else None,
+        expiresAt=_to_utc_unix_ts(token.expires_at) if getattr(token, "expires_at", None) else None,
+        revokedAt=_to_utc_unix_ts(token.revoked_at) if getattr(token, "revoked_at", None) else None,
+        revokedBy=str(token.revoked_by) if getattr(token, "revoked_by", None) else None,
+        revokedReason=getattr(token, "revoked_reason", None),
+        leakReportedAt=_to_utc_unix_ts(token.leak_reported_at) if getattr(token, "leak_reported_at", None) else None,
+        leakReportedBy=str(token.leak_reported_by) if getattr(token, "leak_reported_by", None) else None,
+        leakReportReason=getattr(token, "leak_report_reason", None),
+        policy=_to_ci_token_record_policy(token),
+    )
+
+
+@router.post("/ci-token/rotate", response_model=ApiResponse[ProjectCiTokenRotateData])
+async def rotate_ci_token_(
+    payload: ProjectCiTokenRotateRequest,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    request_id: str = Depends(get_request_id),
+) -> ApiResponse[ProjectCiTokenRotateData]:
+    try:
+        expires_at = datetime.utcfromtimestamp(payload.expiresAt) if payload.expiresAt is not None else None
+        project, token = await rotate_project_ci_token(
+            db,
+            user=user,
+            project_id=uuid.UUID(payload.projectId),
+            policy=payload.policy.model_dump(mode="json") if payload.policy else None,
+            expires_at=expires_at,
+        )
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    return ApiResponse(
+        data=ProjectCiTokenRotateData(
+            projectId=str(project.id),
+            enabled=resolve_ci_token_state(project) == "active",
+            state=resolve_ci_token_state(project),
+            token=token,
+            hint=str(project.ci_token_hint or ""),
+            rotatedAt=_to_utc_unix_ts(project.ci_token_rotated_at),
+            expiresAt=_to_utc_unix_ts(project.ci_token_expires_at) if getattr(project, "ci_token_expires_at", None) else None,
+            lastUsedAt=_to_utc_unix_ts(project.ci_token_last_used_at) if getattr(project, "ci_token_last_used_at", None) else None,
+            rotatedBy=str(project.ci_token_rotated_by) if getattr(project, "ci_token_rotated_by", None) else None,
+            revokedAt=_to_utc_unix_ts(project.ci_token_revoked_at) if getattr(project, "ci_token_revoked_at", None) else None,
+            revokedBy=str(project.ci_token_revoked_by) if getattr(project, "ci_token_revoked_by", None) else None,
+            revokedReason=getattr(project, "ci_token_revoked_reason", None),
+            leakReportedAt=_to_utc_unix_ts(project.ci_token_leak_reported_at) if getattr(project, "ci_token_leak_reported_at", None) else None,
+            leakReportedBy=str(project.ci_token_leak_reported_by) if getattr(project, "ci_token_leak_reported_by", None) else None,
+            leakReportReason=getattr(project, "ci_token_leak_report_reason", None),
+            policy=_to_ci_token_policy(project),
+        ),
+        requestId=request_id,
+    )
+
+
+@router.get("/ci-tokens", response_model=ApiResponse[ProjectCiTokenListData])
+async def list_ci_tokens_(
+    projectId: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    request_id: str = Depends(get_request_id),
+) -> ApiResponse[ProjectCiTokenListData]:
+    project, tokens = await list_project_ci_token_records(db, user=user, project_id=uuid.UUID(projectId))
+    return ApiResponse(
+        data=ProjectCiTokenListData(projectId=str(project.id), tokens=[_to_ci_token_record(token) for token in tokens]),
+        requestId=request_id,
+    )
+
+
+@router.post("/ci-tokens/rotate", response_model=ApiResponse[ProjectCiTokenNamedRotateData])
+async def rotate_named_ci_token_(
+    payload: ProjectCiTokenNamedRotateRequest,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    request_id: str = Depends(get_request_id),
+) -> ApiResponse[ProjectCiTokenNamedRotateData]:
+    try:
+        expires_at = datetime.utcfromtimestamp(payload.expiresAt) if payload.expiresAt is not None else None
+        record, token = await rotate_project_ci_token_record(
+            db,
+            user=user,
+            project_id=uuid.UUID(payload.projectId),
+            name=payload.name,
+            primary=payload.primary,
+            policy=payload.policy.model_dump(mode="json") if payload.policy else None,
+            expires_at=expires_at,
+        )
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    data = _to_ci_token_record(record).model_dump()
+    return ApiResponse(data=ProjectCiTokenNamedRotateData(**data, token=token), requestId=request_id)
+
+
+@router.put("/ci-tokens/policy", response_model=ApiResponse[ProjectCiTokenRecordData])
+async def update_named_ci_token_policy_(
+    payload: ProjectCiTokenNamedPolicyUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    request_id: str = Depends(get_request_id),
+) -> ApiResponse[ProjectCiTokenRecordData]:
+    try:
+        record = await update_project_ci_token_record_policy(
+            db,
+            user=user,
+            project_id=uuid.UUID(payload.projectId),
+            token_id=uuid.UUID(payload.tokenId) if payload.tokenId else None,
+            name=payload.name,
+            policy=payload.policy.model_dump(mode="json"),
+        )
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    return ApiResponse(data=_to_ci_token_record(record), requestId=request_id)
+
+
+@router.delete("/ci-tokens", response_model=ApiResponse[ProjectCiTokenRecordData])
+async def revoke_named_ci_token_(
+    payload: ProjectCiTokenNamedManageRequest,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    request_id: str = Depends(get_request_id),
+) -> ApiResponse[ProjectCiTokenRecordData]:
+    try:
+        record = await revoke_project_ci_token_record(
+            db,
+            user=user,
+            project_id=uuid.UUID(payload.projectId),
+            token_id=uuid.UUID(payload.tokenId) if payload.tokenId else None,
+            name=payload.name,
+            reason=payload.reason,
+        )
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    return ApiResponse(data=_to_ci_token_record(record), requestId=request_id)
+
+
+@router.post("/ci-tokens/report-leak", response_model=ApiResponse[ProjectCiTokenRecordData])
+async def report_named_ci_token_leak_(
+    payload: ProjectCiTokenNamedManageRequest,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    request_id: str = Depends(get_request_id),
+) -> ApiResponse[ProjectCiTokenRecordData]:
+    try:
+        record = await report_project_ci_token_record_leak(
+            db,
+            user=user,
+            project_id=uuid.UUID(payload.projectId),
+            token_id=uuid.UUID(payload.tokenId) if payload.tokenId else None,
+            name=payload.name,
+            reason=payload.reason,
+        )
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    return ApiResponse(data=_to_ci_token_record(record), requestId=request_id)
+
+
+@router.get("/ci-token/status", response_model=ApiResponse[ProjectCiTokenStatusData])
+async def get_ci_token_status_(
+    projectId: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    request_id: str = Depends(get_request_id),
+) -> ApiResponse[ProjectCiTokenStatusData]:
+    project = await get_project_ci_token_status(db, user=user, project_id=uuid.UUID(projectId))
+    return ApiResponse(data=_to_ci_token_status(project), requestId=request_id)
+
+
+@router.put("/ci-token/policy", response_model=ApiResponse[ProjectCiTokenStatusData])
+async def update_ci_token_policy_(
+    payload: ProjectCiTokenPolicyUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    request_id: str = Depends(get_request_id),
+) -> ApiResponse[ProjectCiTokenStatusData]:
+    try:
+        project = await update_project_ci_token_policy(
+            db,
+            user=user,
+            project_id=uuid.UUID(payload.projectId),
+            policy=payload.policy.model_dump(mode="json"),
+        )
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    return ApiResponse(data=_to_ci_token_status(project), requestId=request_id)
+
+
+@router.delete("/ci-token", response_model=ApiResponse[ProjectCiTokenStatusData])
+async def revoke_ci_token_(
+    payload: ProjectCiTokenManageRequest,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    request_id: str = Depends(get_request_id),
+) -> ApiResponse[ProjectCiTokenStatusData]:
+    try:
+        project = await revoke_project_ci_token(db, user=user, project_id=uuid.UUID(payload.projectId), reason=payload.reason)
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    return ApiResponse(data=_to_ci_token_status(project), requestId=request_id)
+
+
+@router.post("/ci-token/report-leak", response_model=ApiResponse[ProjectCiTokenStatusData])
+async def report_ci_token_leak_(
+    payload: ProjectCiTokenManageRequest,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    request_id: str = Depends(get_request_id),
+) -> ApiResponse[ProjectCiTokenStatusData]:
+    try:
+        project = await report_project_ci_token_leak(db, user=user, project_id=uuid.UUID(payload.projectId), reason=payload.reason)
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    return ApiResponse(data=_to_ci_token_status(project), requestId=request_id)
+
+
+@router.post("/ci-trigger", response_model=ApiResponse[RunDetailData])
+async def ci_trigger_(
+    payload: RunCiTriggerRequest,
+    ci_token: str | None = Header(default=None, alias="X-CI-Token"),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    db: AsyncSession = Depends(get_db),
+    request_id: str = Depends(get_request_id),
+) -> ApiResponse[RunDetailData]:
+    token = str(ci_token or "").strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Invalid CI token")
+    idem = (idempotency_key or "").strip() or None
+    if idem is not None:
+        idem = idem[:128]
+    env_uuid: uuid.UUID | None = None
+    if payload.envId:
+        env_uuid = uuid.UUID(payload.envId)
+    try:
+        run = await create_run_via_ci_token(
+            db,
+            project_id=uuid.UUID(payload.projectId),
+            ci_token=token,
+            env_id=env_uuid,
+            meta=dict(payload.meta or {}),
+            concurrency=payload.concurrency,
+            stop_on_failure=payload.stopOnFailure,
+            items=[item.model_dump() for item in payload.items],
+            notify_rule_id=payload.notifyRuleId,
+            idempotency_key=idem,
+        )
+        await db.commit()
+    except CiTokenPolicyDenied:
+        try:
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            raise
+        raise
+    except Exception:
+        await db.rollback()
+        raise
+    done, total, passed, failed, skipped = await _load_run_case_metrics(db, run=run)
+    return ApiResponse(data=_to_run_detail(run, done, total, passed, failed, skipped), requestId=request_id)
 
 
 @router.post("", response_model=ApiResponse[RunDetailData])

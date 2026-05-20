@@ -19,10 +19,35 @@ from app.models.api import ApiCollection, ApiCollectionGroup, ApiRequest
 from app.models.environment import Environment
 from app.models.enums import ProjectRole
 from app.models.project import Project, ProjectMember
+from app.services.platform_record import create_audit_log
 
 
 def _is_admin(user: CurrentUser) -> bool:
     return "Admin" in user.roles or "ADMIN" in user.roles
+
+
+async def _create_collection_audit(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+    action: str,
+    resource_type: str,
+    resource_id: str,
+    summary: str | None = None,
+    detail: dict | None = None,
+) -> None:
+    await create_audit_log(
+        db,
+        user=user,
+        project_id=project_id,
+        module="COLLECTION",
+        action=action,
+        resource_type=resource_type,
+        resource_id=resource_id,
+        summary=summary,
+        detail=detail,
+    )
 
 
 async def _get_project(
@@ -127,6 +152,16 @@ async def create_collection(
     )
     db.add(collection)
     await db.flush()
+    await _create_collection_audit(
+        db,
+        user=user,
+        project_id=project_id,
+        action="CREATE_COLLECTION",
+        resource_type="api_collection",
+        resource_id=str(collection.id),
+        summary=collection.name,
+        detail={"name": collection.name},
+    )
     return collection
 
 
@@ -165,6 +200,16 @@ async def update_collection(
     if variables_is_set:
         collection.variables_json = dict(variables or {})
     await db.flush()
+    await _create_collection_audit(
+        db,
+        user=user,
+        project_id=collection.project_id,
+        action="UPDATE_COLLECTION",
+        resource_type="api_collection",
+        resource_id=str(collection.id),
+        summary=collection.name,
+        detail={"name": collection.name, "variablesChanged": variables_is_set},
+    )
     return collection
 
 
@@ -177,6 +222,8 @@ async def delete_collection(
     collection = await get_collection(db, user=user, collection_id=collection_id)
     project = await _get_project(db, user=user, project_id=collection.project_id)
     await _require_project_write(db, user=user, project=project)
+    project_id = collection.project_id
+    name = collection.name
 
     await db.execute(
         delete(ApiRequest).where(ApiRequest.tenant_id == user.tenant_id, ApiRequest.collection_id == collection.id)
@@ -187,6 +234,16 @@ async def delete_collection(
         )
     )
     await db.delete(collection)
+    await _create_collection_audit(
+        db,
+        user=user,
+        project_id=project_id,
+        action="DELETE_COLLECTION",
+        resource_type="api_collection",
+        resource_id=str(collection_id),
+        summary=name,
+        detail={"name": name},
+    )
 
 
 async def list_groups_and_requests(
@@ -253,6 +310,16 @@ async def create_group(
     )
     db.add(group)
     await db.flush()
+    await _create_collection_audit(
+        db,
+        user=user,
+        project_id=collection.project_id,
+        action="CREATE_COLLECTION_GROUP",
+        resource_type="api_collection_group",
+        resource_id=str(group.id),
+        summary=group.name,
+        detail={"collectionId": str(collection.id), "name": group.name},
+    )
     return group
 
 
@@ -279,6 +346,16 @@ async def update_group(
         raise HTTPException(status_code=404, detail="Group not found")
     group.name = name
     await db.flush()
+    await _create_collection_audit(
+        db,
+        user=user,
+        project_id=collection.project_id,
+        action="UPDATE_COLLECTION_GROUP",
+        resource_type="api_collection_group",
+        resource_id=str(group.id),
+        summary=group.name,
+        detail={"collectionId": str(collection.id), "name": group.name},
+    )
     return group
 
 
@@ -325,6 +402,16 @@ async def reorder_groups(
         )
 
     await db.flush()
+    await _create_collection_audit(
+        db,
+        user=user,
+        project_id=collection.project_id,
+        action="REORDER_COLLECTION_GROUPS",
+        resource_type="api_collection",
+        resource_id=str(collection.id),
+        summary=collection.name,
+        detail={"groupCount": len(items)},
+    )
 
 
 async def delete_group(
@@ -347,9 +434,20 @@ async def delete_group(
     )
     if group is None:
         raise HTTPException(status_code=404, detail="Group not found")
+    group_name = group.name
 
     await db.execute(delete(ApiRequest).where(ApiRequest.tenant_id == user.tenant_id, ApiRequest.group_id == group.id))
     await db.delete(group)
+    await _create_collection_audit(
+        db,
+        user=user,
+        project_id=collection.project_id,
+        action="DELETE_COLLECTION_GROUP",
+        resource_type="api_collection_group",
+        resource_id=str(group_id),
+        summary=group_name,
+        detail={"collectionId": str(collection.id), "name": group_name},
+    )
 
 
 async def create_request(
@@ -397,6 +495,16 @@ async def create_request(
     )
     db.add(req)
     await db.flush()
+    await _create_collection_audit(
+        db,
+        user=user,
+        project_id=collection.project_id,
+        action="CREATE_API_REQUEST",
+        resource_type="api_request",
+        resource_id=str(req.id),
+        summary=req.name,
+        detail={"collectionId": str(collection.id), "method": req.method, "url": req.url},
+    )
     return req
 
 
@@ -456,6 +564,16 @@ async def update_request(
     req.body_json = dict(body or {})
     req.asserts_json = dict(asserts or {})
     await db.flush()
+    await _create_collection_audit(
+        db,
+        user=user,
+        project_id=collection.project_id,
+        action="UPDATE_API_REQUEST",
+        resource_type="api_request",
+        resource_id=str(req.id),
+        summary=req.name,
+        detail={"collectionId": str(collection.id), "method": req.method, "url": req.url},
+    )
     return req
 
 
@@ -469,7 +587,18 @@ async def delete_request(
     collection, req = await get_request(db, user=user, collection_id=collection_id, request_id=request_id)
     project = await _get_project(db, user=user, project_id=collection.project_id)
     await _require_project_write(db, user=user, project=project)
+    request_name = req.name
     await db.delete(req)
+    await _create_collection_audit(
+        db,
+        user=user,
+        project_id=collection.project_id,
+        action="DELETE_API_REQUEST",
+        resource_type="api_request",
+        resource_id=str(request_id),
+        summary=request_name,
+        detail={"collectionId": str(collection.id), "name": request_name},
+    )
 
 
 def _parse_json_content(content: str) -> Any:
@@ -697,10 +826,21 @@ async def import_collection(
                     auth_json=dict(req.get("auth") or {}),
                     body_json=dict(req.get("body") or {}),
                     asserts_json=dict(req.get("asserts") or {}),
-                )
             )
+        )
 
     await db.flush()
+    request_count = len(root_reqs) + sum(len(items) for items in groups.values())
+    await _create_collection_audit(
+        db,
+        user=user,
+        project_id=project_id,
+        action="IMPORT_COLLECTION",
+        resource_type="api_collection",
+        resource_id=str(collection.id),
+        summary=collection.name,
+        detail={"format": fmt, "groupCount": len(groups), "requestCount": request_count},
+    )
     return collection
 
 
@@ -910,7 +1050,7 @@ async def run_request_quick(
         if isinstance(expected_status, int) and result.status is not None:
             ok = ok and result.status == expected_status
 
-    return {
+    response_data = {
         "collectionId": str(collection.id),
         "requestId": str(req.id),
         "envId": str(env.id) if env else None,
@@ -920,6 +1060,17 @@ async def run_request_quick(
         "error": result.error,
         "response": {"headers": result.headers, "body": result.body},
     }
+    await _create_collection_audit(
+        db,
+        user=user,
+        project_id=collection.project_id,
+        action="RUN_API_REQUEST",
+        resource_type="api_request",
+        resource_id=str(req.id),
+        summary=req.name,
+        detail={"collectionId": str(collection.id), "ok": ok, "status": result.status},
+    )
+    return response_data
 
 
 async def run_collection_quick(
@@ -969,6 +1120,22 @@ async def run_collection_quick(
         results.extend(batch)
 
     passed = sum(1 for r in results if r.get("ok"))
+    await _create_collection_audit(
+        db,
+        user=user,
+        project_id=collection.project_id,
+        action="RUN_COLLECTION",
+        resource_type="api_collection",
+        resource_id=str(collection.id),
+        summary=collection.name,
+        detail={
+            "concurrency": int(concurrency),
+            "iterations": int(iterations),
+            "total": len(results),
+            "passed": passed,
+            "failed": len(results) - passed,
+        },
+    )
     return {
         "collectionId": str(collection.id),
         "envId": str(env.id) if env else None,

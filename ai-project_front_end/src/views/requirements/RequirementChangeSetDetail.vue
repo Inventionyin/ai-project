@@ -3,11 +3,14 @@ import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   fetchRequirementChangeSetDetail,
+  fetchRequirementRegressionSetByChangeSet,
   generateRequirementRegressionSet,
   type RequirementChangeSetDetail,
   type RequirementRegressionCase,
   type RequirementRegressionSetDetail
 } from '@/lib/api/requirementChanges'
+import { evaluateKnowledgeRecommendations, type KnowledgeRecommendation } from '@/lib/api/knowledge'
+import VersionDiffViewer from '@/components/VersionDiffViewer.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -21,6 +24,9 @@ const error = ref('')
 const success = ref('')
 const detail = ref<RequirementChangeSetDetail | null>(null)
 const regressionSet = ref<RequirementRegressionSetDetail | null>(null)
+const knowledgeRecommendations = ref<KnowledgeRecommendation[]>([])
+const knowledgeLoading = ref(false)
+const knowledgeError = ref('')
 let loadSeq = 0
 
 const changeItems = computed(() => detail.value?.items || [])
@@ -38,15 +44,28 @@ async function load() {
   error.value = ''
   success.value = ''
   regressionSet.value = null
+  knowledgeRecommendations.value = []
+  knowledgeError.value = ''
+  knowledgeLoading.value = true
   try {
-    const data = await fetchRequirementChangeSetDetail(pid, cid)
+    const [data, existingRegressionSet, recommendationResult] = await Promise.all([
+      fetchRequirementChangeSetDetail(pid, cid),
+      fetchRequirementRegressionSetByChangeSet(pid, cid),
+      evaluateKnowledgeRecommendations(pid, 'CHANGE_SET', cid, 5).catch((reason) => {
+        knowledgeError.value = reason instanceof Error ? reason.message : '加载推荐经验失败'
+        return { targetType: 'CHANGE_SET', targetId: cid, recommendations: [] }
+      })
+    ])
     if (seq !== loadSeq || pid !== projectId.value || cid !== changeSetId.value) return
     detail.value = data
+    regressionSet.value = existingRegressionSet
+    knowledgeRecommendations.value = recommendationResult.recommendations || []
   } catch (e) {
     if (seq !== loadSeq) return
     error.value = e instanceof Error ? e.message : '加载变更影响分析失败'
     detail.value = null
   } finally {
+    if (seq === loadSeq) knowledgeLoading.value = false
     if (seq === loadSeq) loading.value = false
   }
 }
@@ -62,7 +81,7 @@ async function createRegressionSet() {
     const data = await generateRequirementRegressionSet(pid, cid)
     if (pid !== projectId.value || cid !== changeSetId.value) return
     regressionSet.value = data
-    success.value = '回归集已生成'
+    success.value = regressionCases.value.length ? '回归集已刷新' : '回归集已生成'
   } catch (e) {
     error.value = e instanceof Error ? e.message : '生成回归集失败'
   } finally {
@@ -73,6 +92,10 @@ async function createRegressionSet() {
 function backToDoc() {
   if (!detail.value) return
   void router.push(`/projects/${encodeURIComponent(projectId.value)}/requirements/docs/${encodeURIComponent(detail.value.docId)}`)
+}
+
+function goToRetrospectives() {
+  void router.push(`/projects/${encodeURIComponent(projectId.value)}/knowledge/retrospectives`)
 }
 
 function formatTime(ts?: number | null) {
@@ -117,7 +140,10 @@ watch(
       <section class="rounded-[12px] border border-black/10 bg-white p-4">
         <div class="flex items-center justify-between gap-2">
           <h2 class="text-[14px] font-semibold text-[#0A0A0A]">变更影响分析</h2>
-          <button class="h-8 rounded-[8px] border border-black/10 px-3 text-[12px]" @click="backToDoc">返回文档</button>
+          <div class="flex items-center gap-2">
+            <button class="h-8 rounded-[8px] border border-black/10 px-3 text-[12px]" @click="goToRetrospectives">复盘中心</button>
+            <button class="h-8 rounded-[8px] border border-black/10 px-3 text-[12px]" @click="backToDoc">返回文档</button>
+          </div>
         </div>
 
         <div class="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -155,14 +181,35 @@ watch(
         </div>
 
         <button class="mt-4 h-9 rounded-[8px] bg-[#155DFC] px-4 text-[13px] text-white disabled:opacity-60" :disabled="generating" @click="createRegressionSet">
-          {{ generating ? '生成中...' : regressionSet ? '重新生成回归集' : '生成回归集' }}
+          {{ generating ? '生成中...' : regressionSet ? '刷新回归集' : '生成回归集' }}
         </button>
+
+        <div class="mt-4 border-t border-black/10 pt-4">
+          <div class="text-[13px] font-medium text-[#0A0A0A]">推荐经验</div>
+          <div v-if="knowledgeLoading" class="mt-2 text-[12px] text-[#717182]">加载中...</div>
+          <div v-else-if="knowledgeError" class="mt-2 text-[12px] text-[#B91C1C]">{{ knowledgeError }}</div>
+          <div v-else-if="knowledgeRecommendations.length === 0" class="mt-2 text-[12px] text-[#717182]">暂无推荐经验。</div>
+          <div v-else class="mt-2 space-y-2">
+            <article v-for="item in knowledgeRecommendations" :key="item.id" class="rounded-[8px] border border-black/10 bg-[#FAFAFA] p-2">
+              <div class="flex flex-wrap items-center gap-2 text-[11px]">
+                <span class="rounded-[6px] bg-[#EFF6FF] px-2 py-0.5 text-[#155DFC]">score: {{ item.score ?? '-' }}</span>
+                <span class="rounded-[6px] bg-[#F4F4F5] px-2 py-0.5 text-[#4A5565]">{{ item.status || '-' }}</span>
+                <span class="rounded-[6px] bg-[#F4F4F5] px-2 py-0.5 text-[#4A5565]">{{ item.type || '-' }}</span>
+              </div>
+              <p class="mt-1 text-[12px] leading-5 text-[#0A0A0A]">{{ item.content || '-' }}</p>
+            </article>
+          </div>
+        </div>
       </section>
 
       <section class="rounded-[12px] border border-black/10 bg-white">
         <div class="border-b border-black/10 px-4 py-3">
           <div class="text-[14px] font-semibold text-[#0A0A0A]">影响项</div>
           <div class="mt-1 text-[12px] text-[#717182]">按后端识别出的变更类型和影响级别展示，可作为回归测试入口。</div>
+        </div>
+
+        <div class="px-4 py-3 border-b border-black/10">
+          <VersionDiffViewer :items="changeItems" />
         </div>
         <div v-if="changeItems.length === 0" class="px-4 py-6 text-[12px] text-[#717182]">暂无变更项。</div>
         <div v-else class="divide-y divide-black/10">

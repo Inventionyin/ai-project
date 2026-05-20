@@ -11,6 +11,18 @@ const resolveApiBaseUrl = () => {
   return envBase.endsWith('/') ? envBase.slice(0, -1) : envBase
 }
 
+const normalizeApiUrl = (path: string) => {
+  const baseUrl = resolveApiBaseUrl()
+  const normalizedPath = String(path || '').startsWith('/') ? String(path || '') : `/${String(path || '')}`
+  const pathWithPrefix = normalizedPath.startsWith('/api') ? normalizedPath : `/api${normalizedPath}`
+
+  if (!baseUrl) return pathWithPrefix
+  if (baseUrl.endsWith('/api') && pathWithPrefix.startsWith('/api')) {
+    return `${baseUrl}${pathWithPrefix.slice('/api'.length)}`
+  }
+  return `${baseUrl}${pathWithPrefix}`
+}
+
 const resolveAuthHeader = () => {
   const accessToken = localStorage.getItem('accessToken')
   if (!accessToken) {
@@ -20,8 +32,7 @@ const resolveAuthHeader = () => {
 }
 
 export async function requestJson<T>(path: string, init: RequestInit) {
-  const baseUrl = resolveApiBaseUrl()
-  const res = await fetch(`${baseUrl}${path}`, init)
+  const res = await fetch(normalizeApiUrl(path), init)
   let payload: ApiResponse<T> = {}
   try {
     payload = (await res.json()) as ApiResponse<T>

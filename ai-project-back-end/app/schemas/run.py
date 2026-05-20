@@ -49,6 +49,117 @@ class RunFromTestcasesHttpRequest(BaseSchema):
     notifyRuleId: IdStr | None = None
 
 
+class ProjectCiTokenManageRequest(BaseSchema):
+    projectId: IdStr
+    reason: str | None = Field(default=None, max_length=255)
+
+
+class ProjectCiTokenNamedManageRequest(ProjectCiTokenManageRequest):
+    tokenId: IdStr | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=64)
+
+
+class ProjectCiTokenPolicyData(BaseSchema):
+    allowedRunnerTypes: list[str] = Field(default_factory=list, max_length=20)
+    allowedTestCaseIds: list[IdStr] = Field(default_factory=list, max_length=10_000)
+    maxTestCaseCount: int | None = Field(default=None, ge=1, le=10_000)
+
+
+class ProjectCiTokenRotateRequest(ProjectCiTokenManageRequest):
+    policy: ProjectCiTokenPolicyData | None = None
+    expiresAt: UnixTs | None = None
+
+
+class ProjectCiTokenNamedRotateRequest(ProjectCiTokenRotateRequest):
+    name: str = Field(default="primary", min_length=1, max_length=64)
+    primary: bool = False
+
+
+class ProjectCiTokenPolicyUpdateRequest(ProjectCiTokenManageRequest):
+    policy: ProjectCiTokenPolicyData
+
+
+class ProjectCiTokenNamedPolicyUpdateRequest(ProjectCiTokenNamedManageRequest):
+    policy: ProjectCiTokenPolicyData
+
+
+class ProjectCiTokenRotateData(BaseSchema):
+    projectId: IdStr
+    enabled: bool
+    state: str
+    token: str
+    hint: str
+    rotatedAt: UnixTs
+    expiresAt: UnixTs | None = None
+    lastUsedAt: UnixTs | None = None
+    rotatedBy: IdStr | None = None
+    revokedAt: UnixTs | None = None
+    revokedBy: IdStr | None = None
+    revokedReason: str | None = None
+    leakReportedAt: UnixTs | None = None
+    leakReportedBy: IdStr | None = None
+    leakReportReason: str | None = None
+    policy: ProjectCiTokenPolicyData = Field(default_factory=ProjectCiTokenPolicyData)
+
+
+class ProjectCiTokenRecordData(BaseSchema):
+    id: IdStr
+    projectId: IdStr
+    name: str
+    primary: bool = False
+    enabled: bool
+    state: str
+    hint: str | None = None
+    rotatedAt: UnixTs | None = None
+    lastUsedAt: UnixTs | None = None
+    rotatedBy: IdStr | None = None
+    expiresAt: UnixTs | None = None
+    revokedAt: UnixTs | None = None
+    revokedBy: IdStr | None = None
+    revokedReason: str | None = None
+    leakReportedAt: UnixTs | None = None
+    leakReportedBy: IdStr | None = None
+    leakReportReason: str | None = None
+    policy: ProjectCiTokenPolicyData = Field(default_factory=ProjectCiTokenPolicyData)
+
+
+class ProjectCiTokenNamedRotateData(ProjectCiTokenRecordData):
+    token: str
+
+
+class ProjectCiTokenListData(BaseSchema):
+    projectId: IdStr
+    tokens: list[ProjectCiTokenRecordData] = Field(default_factory=list)
+
+
+class ProjectCiTokenStatusData(BaseSchema):
+    projectId: IdStr
+    enabled: bool
+    state: str
+    hint: str | None = None
+    rotatedAt: UnixTs | None = None
+    lastUsedAt: UnixTs | None = None
+    rotatedBy: IdStr | None = None
+    expiresAt: UnixTs | None = None
+    revokedAt: UnixTs | None = None
+    revokedBy: IdStr | None = None
+    revokedReason: str | None = None
+    leakReportedAt: UnixTs | None = None
+    leakReportedBy: IdStr | None = None
+    leakReportReason: str | None = None
+    policy: ProjectCiTokenPolicyData = Field(default_factory=ProjectCiTokenPolicyData)
+
+
+class RunCiTriggerRequest(BaseSchema):
+    projectId: IdStr
+    envId: IdStr | None = None
+    meta: dict[str, object] = Field(default_factory=dict)
+    concurrency: int = Field(default=10, ge=1, le=100)
+    stopOnFailure: bool = False
+    items: list[RunFromTestcasesHttpItem] = Field(min_length=1, max_length=10_000)
+    notifyRuleId: IdStr | None = None
+
+
 class RunProgress(BaseSchema):
     done: int = Field(ge=0)
     total: int = Field(ge=0)

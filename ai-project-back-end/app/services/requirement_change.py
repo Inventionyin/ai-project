@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+import difflib
 
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -27,7 +28,7 @@ from app.schemas.requirement_change import (
     RequirementRegressionCaseDetail,
     RequirementRegressionSetDetail,
 )
-from app.services.platform_record import create_ai_job_record
+from app.services.platform_record import create_ai_job_record, create_audit_log
 
 
 def _is_admin(user: CurrentUser) -> bool:
@@ -71,6 +72,30 @@ async def _require_project_write(db: AsyncSession, *, user: CurrentUser, project
     raise HTTPException(status_code=403, detail="Only Owner/Editor can modify this project")
 
 
+async def _create_requirement_audit(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+    action: str,
+    resource_type: str,
+    resource_id: str,
+    summary: str,
+    detail: dict | None = None,
+) -> None:
+    await create_audit_log(
+        db,
+        user=user,
+        project_id=project_id,
+        module="REQUIREMENT",
+        action=action,
+        resource_type=resource_type,
+        resource_id=resource_id,
+        summary=summary,
+        detail=detail or {},
+    )
+
+
 def _text_chunks(version: RequirementDocVersion) -> list[str]:
     raw = "\n".join(
         part
@@ -97,12 +122,47 @@ def _text_chunks(version: RequirementDocVersion) -> list[str]:
 
 
 def _build_change_item_payloads(baseline: RequirementDocVersion, target: RequirementDocVersion) -> list[dict[str, str]]:
-    baseline_chunks = set(_text_chunks(baseline))
-    target_chunks = set(_text_chunks(target))
+    baseline_values = _text_chunks(baseline)
+    target_values = _text_chunks(target)
+    baseline_chunks = set(baseline_values)
+    target_chunks = set(target_values)
     added = sorted(target_chunks - baseline_chunks)
     removed = sorted(baseline_chunks - target_chunks)
     payloads: list[dict[str, str]] = []
-    for idx, text in enumerate(added[:20], start=1):
+    matched_added_indices: set[int] = set()
+    updated_pairs: list[tuple[str, str]] = []
+
+    # Pair highly-similar removed/added chunks as UPDATED items.
+    for removed_text in removed:
+        best_idx: int | None = None
+        best_score = 0.0
+        for idx, added_text in enumerate(added):
+            if idx in matched_added_indices:
+                continue
+            score = difflib.SequenceMatcher(None, removed_text.lower(), added_text.lower()).ratio()
+            if score > best_score:
+                best_score = score
+                best_idx = idx
+        if best_idx is not None and best_score >= 0.55:
+            matched_added_indices.add(best_idx)
+            updated_pairs.append((removed_text, added[best_idx]))
+
+    updated_set_removed = {old_text for old_text, _ in updated_pairs}
+    updated_set_added = {new_text for _, new_text in updated_pairs}
+    remaining_removed = [text for text in removed if text not in updated_set_removed]
+    remaining_added = [text for text in added if text not in updated_set_added]
+
+    for idx, (old_text, new_text) in enumerate(updated_pairs[:20], start=1):
+        payloads.append(
+            {
+                "change_type": "UPDATED",
+                "title": f"变更需求点 {idx}",
+                "description": f"原内容: {old_text}\n新内容: {new_text}",
+                "impact_level": "HIGH",
+                "source_path": f"baseline:v{baseline.version}:u{idx}->target:v{target.version}:u{idx}",
+            }
+        )
+    for idx, text in enumerate(remaining_added[:20], start=1):
         payloads.append(
             {
                 "change_type": "ADDED",
@@ -112,7 +172,7 @@ def _build_change_item_payloads(baseline: RequirementDocVersion, target: Require
                 "source_path": f"target:v{target.version}:{idx}",
             }
         )
-    for idx, text in enumerate(removed[:20], start=1):
+    for idx, text in enumerate(remaining_removed[:20], start=1):
         payloads.append(
             {
                 "change_type": "REMOVED",
@@ -298,6 +358,21 @@ async def create_requirement_change_set(
         summary=row.summary,
         detail={"docId": str(doc_id), "changeSetId": str(row.id)},
     )
+    await _create_requirement_audit(
+        db,
+        user=user,
+        project_id=project_id,
+        action="CREATE_CHANGE_SET",
+        resource_type="requirement_change_set",
+        resource_id=str(row.id),
+        summary=row.summary or "生成需求变更影响分析",
+        detail={
+            "docId": str(doc_id),
+            "baselineVersionId": str(baseline.id),
+            "targetVersionId": str(target.id),
+            "changeItemCount": len(items),
+        },
+    )
     return _to_change_set_detail(row, items)
 
 
@@ -349,6 +424,32 @@ async def get_requirement_change_set(db: AsyncSession, *, user: CurrentUser, pro
         )
     ).scalars().all()
     return _to_change_set_detail(row, items)
+
+
+async def get_requirement_regression_set_by_change_set(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+    change_set_id: uuid.UUID,
+) -> RequirementRegressionSetDetail | None:
+    project = await _get_project(db, user=user, project_id=project_id)
+    await _require_project_read(db, user=user, project=project)
+    exists = await db.scalar(
+        select(RequirementChangeSet.id).where(
+            RequirementChangeSet.id == change_set_id,
+            RequirementChangeSet.project_id == project_id,
+            RequirementChangeSet.tenant_id == user.tenant_id,
+        )
+    )
+    if exists is None:
+        raise HTTPException(status_code=404, detail="Requirement change set not found")
+    return await _load_regression_set_detail_by_change_set(
+        db,
+        user=user,
+        project_id=project_id,
+        change_set_id=change_set_id,
+    )
 
 
 async def create_requirement_regression_set(db: AsyncSession, *, user: CurrentUser, project_id: uuid.UUID, change_set_id: uuid.UUID) -> RequirementRegressionSetDetail:
@@ -438,6 +539,16 @@ async def create_requirement_regression_set(db: AsyncSession, *, user: CurrentUs
         db.add(row)
         cases.append((row, title))
     await db.flush()
+    await _create_requirement_audit(
+        db,
+        user=user,
+        project_id=project_id,
+        action="CREATE_REGRESSION_SET",
+        resource_type="requirement_regression_set",
+        resource_id=str(regression_set.id),
+        summary=regression_set.summary or "生成需求回归集合",
+        detail={"changeSetId": str(change_set.id), "caseCount": len(cases)},
+    )
     return _to_regression_set_detail(regression_set, cases)
 
 

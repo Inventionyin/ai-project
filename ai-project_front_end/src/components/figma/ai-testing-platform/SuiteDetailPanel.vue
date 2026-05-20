@@ -6,122 +6,170 @@ import suiteDetailRun from '@/assets/figma/ai-testing-platform/suite-detail-run.
 import suiteDetailSave from '@/assets/figma/ai-testing-platform/suite-detail-save.svg'
 import SuiteCasePool from '@/components/figma/ai-testing-platform/SuiteCasePool.vue'
 import SuiteCaseTable from '@/components/figma/ai-testing-platform/SuiteCaseTable.vue'
+import { createSuiteRun, fetchProjectTestcasesLite, fetchSuiteDetail, fetchSuiteItems, upsertSuiteItems, type ProjectTestcaseLite, type SuiteItem } from '@/lib/aiTestingPlatformApi'
 
 const router = useRouter()
 const route = useRoute()
 
-type ApiResponse<T> = {
-  code?: number
-  message?: string
-  data?: T
-}
-
-type SuitePublic = {
-  id: string
-  name: string
-}
-
-type SuiteItemPublic = {
-  testcaseTitle: string
-  testcaseType: string
-  testcasePriority: string
-}
-
 const projectId = computed(() => (typeof route.params.projectId === 'string' && route.params.projectId.length > 0 ? route.params.projectId : '1'))
 const suiteId = computed(() => (typeof route.params.id === 'string' ? route.params.id.trim() : ''))
 const suiteName = ref('套件编排')
+const suiteDefaultEnvId = ref('')
 const isLoadingSuiteItems = ref(false)
+const isSaving = ref(false)
+const isRunning = ref(false)
 
-const resolveApiBaseUrl = () => {
-  const envBase = String(import.meta.env.VITE_API_BASE_URL || '').trim()
-  if (!envBase) return ''
-  return envBase.endsWith('/') ? envBase.slice(0, -1) : envBase
-}
-
-const resolveAuthHeader = () => {
-  const accessToken = localStorage.getItem('accessToken')
-  if (!accessToken) {
-    throw new Error('登录状态已失效，请重新登录')
-  }
-  return `Bearer ${accessToken}`
-}
-
-function showToast(message: string) {
-  window.dispatchEvent(new CustomEvent('app-toast', { detail: { message, type: 'success' } }))
+function showToast(message: string, type: 'success' | 'error' = 'success') {
+  window.dispatchEvent(new CustomEvent('app-toast', { detail: { message, type } }))
 }
 
 function goBack() {
   router.push(`/projects/${projectId.value}/assets/suites`)
 }
 
-function runSuite() {
-  showToast('运行已触发')
-}
+type PoolCase = { testcaseId: string; title: string; typeLabel: string; priority: string }
+type SuiteCaseRow = { testcaseId: string; title: string; typeLabel: string; priority: string; params: Record<string, unknown> }
 
-function saveSuite() {
-  showToast('套件已保存')
-}
-
-type PoolCase = { title: string; typeLabel: string; priority: string }
-type SuiteCaseRow = { title: string; typeLabel: string; priority: string }
-
-const poolCases = ref<PoolCase[]>([
-  { title: '取消订单-超时自动取消', typeLabel: 'API', priority: 'P1' },
-  { title: '用户登录-手机号验证码', typeLabel: 'API', priority: 'P0' },
-  { title: '商品库存扣减-并发场景', typeLabel: 'API', priority: 'P0' },
-  { title: '支付宝退款-全额退款', typeLabel: 'API', priority: 'P1' }
-])
-
+const poolCases = ref<PoolCase[]>([])
 const suiteRows = ref<SuiteCaseRow[]>([])
 
 const selectedPoolIndex = ref<number | null>(null)
 
-const mapItemToRow = (item: SuiteItemPublic): SuiteCaseRow => {
+const normalizeText = (value: unknown, fallback = '-') => {
+  const text = String(value ?? '').trim()
+  return text || fallback
+}
+
+const mapProjectTestcaseToPoolCase = (item: ProjectTestcaseLite): PoolCase | null => {
+  const testcaseId = String(item?.id || '').trim()
+  if (!testcaseId) return null
   return {
-    title: item.testcaseTitle,
-    typeLabel: item.testcaseType,
-    priority: item.testcasePriority
+    testcaseId,
+    title: normalizeText(item?.title ?? item?.name, testcaseId),
+    typeLabel: normalizeText(item?.type, 'API'),
+    priority: normalizeText(item?.priority, 'P2')
   }
+}
+
+const mapItemToRow = (item: SuiteItem): SuiteCaseRow | null => {
+  const testcaseId = String(item.testcaseId || '').trim()
+  if (!testcaseId) return null
+  return {
+    testcaseId,
+    title: normalizeText(item.testcaseTitle, testcaseId),
+    typeLabel: normalizeText(item.testcaseType, 'API'),
+    priority: normalizeText(item.testcasePriority, 'P2'),
+    params: item.params && typeof item.params === 'object' ? item.params : {}
+  }
+}
+
+const loadProjectTestcases = async () => {
+  const pid = String(projectId.value || '').trim()
+  if (!pid) return []
+  const pageSize = 200
+  const first = await fetchProjectTestcasesLite(pid, 1, pageSize)
+  const items = Array.isArray(first.items) ? [...first.items] : []
+  const total = Number(first.total || 0)
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+  if (totalPages > 1) {
+    const pages = await Promise.all(
+      Array.from({ length: totalPages - 1 }, (_, idx) => fetchProjectTestcasesLite(pid, idx + 2, pageSize))
+    )
+    for (const page of pages) {
+      if (Array.isArray(page.items)) items.push(...page.items)
+    }
+  }
+  return items
+}
+
+const recomputePoolCases = (allCases: ProjectTestcaseLite[], rows: SuiteCaseRow[]) => {
+  const used = new Set(rows.map((item) => item.testcaseId))
+  const seen = new Set<string>()
+  poolCases.value = allCases
+    .map(mapProjectTestcaseToPoolCase)
+    .filter((item): item is PoolCase => Boolean(item))
+    .filter((item) => {
+      if (seen.has(item.testcaseId)) return false
+      seen.add(item.testcaseId)
+      return true
+    })
+    .filter((item) => !used.has(item.testcaseId))
 }
 
 const loadSuiteItems = async () => {
   if (!suiteId.value) return
   isLoadingSuiteItems.value = true
   try {
-    const authorization = resolveAuthHeader()
-    const [itemsResponse, suiteResponse] = await Promise.all([
-      fetch(`${resolveApiBaseUrl()}/api/suites/${suiteId.value}/items`, {
-        method: 'GET',
-        headers: {
-          Authorization: authorization
-        }
-      }),
-      fetch(`${resolveApiBaseUrl()}/api/suites/${suiteId.value}`, {
-        method: 'GET',
-        headers: {
-          Authorization: authorization
-        }
-      })
+    const [suiteItemsData, suiteData, testcaseData] = await Promise.all([
+      fetchSuiteItems(suiteId.value),
+      fetchSuiteDetail(suiteId.value),
+      loadProjectTestcases()
     ])
-    const itemsPayload = await itemsResponse.json() as ApiResponse<SuiteItemPublic[]>
-    if (!itemsResponse.ok || itemsPayload.code !== 0 || !itemsPayload.data) {
-      throw new Error(itemsPayload.message || '获取套件编排项失败，请稍后重试')
-    }
-    suiteRows.value = itemsPayload.data.map(mapItemToRow)
 
-    const suitePayload = await suiteResponse.json() as ApiResponse<SuitePublic>
-    if (suiteResponse.ok && suitePayload.code === 0 && suitePayload.data?.name) {
-      suiteName.value = suitePayload.data.name
-    } else {
-      suiteName.value = '未知套件'
-    }
+    const rows = suiteItemsData.map((item) => mapItemToRow(item)).filter((item): item is SuiteCaseRow => Boolean(item))
+    suiteRows.value = rows
+    suiteName.value = suiteData?.name || '未知套件'
+    suiteDefaultEnvId.value = String(suiteData?.defaultEnvId || '').trim()
+    recomputePoolCases(testcaseData, rows)
   } catch (error) {
     suiteRows.value = []
+    poolCases.value = []
     suiteName.value = '未知套件'
-    const errorMessage = error instanceof Error ? error.message : '获取套件编排项失败，请稍后重试'
-    window.alert(errorMessage)
+    suiteDefaultEnvId.value = ''
+    const errorMessage = error instanceof Error ? error.message : '获取套件编排数据失败，请稍后重试'
+    showToast(errorMessage, 'error')
   } finally {
     isLoadingSuiteItems.value = false
+  }
+}
+
+const canRun = computed(() => !isLoadingSuiteItems.value && !isRunning.value && !isSaving.value && !!suiteId.value && !!suiteDefaultEnvId.value)
+const canSave = computed(() => !isLoadingSuiteItems.value && !isRunning.value && !isSaving.value && !!suiteId.value && suiteRows.value.length > 0)
+
+async function saveSuite() {
+  if (!canSave.value) return
+  isSaving.value = true
+  try {
+    const items: SuiteItem[] = suiteRows.value.map((row, index) => ({
+      testcaseId: row.testcaseId,
+      orderNo: index + 1,
+      params: row.params || {}
+    }))
+    await upsertSuiteItems(suiteId.value, items)
+    showToast('套件已保存')
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : '保存失败，请稍后重试'
+    showToast(errorMessage, 'error')
+  } finally {
+    isSaving.value = false
+  }
+}
+
+async function runSuite() {
+  if (!suiteId.value) return
+  const envId = String(suiteDefaultEnvId.value || '').trim()
+  if (!envId) {
+    showToast('套件未配置默认环境，无法运行', 'error')
+    return
+  }
+  isRunning.value = true
+  try {
+    const run = await createSuiteRun({
+      projectId: projectId.value,
+      suiteId: suiteId.value,
+      envId,
+      triggerType: 'MANUAL',
+      meta: { source: 'suite-detail-panel' }
+    })
+    const rid = String(run?.id || '').trim()
+    if (!rid) throw new Error('运行创建成功但未返回 runId')
+    showToast('运行已触发')
+    await router.push(`/projects/${encodeURIComponent(projectId.value)}/runs/${encodeURIComponent(rid)}`)
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : '运行触发失败，请稍后重试'
+    showToast(errorMessage, 'error')
+  } finally {
+    isRunning.value = false
   }
 }
 
@@ -132,7 +180,7 @@ function selectPoolCase(index: number) {
 function addPoolCase(index: number) {
   if (index < 0 || index >= poolCases.value.length) return
   const item = poolCases.value.splice(index, 1)[0]
-  suiteRows.value.push({ ...item })
+  suiteRows.value.push({ ...item, params: {} })
   selectedPoolIndex.value = null
   showToast('已添加到套件')
 }
@@ -140,7 +188,16 @@ function addPoolCase(index: number) {
 function removeSuiteRow(index: number) {
   if (index < 0 || index >= suiteRows.value.length) return
   const item = suiteRows.value.splice(index, 1)[0]
-  poolCases.value.unshift({ ...item })
+  if (poolCases.value.some((row) => row.testcaseId === item.testcaseId)) {
+    showToast('已移回用例池')
+    return
+  }
+  poolCases.value.unshift({
+    testcaseId: item.testcaseId,
+    title: item.title,
+    typeLabel: item.typeLabel,
+    priority: item.priority
+  })
   showToast('已移回用例池')
 }
 
@@ -158,7 +215,7 @@ onMounted(() => {
 })
 
 watch(
-  () => route.params.id,
+  () => [route.params.projectId, route.params.id],
   () => {
     void loadSuiteItems()
   }
@@ -182,16 +239,26 @@ watch(
       <div class="flex items-center gap-[8px]">
         <button
           type="button"
-          class="relative h-[32px] w-[72.33px] rounded-[10px] border-[0.6667px] border-black/10 bg-transparent"
+          class="relative h-[32px] w-[72.33px] rounded-[10px] border-[0.6667px] border-black/10 bg-transparent disabled:cursor-not-allowed disabled:opacity-60"
+          :disabled="!canRun"
           @click="runSuite"
         >
           <img :src="suiteDetailRun" alt="" class="absolute left-[12.67px] top-[9.5px] h-[13px] w-[13px]" />
-          <span class="absolute left-[29.67px] top-[6.33px] text-[14px] font-medium leading-[20px] text-[#717182]"> 运行</span>
+          <span class="absolute left-[29.67px] top-[6.33px] text-[14px] font-medium leading-[20px] text-[#717182]">
+            {{ isRunning ? '运行中' : '运行' }}
+          </span>
         </button>
 
-        <button type="button" class="relative h-[32px] w-[71px] rounded-[10px] bg-[#155DFC]" @click="saveSuite">
+        <button
+          type="button"
+          class="relative h-[32px] w-[71px] rounded-[10px] bg-[#155DFC] disabled:cursor-not-allowed disabled:opacity-60"
+          :disabled="!canSave"
+          @click="saveSuite"
+        >
           <img :src="suiteDetailSave" alt="" class="absolute left-[12px] top-[9.5px] h-[13px] w-[13px]" />
-          <span class="absolute left-[31px] top-[6.33px] text-[14px] font-medium leading-[20px] text-white">保存</span>
+          <span class="absolute left-[31px] top-[6.33px] text-[14px] font-medium leading-[20px] text-white">
+            {{ isSaving ? '保存中' : '保存' }}
+          </span>
         </button>
       </div>
     </div>

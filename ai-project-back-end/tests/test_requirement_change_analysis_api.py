@@ -20,6 +20,7 @@ from app.schemas.requirement_change import (
     RequirementChangeSetDetail,
     RequirementRegressionSetDetail,
 )
+from app.schemas.knowledge import RecommendationEvaluateResponse
 
 
 @dataclass
@@ -98,6 +99,9 @@ def test_change_set_and_regression_set_endpoints(monkeypatch) -> None:
     async def _fake_create_regression_set(db, *, user, project_id, change_set_id):
         return _regression_set(project_id, regression_set_id, change_set_id)
 
+    async def _fake_get_regression_set_by_change_set(db, *, user, project_id, change_set_id):
+        return _regression_set(project_id, regression_set_id, change_set_id)
+
     async def _fake_get_regression_set(db, *, user, project_id, regression_set_id):
         return _regression_set(project_id, regression_set_id, change_set_id)
 
@@ -105,6 +109,7 @@ def test_change_set_and_regression_set_endpoints(monkeypatch) -> None:
     monkeypatch.setattr(requirement_changes_endpoint, "list_requirement_change_sets", _fake_list_change_sets)
     monkeypatch.setattr(requirement_changes_endpoint, "get_requirement_change_set", _fake_get_change_set)
     monkeypatch.setattr(requirement_changes_endpoint, "create_requirement_regression_set", _fake_create_regression_set)
+    monkeypatch.setattr(requirement_changes_endpoint, "get_requirement_regression_set_by_change_set", _fake_get_regression_set_by_change_set)
     monkeypatch.setattr(requirement_changes_endpoint, "get_requirement_regression_set", _fake_get_regression_set)
 
     client = TestClient(_build_app())
@@ -128,9 +133,47 @@ def test_change_set_and_regression_set_endpoints(monkeypatch) -> None:
     assert create_reg_resp.status_code == 200
     assert create_reg_resp.json()["data"]["id"] == str(regression_set_id)
 
+    get_reg_by_change_resp = client.get(f"/api/projects/{project_id}/requirements/change-sets/{change_set_id}/regression-set")
+    assert get_reg_by_change_resp.status_code == 200
+    assert get_reg_by_change_resp.json()["data"]["id"] == str(regression_set_id)
+
     get_reg_resp = client.get(f"/api/projects/{project_id}/requirements/regression-sets/{regression_set_id}")
     assert get_reg_resp.status_code == 200
     assert get_reg_resp.json()["data"]["changeSetId"] == str(change_set_id)
+
+
+def test_change_set_knowledge_recommendations_endpoint(monkeypatch) -> None:
+    project_id = uuid.UUID("22222222-2222-2222-2222-222222222222")
+    change_set_id = uuid.UUID("66666666-6666-6666-6666-666666666666")
+
+    async def _fake_evaluate(db, *, user, project_id, payload):
+        assert payload.targetType == "CHANGE_SET"
+        assert payload.targetId == str(change_set_id)
+        assert payload.topK == 3
+        return RecommendationEvaluateResponse(
+            targetType="CHANGE_SET",
+            targetId=payload.targetId,
+            recommendations=[
+                {
+                    "id": "44444444-4444-4444-4444-444444444444",
+                    "content": "优先复查新增登录风控场景",
+                    "score": 0.88,
+                    "type": "TESTCASE",
+                    "status": "PENDING",
+                }
+            ],
+        )
+
+    monkeypatch.setattr(requirement_changes_endpoint, "evaluate_recommendations", _fake_evaluate)
+    client = TestClient(_build_app())
+    resp = client.get(
+        f"/api/projects/{project_id}/requirements/change-sets/{change_set_id}/knowledge-recommendations?topK=3"
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["code"] == 0
+    assert body["data"]["targetType"] == "CHANGE_SET"
+    assert body["data"]["recommendations"][0]["score"] == 0.88
 
 
 def test_create_regression_set_scopes_case_links_to_target_version(monkeypatch) -> None:
@@ -552,3 +595,25 @@ def test_load_regression_set_detail_filters_cases_by_project(monkeypatch) -> Non
     )
 
     assert detail is not None
+
+
+def test_build_change_item_payloads_includes_updated() -> None:
+    baseline = SimpleNamespace(
+        version=1,
+        change_summary="登录失败超过5次锁定账号",
+        effective_scope="账号安全",
+        parsed_text_preview="用户连续输错密码5次后锁定30分钟",
+        file_name="baseline.md",
+    )
+    target = SimpleNamespace(
+        version=2,
+        change_summary="登录失败超过3次锁定账号",
+        effective_scope="账号安全",
+        parsed_text_preview="用户连续输错密码3次后锁定60分钟",
+        file_name="target.md",
+    )
+
+    payloads = requirement_change_service._build_change_item_payloads(baseline, target)
+    change_types = {item["change_type"] for item in payloads}
+
+    assert "UPDATED" in change_types

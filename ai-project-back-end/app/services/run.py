@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import secrets
 import shutil
 import uuid
 from datetime import datetime
@@ -16,13 +17,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import CurrentUser
 from app.models.environment import Environment
 from app.models.enums import ArtifactType, CaseRunStatus, JobStatus, ProjectRole, RunStatus, TriggerType
-from app.models.project import Project, ProjectMember
+from app.models.project import Project, ProjectCiToken, ProjectMember
 from app.models.run import Artifact, CaseRun, Job, Run
 from app.models.suite import Suite, SuiteItem
 from app.models.testcase import TestCase
 from app.models.testcase_binding import TestcaseBinding
 from app.schemas.worker import JobArtifactSpec, JobEnv, JobExecution, JobItem, JobPayload, JobSuiteConfig
 from app.services.environment import get_secret_keys
+from app.services.integration_delivery import dispatch_run_terminal_notification
+from app.services.security_policy import create_audit_log
 from app.services.runner_dispatch import dispatch_job_runner
 from app.services.runner_pytest_allure import resolve_run_allure_paths
 
@@ -83,9 +86,65 @@ def _stable_payload_sig(payload: dict[str, object]) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+def _hash_ci_token(raw_token: str) -> str:
+    return hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+
+
+def _build_ci_token_hint(raw_token: str) -> str:
+    prefix = raw_token[:4]
+    suffix = raw_token[-4:]
+    return f"{prefix}...{suffix}"
+
+
+def _normalize_ci_token_reason(reason: str | None) -> str | None:
+    normalized = str(reason or "").strip()
+    return normalized[:255] or None
+
+
+def _normalize_ci_token_name(name: str | None) -> str:
+    normalized = str(name or "primary").strip().lower()
+    if not normalized:
+        normalized = "primary"
+    if len(normalized) > 64:
+        normalized = normalized[:64]
+    allowed = set("abcdefghijklmnopqrstuvwxyz0123456789._-")
+    if any(ch not in allowed for ch in normalized):
+        raise HTTPException(status_code=400, detail="CI token name may only contain letters, numbers, dot, dash, or underscore")
+    return normalized
+
+
 _RUNNER_TYPE_DEFAULT = "DEFAULT"
 _RUNNER_TYPE_PYTEST_ALLURE = "PYTEST_ALLURE"
 _SUPPORTED_RUNNER_TYPES = {_RUNNER_TYPE_DEFAULT, _RUNNER_TYPE_PYTEST_ALLURE}
+
+
+class CiTokenPolicyDenied(HTTPException):
+    def __init__(self, *, detail: str) -> None:
+        super().__init__(status_code=403, detail=detail)
+
+
+def resolve_ci_token_state(project: Project, *, now: datetime | None = None) -> str:
+    if not getattr(project, "ci_token_hash", None):
+        return "disabled"
+    if getattr(project, "ci_token_leak_reported_at", None) is not None:
+        return "leaked"
+    if getattr(project, "ci_token_revoked_at", None) is not None:
+        return "revoked"
+    expires_at = getattr(project, "ci_token_expires_at", None)
+    if expires_at is not None and expires_at <= (now or datetime.utcnow()):
+        return "expired"
+    return "active"
+
+
+def resolve_project_ci_token_record_state(token: ProjectCiToken, *, now: datetime | None = None) -> str:
+    if getattr(token, "leak_reported_at", None) is not None:
+        return "leaked"
+    if getattr(token, "revoked_at", None) is not None:
+        return "revoked"
+    expires_at = getattr(token, "expires_at", None)
+    if expires_at is not None and expires_at <= (now or datetime.utcnow()):
+        return "expired"
+    return "active"
 
 
 def _resolve_runner_type(meta: dict[str, object] | None) -> str:
@@ -95,6 +154,282 @@ def _resolve_runner_type(meta: dict[str, object] | None) -> str:
     if raw in _SUPPORTED_RUNNER_TYPES:
         return raw
     return _RUNNER_TYPE_DEFAULT
+
+
+def _resolve_ci_runner_type(meta: dict[str, object] | None) -> tuple[str, bool]:
+    if not isinstance(meta, dict):
+        return _RUNNER_TYPE_DEFAULT, True
+    raw = str(meta.get("runnerType") or "").strip().upper()
+    if not raw:
+        return _RUNNER_TYPE_DEFAULT, True
+    if raw in _SUPPORTED_RUNNER_TYPES:
+        return raw, True
+    return raw, False
+
+
+def _normalize_ci_runner_types(values: object) -> list[str]:
+    if not isinstance(values, (list, tuple, set)):
+        return []
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        runner_type = str(value or "").strip().upper()
+        if runner_type in _SUPPORTED_RUNNER_TYPES and runner_type not in seen:
+            normalized.append(runner_type)
+            seen.add(runner_type)
+    return normalized
+
+
+def _normalize_ci_testcase_ids(values: object) -> list[str]:
+    if not isinstance(values, (list, tuple, set)):
+        return []
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        raw = str(value or "").strip()
+        if not raw:
+            continue
+        try:
+            item = str(uuid.UUID(raw))
+        except ValueError:
+            continue
+        if item not in seen:
+            normalized.append(item)
+            seen.add(item)
+    return normalized
+
+
+def _normalize_ci_max_testcase_count(value: object) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed <= 0:
+        return None
+    return min(parsed, 10_000)
+
+
+def normalize_ci_token_policy(policy: dict[str, object] | None) -> dict[str, object]:
+    raw = dict(policy or {})
+    return {
+        "allowedRunnerTypes": _normalize_ci_runner_types(raw.get("allowedRunnerTypes")),
+        "allowedTestCaseIds": _normalize_ci_testcase_ids(raw.get("allowedTestCaseIds")),
+        "maxTestCaseCount": _normalize_ci_max_testcase_count(raw.get("maxTestCaseCount")),
+    }
+
+
+def get_project_ci_token_policy(project: Project) -> dict[str, object]:
+    return normalize_ci_token_policy(
+        {
+            "allowedRunnerTypes": getattr(project, "ci_token_allowed_runner_types", None),
+            "allowedTestCaseIds": getattr(project, "ci_token_allowed_testcase_ids", None),
+            "maxTestCaseCount": getattr(project, "ci_token_max_testcase_count", None),
+        }
+    )
+
+
+def get_project_ci_token_record_policy(token: ProjectCiToken) -> dict[str, object]:
+    return normalize_ci_token_policy(
+        {
+            "allowedRunnerTypes": getattr(token, "allowed_runner_types", None),
+            "allowedTestCaseIds": getattr(token, "allowed_testcase_ids", None),
+            "maxTestCaseCount": getattr(token, "max_testcase_count", None),
+        }
+    )
+
+
+async def _audit_ci_trigger_denied(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project: Project,
+    reason: str,
+    runner_type: str,
+    case_count: int,
+    meta: dict[str, object],
+) -> None:
+    await create_audit_log(
+        db,
+        user=user,
+        project_id=project.id,
+        module="RUN",
+        action="CI_TRIGGER_DENIED",
+        resource_type="project_ci_token",
+        resource_id=str(project.id),
+        summary="Deny CI run by token policy",
+        detail={
+            "reason": reason,
+            "triggerType": TriggerType.CI.value,
+            "ciTokenHint": project.ci_token_hint,
+            "projectId": str(project.id),
+            "runnerType": runner_type,
+            "caseCount": case_count,
+            "meta": dict(meta or {}),
+        },
+    )
+    await db.flush()
+
+
+async def _enforce_ci_token_policy(
+    db: AsyncSession,
+    *,
+    project: Project,
+    user: CurrentUser,
+    meta: dict[str, object],
+    items: list[dict[str, object]],
+) -> None:
+    lifecycle_state = resolve_ci_token_state(project)
+    if lifecycle_state != "active":
+        reason = f"ci_token_{lifecycle_state}"
+        runner_type, _ = _resolve_ci_runner_type(meta)
+        await _audit_ci_trigger_denied(
+            db,
+            user=user,
+            project=project,
+            reason=reason,
+            runner_type=runner_type,
+            case_count=len(items),
+            meta=meta,
+        )
+        raise CiTokenPolicyDenied(detail=reason)
+
+    policy = get_project_ci_token_policy(project)
+    runner_type, runner_type_supported = _resolve_ci_runner_type(meta)
+    allowed_runner_types = list(policy["allowedRunnerTypes"])
+    case_count = len(items)
+    max_testcase_count = policy["maxTestCaseCount"]
+
+    if not runner_type_supported or (allowed_runner_types and runner_type not in allowed_runner_types):
+        reason = "ci_runner_type_not_allowed"
+        await _audit_ci_trigger_denied(
+            db, user=user, project=project, reason=reason, runner_type=runner_type, case_count=case_count, meta=meta
+        )
+        raise CiTokenPolicyDenied(detail=reason)
+
+    if isinstance(max_testcase_count, int) and case_count > max_testcase_count:
+        reason = "ci_testcase_count_exceeded"
+        await _audit_ci_trigger_denied(
+            db, user=user, project=project, reason=reason, runner_type=runner_type, case_count=case_count, meta=meta
+        )
+        raise CiTokenPolicyDenied(detail=reason)
+
+    allowed_testcase_ids = set(policy["allowedTestCaseIds"])
+    if allowed_testcase_ids:
+        for item in items:
+            try:
+                testcase_id = str(uuid.UUID(str(item.get("testcaseId") or "").strip()))
+            except ValueError:
+                testcase_id = ""
+            if testcase_id not in allowed_testcase_ids:
+                reason = "ci_testcase_not_allowed"
+                await _audit_ci_trigger_denied(
+                    db, user=user, project=project, reason=reason, runner_type=runner_type, case_count=case_count, meta=meta
+                )
+                raise CiTokenPolicyDenied(detail=reason)
+
+
+async def _audit_ci_token_record_trigger_denied(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project: Project,
+    token: ProjectCiToken,
+    reason: str,
+    runner_type: str,
+    case_count: int,
+    meta: dict[str, object],
+) -> None:
+    await create_audit_log(
+        db,
+        user=user,
+        project_id=project.id,
+        module="RUN",
+        action="CI_TRIGGER_DENIED",
+        resource_type="project_ci_token",
+        resource_id=str(token.id),
+        summary="Deny CI run by named token policy",
+        detail={
+            "reason": reason,
+            "triggerType": TriggerType.CI.value,
+            "ciTokenId": str(token.id),
+            "ciTokenName": token.name,
+            "ciTokenHint": token.token_hint,
+            "projectId": str(project.id),
+            "runnerType": runner_type,
+            "caseCount": case_count,
+            "meta": dict(meta or {}),
+        },
+    )
+    await db.flush()
+
+
+async def _enforce_ci_token_record_policy(
+    db: AsyncSession,
+    *,
+    project: Project,
+    token: ProjectCiToken,
+    user: CurrentUser,
+    meta: dict[str, object],
+    items: list[dict[str, object]],
+) -> None:
+    lifecycle_state = resolve_project_ci_token_record_state(token)
+    if lifecycle_state != "active":
+        reason = f"ci_token_{lifecycle_state}"
+        runner_type, _ = _resolve_ci_runner_type(meta)
+        await _audit_ci_token_record_trigger_denied(
+            db,
+            user=user,
+            project=project,
+            token=token,
+            reason=reason,
+            runner_type=runner_type,
+            case_count=len(items),
+            meta=meta,
+        )
+        raise CiTokenPolicyDenied(detail=reason)
+
+    policy = get_project_ci_token_record_policy(token)
+    runner_type, runner_type_supported = _resolve_ci_runner_type(meta)
+    allowed_runner_types = list(policy["allowedRunnerTypes"])
+    case_count = len(items)
+    max_testcase_count = policy["maxTestCaseCount"]
+
+    if not runner_type_supported or (allowed_runner_types and runner_type not in allowed_runner_types):
+        reason = "ci_runner_type_not_allowed"
+        await _audit_ci_token_record_trigger_denied(
+            db, user=user, project=project, token=token, reason=reason, runner_type=runner_type, case_count=case_count, meta=meta
+        )
+        raise CiTokenPolicyDenied(detail=reason)
+
+    if isinstance(max_testcase_count, int) and case_count > max_testcase_count:
+        reason = "ci_testcase_count_exceeded"
+        await _audit_ci_token_record_trigger_denied(
+            db, user=user, project=project, token=token, reason=reason, runner_type=runner_type, case_count=case_count, meta=meta
+        )
+        raise CiTokenPolicyDenied(detail=reason)
+
+    allowed_testcase_ids = set(policy["allowedTestCaseIds"])
+    if allowed_testcase_ids:
+        for item in items:
+            try:
+                testcase_id = str(uuid.UUID(str(item.get("testcaseId") or "").strip()))
+            except ValueError:
+                testcase_id = ""
+            if testcase_id not in allowed_testcase_ids:
+                reason = "ci_testcase_not_allowed"
+                await _audit_ci_token_record_trigger_denied(
+                    db,
+                    user=user,
+                    project=project,
+                    token=token,
+                    reason=reason,
+                    runner_type=runner_type,
+                    case_count=case_count,
+                    meta=meta,
+                )
+                raise CiTokenPolicyDenied(detail=reason)
 
 
 def _extract_testcase_api_params(ai_meta_json: object) -> dict[str, object]:
@@ -323,6 +658,11 @@ async def _execute_inline_pytest_allure_job(
         if run.status in (RunStatus.PASSED, RunStatus.FAILED, RunStatus.CANCELED):
             run.end_at = datetime.utcnow()
         _update_run_execution_summary(run, case_runs=case_runs, workspace=str(output.workspace))
+        if run.status in (RunStatus.PASSED, RunStatus.FAILED, RunStatus.CANCELED):
+            try:
+                await dispatch_run_terminal_notification(db, run=run)
+            except Exception:
+                pass
     except Exception as exc:
         now = datetime.utcnow()
         error_message = str(exc).strip()[:2000] or "inline_execution_failed"
@@ -340,6 +680,10 @@ async def _execute_inline_pytest_allure_job(
         run.status = RunStatus.FAILED
         run.end_at = now
         _update_run_execution_summary(run, case_runs=case_runs)
+        try:
+            await dispatch_run_terminal_notification(db, run=run)
+        except Exception:
+            pass
     await db.flush()
 
 
@@ -606,6 +950,25 @@ async def create_run(
     )
     db.add(job)
     await db.flush()
+    await create_audit_log(
+        db,
+        user=user,
+        project_id=project.id,
+        module="RUN",
+        action="CREATE_RUN",
+        resource_type="run",
+        resource_id=str(run.id),
+        summary="Create run from suite",
+        detail={
+            "triggerType": trigger_type.value,
+            "suiteId": str(suite.id),
+            "envId": str(env.id),
+            "runnerType": runner_type,
+            "caseCount": len(case_runs),
+            "notifyRuleId": notify_rule_id,
+            "meta": dict(meta or {}),
+        },
+    )
     return run
 
 
@@ -848,6 +1211,27 @@ async def create_run_from_testcases(
     )
     db.add(job)
     await db.flush()
+    await create_audit_log(
+        db,
+        user=user,
+        project_id=project.id,
+        module="RUN",
+        action="CREATE_RUN_FROM_TESTCASES",
+        resource_type="run",
+        resource_id=str(run.id),
+        summary="Create run from testcase bindings",
+        detail={
+            "triggerType": trigger_type.value,
+            "suiteId": str(suite.id),
+            "envId": str(env.id),
+            "runnerType": runner_type,
+            "caseCount": len(case_runs),
+            "concurrency": concurrency,
+            "stopOnFailure": stop_on_failure,
+            "notifyRuleId": notify_rule_id,
+            "meta": dict(meta or {}),
+        },
+    )
     return run
 
 
@@ -1103,6 +1487,149 @@ async def create_run_from_testcases_http(
             items_for_job=items_for_job,
             runner_type=runner_type,
         )
+    await create_audit_log(
+        db,
+        user=user,
+        project_id=project.id,
+        module="RUN",
+        action="CREATE_RUN_FROM_TESTCASES_HTTP",
+        resource_type="run",
+        resource_id=str(run.id),
+        summary="Create HTTP run from testcases",
+        detail={
+            "triggerType": trigger_type.value,
+            "suiteId": str(suite.id),
+            "envId": str(env.id) if env else None,
+            "runnerType": runner_type,
+            "caseCount": len(case_runs),
+            "concurrency": concurrency,
+            "stopOnFailure": stop_on_failure,
+            "notifyRuleId": notify_rule_id,
+            "meta": dict(meta or {}),
+        },
+    )
+    return run
+
+
+async def create_run_via_ci_token(
+    db: AsyncSession,
+    *,
+    project_id: uuid.UUID,
+    ci_token: str,
+    env_id: uuid.UUID | None,
+    meta: dict[str, object],
+    concurrency: int,
+    stop_on_failure: bool,
+    items: list[dict[str, object]],
+    notify_rule_id: str | None,
+    idempotency_key: str | None,
+) -> Run:
+    raw_token = str(ci_token or "").strip()
+    if not raw_token:
+        raise HTTPException(status_code=401, detail="Invalid CI token")
+    hashed = _hash_ci_token(raw_token)
+    token_record = await db.scalar(select(ProjectCiToken).where(ProjectCiToken.token_hash == hashed))
+    if token_record is not None:
+        project = await db.scalar(
+            select(Project).where(
+                Project.id == project_id,
+                Project.id == token_record.project_id,
+                Project.tenant_id == token_record.tenant_id,
+            )
+        )
+        if project is None:
+            raise HTTPException(status_code=401, detail="Invalid CI token")
+        ci_user = CurrentUser(
+            id=project.owner_id,
+            tenant_id=project.tenant_id,
+            roles=frozenset(),
+        )
+        await _enforce_ci_token_record_policy(db, project=project, token=token_record, user=ci_user, meta=meta, items=items)
+        run = await create_run_from_testcases_http(
+            db,
+            user=ci_user,
+            project_id=project_id,
+            env_id=env_id,
+            trigger_type=TriggerType.CI,
+            meta=meta,
+            concurrency=concurrency,
+            stop_on_failure=stop_on_failure,
+            items=items,
+            notify_rule_id=notify_rule_id,
+            idempotency_key=idempotency_key,
+        )
+        now = datetime.utcnow()
+        token_record.last_used_at = now
+        if token_record.is_primary:
+            project.ci_token_last_used_at = now
+        await db.flush()
+        await create_audit_log(
+            db,
+            user=ci_user,
+            project_id=project.id,
+            module="RUN",
+            action="CI_TRIGGER_RUN",
+            resource_type="run",
+            resource_id=str(run.id),
+            summary="Create run via named CI token",
+            detail={
+                "triggerType": TriggerType.CI.value,
+                "ciTokenId": str(token_record.id),
+                "ciTokenName": token_record.name,
+                "ciTokenHint": token_record.token_hint,
+                "projectId": str(project.id),
+                "meta": dict(meta or {}),
+            },
+        )
+        return run
+
+    project = await db.scalar(
+        select(Project).where(
+            Project.id == project_id,
+            Project.ci_token_hash.is_not(None),
+            Project.ci_token_hash == hashed,
+        )
+    )
+    if project is None:
+        raise HTTPException(status_code=401, detail="Invalid CI token")
+
+    ci_user = CurrentUser(
+        id=project.owner_id,
+        tenant_id=project.tenant_id,
+        roles=frozenset(),
+    )
+    await _enforce_ci_token_policy(db, project=project, user=ci_user, meta=meta, items=items)
+    run = await create_run_from_testcases_http(
+        db,
+        user=ci_user,
+        project_id=project_id,
+        env_id=env_id,
+        trigger_type=TriggerType.CI,
+        meta=meta,
+        concurrency=concurrency,
+        stop_on_failure=stop_on_failure,
+        items=items,
+        notify_rule_id=notify_rule_id,
+        idempotency_key=idempotency_key,
+    )
+    project.ci_token_last_used_at = datetime.utcnow()
+    await db.flush()
+    await create_audit_log(
+        db,
+        user=ci_user,
+        project_id=project.id,
+        module="RUN",
+        action="CI_TRIGGER_RUN",
+        resource_type="run",
+        resource_id=str(run.id),
+        summary="Create run via CI token",
+        detail={
+            "triggerType": TriggerType.CI.value,
+            "ciTokenHint": project.ci_token_hint,
+            "projectId": str(project.id),
+            "meta": dict(meta or {}),
+        },
+    )
     return run
 
 
@@ -1299,8 +1826,445 @@ async def cancel_run(
         )
         .values(status=CaseRunStatus.SKIPPED, end_at=datetime.utcnow())
     )
+    try:
+        await dispatch_run_terminal_notification(db, run=run)
+    except Exception:
+        pass
+    await create_audit_log(
+        db,
+        user=user,
+        project_id=project.id,
+        module="RUN",
+        action="CANCEL_RUN",
+        resource_type="run",
+        resource_id=str(run.id),
+        summary="Cancel run",
+        detail={"status": run.status.value},
+    )
     await db.flush()
     return run
+
+
+async def rotate_project_ci_token(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+    policy: dict[str, object] | None = None,
+    expires_at: datetime | None = None,
+) -> tuple[Project, str]:
+    project = await _get_project(db, user=user, project_id=project_id)
+    await _require_project_write(db, user=user, project=project)
+
+    now = datetime.utcnow()
+    token = f"ci_{secrets.token_urlsafe(24)}"
+    project.ci_token_hash = _hash_ci_token(token)
+    project.ci_token_hint = _build_ci_token_hint(token)
+    project.ci_token_rotated_at = now
+    project.ci_token_last_used_at = None
+    project.ci_token_rotated_by = user.id
+    project.ci_token_expires_at = expires_at
+    project.ci_token_revoked_at = None
+    project.ci_token_revoked_by = None
+    project.ci_token_revoked_reason = None
+    project.ci_token_leak_reported_at = None
+    project.ci_token_leak_reported_by = None
+    project.ci_token_leak_report_reason = None
+    policy_data = normalize_ci_token_policy(policy)
+    project.ci_token_allowed_runner_types = policy_data["allowedRunnerTypes"]
+    project.ci_token_allowed_testcase_ids = policy_data["allowedTestCaseIds"]
+    project.ci_token_max_testcase_count = policy_data["maxTestCaseCount"]
+    await db.flush()
+    await create_audit_log(
+        db,
+        user=user,
+        project_id=project.id,
+        module="RUN",
+        action="ROTATE_CI_TOKEN",
+        resource_type="project_ci_token",
+        resource_id=str(project.id),
+        summary="Rotate project CI token",
+        detail={"hint": project.ci_token_hint, "expiresAt": int(expires_at.timestamp()) if expires_at else None},
+    )
+    return project, token
+
+
+async def get_project_ci_token_status(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+) -> Project:
+    project = await _get_project(db, user=user, project_id=project_id)
+    await _require_project_read(db, user=user, project=project)
+    return project
+
+
+async def list_project_ci_token_records(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+) -> tuple[Project, list[ProjectCiToken]]:
+    project = await _get_project(db, user=user, project_id=project_id)
+    await _require_project_read(db, user=user, project=project)
+    tokens = (
+        await db.execute(
+            select(ProjectCiToken)
+            .where(ProjectCiToken.tenant_id == user.tenant_id, ProjectCiToken.project_id == project.id)
+            .order_by(ProjectCiToken.is_primary.desc(), ProjectCiToken.name.asc(), ProjectCiToken.created_at.asc())
+        )
+    ).scalars().all()
+    return project, list(tokens)
+
+
+async def rotate_project_ci_token_record(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+    name: str,
+    primary: bool = False,
+    policy: dict[str, object] | None = None,
+    expires_at: datetime | None = None,
+) -> tuple[ProjectCiToken, str]:
+    project = await _get_project(db, user=user, project_id=project_id)
+    await _require_project_write(db, user=user, project=project)
+
+    token_name = _normalize_ci_token_name(name)
+    now = datetime.utcnow()
+    raw_token = f"ci_{secrets.token_urlsafe(24)}"
+    policy_data = normalize_ci_token_policy(policy)
+    record = await db.scalar(
+        select(ProjectCiToken).where(
+            ProjectCiToken.tenant_id == user.tenant_id,
+            ProjectCiToken.project_id == project.id,
+            ProjectCiToken.name == token_name,
+        )
+    )
+    if record is None:
+        record = ProjectCiToken(
+            tenant_id=project.tenant_id,
+            project_id=project.id,
+            name=token_name,
+            token_hash=_hash_ci_token(raw_token),
+            token_hint=_build_ci_token_hint(raw_token),
+            is_primary=bool(primary),
+            rotated_at=now,
+            rotated_by=user.id,
+            expires_at=expires_at,
+            allowed_runner_types=policy_data["allowedRunnerTypes"],
+            allowed_testcase_ids=policy_data["allowedTestCaseIds"],
+            max_testcase_count=policy_data["maxTestCaseCount"],
+        )
+        db.add(record)
+    else:
+        record.token_hash = _hash_ci_token(raw_token)
+        record.token_hint = _build_ci_token_hint(raw_token)
+        record.is_primary = bool(primary or record.is_primary)
+        record.rotated_at = now
+        record.last_used_at = None
+        record.rotated_by = user.id
+        record.expires_at = expires_at
+        record.revoked_at = None
+        record.revoked_by = None
+        record.revoked_reason = None
+        record.leak_reported_at = None
+        record.leak_reported_by = None
+        record.leak_report_reason = None
+        record.allowed_runner_types = policy_data["allowedRunnerTypes"]
+        record.allowed_testcase_ids = policy_data["allowedTestCaseIds"]
+        record.max_testcase_count = policy_data["maxTestCaseCount"]
+
+    if record.is_primary:
+        await db.execute(
+            update(ProjectCiToken)
+            .where(ProjectCiToken.project_id == project.id, ProjectCiToken.id != record.id)
+            .values(is_primary=False)
+        )
+        project.ci_token_hash = record.token_hash
+        project.ci_token_hint = record.token_hint
+        project.ci_token_rotated_at = record.rotated_at
+        project.ci_token_last_used_at = None
+        project.ci_token_rotated_by = user.id
+        project.ci_token_expires_at = expires_at
+        project.ci_token_revoked_at = None
+        project.ci_token_revoked_by = None
+        project.ci_token_revoked_reason = None
+        project.ci_token_leak_reported_at = None
+        project.ci_token_leak_reported_by = None
+        project.ci_token_leak_report_reason = None
+        project.ci_token_allowed_runner_types = policy_data["allowedRunnerTypes"]
+        project.ci_token_allowed_testcase_ids = policy_data["allowedTestCaseIds"]
+        project.ci_token_max_testcase_count = policy_data["maxTestCaseCount"]
+
+    await db.flush()
+    await create_audit_log(
+        db,
+        user=user,
+        project_id=project.id,
+        module="RUN",
+        action="ROTATE_CI_TOKEN",
+        resource_type="project_ci_token",
+        resource_id=str(record.id),
+        summary="Rotate named project CI token",
+        detail={
+            "id": str(record.id),
+            "name": record.name,
+            "hint": record.token_hint,
+            "primary": record.is_primary,
+            "expiresAt": int(expires_at.timestamp()) if expires_at else None,
+        },
+    )
+    return record, raw_token
+
+
+async def _get_project_ci_token_record_for_write(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+    token_id: uuid.UUID | None = None,
+    name: str | None = None,
+) -> tuple[Project, ProjectCiToken]:
+    project = await _get_project(db, user=user, project_id=project_id)
+    await _require_project_write(db, user=user, project=project)
+    stmt = select(ProjectCiToken).where(ProjectCiToken.tenant_id == user.tenant_id, ProjectCiToken.project_id == project.id)
+    if token_id is not None:
+        stmt = stmt.where(ProjectCiToken.id == token_id)
+    else:
+        stmt = stmt.where(ProjectCiToken.name == _normalize_ci_token_name(name))
+    token = await db.scalar(stmt)
+    if token is None:
+        raise HTTPException(status_code=404, detail="CI token not found")
+    return project, token
+
+
+async def update_project_ci_token_record_policy(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+    policy: dict[str, object],
+    token_id: uuid.UUID | None = None,
+    name: str | None = None,
+) -> ProjectCiToken:
+    project, token = await _get_project_ci_token_record_for_write(db, user=user, project_id=project_id, token_id=token_id, name=name)
+    policy_data = normalize_ci_token_policy(policy)
+    token.allowed_runner_types = policy_data["allowedRunnerTypes"]
+    token.allowed_testcase_ids = policy_data["allowedTestCaseIds"]
+    token.max_testcase_count = policy_data["maxTestCaseCount"]
+    if token.is_primary:
+        project.ci_token_allowed_runner_types = token.allowed_runner_types
+        project.ci_token_allowed_testcase_ids = token.allowed_testcase_ids
+        project.ci_token_max_testcase_count = token.max_testcase_count
+    await db.flush()
+    await create_audit_log(
+        db,
+        user=user,
+        project_id=project.id,
+        module="RUN",
+        action="UPDATE_CI_TOKEN_POLICY",
+        resource_type="project_ci_token",
+        resource_id=str(token.id),
+        summary="Update named CI token policy",
+        detail={"id": str(token.id), "name": token.name, "hint": token.token_hint, "policy": policy_data},
+    )
+    return token
+
+
+async def update_project_ci_token_policy(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+    policy: dict[str, object],
+) -> Project:
+    project = await _get_project(db, user=user, project_id=project_id)
+    await _require_project_write(db, user=user, project=project)
+
+    policy_data = normalize_ci_token_policy(policy)
+    project.ci_token_allowed_runner_types = policy_data["allowedRunnerTypes"]
+    project.ci_token_allowed_testcase_ids = policy_data["allowedTestCaseIds"]
+    project.ci_token_max_testcase_count = policy_data["maxTestCaseCount"]
+    await db.flush()
+    await create_audit_log(
+        db,
+        user=user,
+        project_id=project.id,
+        module="RUN",
+        action="UPDATE_CI_TOKEN_POLICY",
+        resource_type="project_ci_token",
+        resource_id=str(project.id),
+        summary="Update project CI token policy",
+        detail={"hint": project.ci_token_hint, "policy": policy_data},
+    )
+    return project
+
+
+async def revoke_project_ci_token(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+    reason: str | None = None,
+) -> Project:
+    project = await _get_project(db, user=user, project_id=project_id)
+    await _require_project_write(db, user=user, project=project)
+    old_hint = project.ci_token_hint
+    now = datetime.utcnow()
+    project.ci_token_last_used_at = None
+    project.ci_token_revoked_at = now
+    project.ci_token_revoked_by = user.id
+    project.ci_token_revoked_reason = _normalize_ci_token_reason(reason)
+    project.ci_token_leak_reported_at = None
+    project.ci_token_leak_reported_by = None
+    project.ci_token_leak_report_reason = None
+    project.ci_token_allowed_runner_types = None
+    project.ci_token_allowed_testcase_ids = None
+    project.ci_token_max_testcase_count = None
+    await db.flush()
+    await create_audit_log(
+        db,
+        user=user,
+        project_id=project.id,
+        module="RUN",
+        action="REVOKE_CI_TOKEN",
+        resource_type="project_ci_token",
+        resource_id=str(project.id),
+        summary="Revoke project CI token",
+        detail={"hint": old_hint, "reason": project.ci_token_revoked_reason},
+    )
+    return project
+
+
+async def revoke_project_ci_token_record(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+    token_id: uuid.UUID | None = None,
+    name: str | None = None,
+    reason: str | None = None,
+) -> ProjectCiToken:
+    project, token = await _get_project_ci_token_record_for_write(db, user=user, project_id=project_id, token_id=token_id, name=name)
+    now = datetime.utcnow()
+    token.last_used_at = None
+    token.revoked_at = now
+    token.revoked_by = user.id
+    token.revoked_reason = _normalize_ci_token_reason(reason)
+    token.leak_reported_at = None
+    token.leak_reported_by = None
+    token.leak_report_reason = None
+    token.allowed_runner_types = None
+    token.allowed_testcase_ids = None
+    token.max_testcase_count = None
+    if token.is_primary:
+        project.ci_token_last_used_at = None
+        project.ci_token_revoked_at = token.revoked_at
+        project.ci_token_revoked_by = user.id
+        project.ci_token_revoked_reason = token.revoked_reason
+        project.ci_token_leak_reported_at = None
+        project.ci_token_leak_reported_by = None
+        project.ci_token_leak_report_reason = None
+        project.ci_token_allowed_runner_types = None
+        project.ci_token_allowed_testcase_ids = None
+        project.ci_token_max_testcase_count = None
+    await db.flush()
+    await create_audit_log(
+        db,
+        user=user,
+        project_id=project.id,
+        module="RUN",
+        action="REVOKE_CI_TOKEN",
+        resource_type="project_ci_token",
+        resource_id=str(token.id),
+        summary="Revoke named CI token",
+        detail={"id": str(token.id), "name": token.name, "hint": token.token_hint, "reason": token.revoked_reason},
+    )
+    return token
+
+
+async def report_project_ci_token_leak(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+    reason: str | None = None,
+) -> Project:
+    project = await _get_project(db, user=user, project_id=project_id)
+    await _require_project_write(db, user=user, project=project)
+    now = datetime.utcnow()
+    project.ci_token_last_used_at = None
+    project.ci_token_leak_reported_at = now
+    project.ci_token_leak_reported_by = user.id
+    project.ci_token_leak_report_reason = _normalize_ci_token_reason(reason)
+    project.ci_token_revoked_at = None
+    project.ci_token_revoked_by = None
+    project.ci_token_revoked_reason = None
+    project.ci_token_allowed_runner_types = None
+    project.ci_token_allowed_testcase_ids = None
+    project.ci_token_max_testcase_count = None
+    await db.flush()
+    await create_audit_log(
+        db,
+        user=user,
+        project_id=project.id,
+        module="RUN",
+        action="REPORT_CI_TOKEN_LEAK",
+        resource_type="project_ci_token",
+        resource_id=str(project.id),
+        summary="Report project CI token leak",
+        detail={"hint": project.ci_token_hint, "reason": project.ci_token_leak_report_reason},
+    )
+    return project
+
+
+async def report_project_ci_token_record_leak(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+    token_id: uuid.UUID | None = None,
+    name: str | None = None,
+    reason: str | None = None,
+) -> ProjectCiToken:
+    project, token = await _get_project_ci_token_record_for_write(db, user=user, project_id=project_id, token_id=token_id, name=name)
+    now = datetime.utcnow()
+    token.last_used_at = None
+    token.leak_reported_at = now
+    token.leak_reported_by = user.id
+    token.leak_report_reason = _normalize_ci_token_reason(reason)
+    token.revoked_at = None
+    token.revoked_by = None
+    token.revoked_reason = None
+    token.allowed_runner_types = None
+    token.allowed_testcase_ids = None
+    token.max_testcase_count = None
+    if token.is_primary:
+        project.ci_token_last_used_at = None
+        project.ci_token_leak_reported_at = token.leak_reported_at
+        project.ci_token_leak_reported_by = user.id
+        project.ci_token_leak_report_reason = token.leak_report_reason
+        project.ci_token_revoked_at = None
+        project.ci_token_revoked_by = None
+        project.ci_token_revoked_reason = None
+        project.ci_token_allowed_runner_types = None
+        project.ci_token_allowed_testcase_ids = None
+        project.ci_token_max_testcase_count = None
+    await db.flush()
+    await create_audit_log(
+        db,
+        user=user,
+        project_id=project.id,
+        module="RUN",
+        action="REPORT_CI_TOKEN_LEAK",
+        resource_type="project_ci_token",
+        resource_id=str(token.id),
+        summary="Report named CI token leak",
+        detail={"id": str(token.id), "name": token.name, "hint": token.token_hint, "reason": token.leak_report_reason},
+    )
+    return token
 
 
 async def retry_run(
@@ -1481,6 +2445,24 @@ async def retry_run(
     )
     db.add(job)
     await db.flush()
+    await create_audit_log(
+        db,
+        user=user,
+        project_id=project.id,
+        module="RUN",
+        action="RETRY_RUN",
+        resource_type="run",
+        resource_id=str(retry_run_obj.id),
+        summary="Retry run",
+        detail={
+            "retryOf": str(run.id),
+            "failedOnly": failed_only,
+            "suiteId": str(suite.id),
+            "envId": str(env.id),
+            "runnerType": runner_type,
+            "caseCount": len(retry_case_runs),
+        },
+    )
     return retry_run_obj
 
 
@@ -1562,5 +2544,20 @@ async def delete_run_allure_report(
     run_summary["executionResult"] = execution_result
     run.summary_json = run_summary
 
+    await create_audit_log(
+        db,
+        user=user,
+        project_id=project.id,
+        module="RUN",
+        action="DELETE_ALLURE_REPORT",
+        resource_type="run",
+        resource_id=str(run.id),
+        summary="Delete run allure report",
+        detail={
+            "deletedArtifacts": len(report_artifacts),
+            "deletedFiles": deleted_files,
+            "deletedDirs": deleted_dirs,
+        },
+    )
     await db.flush()
     return len(report_artifacts), deleted_files, deleted_dirs
