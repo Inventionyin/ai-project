@@ -165,6 +165,8 @@ $env:JENKINS_API_TOKEN = "your-jenkins-token"
 3. `JIRA_EMAIL`：你的 Atlassian 登录邮箱。
 4. `JIRA_TOKEN`：Atlassian Account -> Security -> API token -> Create API token。
 
+`-EnableSmoke` 会先验证账号 API，再用 `JIRA_PROJECT_KEY` 做项目级只读探测；不会创建 issue。
+
 填哪里：
 
 ```powershell

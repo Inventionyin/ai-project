@@ -8,6 +8,7 @@ def test_performance_baseline_script_contains_required_contract():
 
     required_tokens = [
         "param(",
+        "[switch]$FailOnWarn",
         "[string]$ApiBaseUrl",
         "[string]$FrontendUrl",
         "[string]$OutputPath",
@@ -25,6 +26,10 @@ def test_performance_baseline_script_contains_required_contract():
         "results",
         "thresholds",
         "conclusion",
+        "gate",
+        "failOnWarn",
+        "shouldFail",
+        "exitCode",
         "$backendThresholdP95Ms = 1000",
         "$frontendThresholdP95Ms = 2000",
         "Get-DingTalkSignedWebhookUrl",
@@ -34,6 +39,7 @@ def test_performance_baseline_script_contains_required_contract():
         '"READY"',
         '"WARN"',
         '"BLOCKED"',
+        "Performance baseline gate failed (FailOnWarn enabled).",
     ]
 
     missing = [token for token in required_tokens if token not in content]
