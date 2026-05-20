@@ -68,17 +68,17 @@ def run_migrations(url: str) -> None:
     command.upgrade(config, "head")
 
 
-async def main() -> None:
+def main() -> None:
     parser = argparse.ArgumentParser(description="Create, reset, migrate, or drop the WeiTesting E2E database.")
     parser.add_argument("--reset", action="store_true", help="Drop and recreate the test database before migrating.")
     parser.add_argument("--drop", action="store_true", help="Drop the test database and exit.")
     args = parser.parse_args()
 
     url = _database_url()
-    await ensure_database(url, reset=args.reset, drop=args.drop)
+    asyncio.run(ensure_database(url, reset=args.reset, drop=args.drop))
     if not args.drop:
         run_migrations(url)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
