@@ -185,6 +185,7 @@ $env:JIRA_TOKEN = "your-jira-api-token"
 1. `ZENTAO_BASE_URL`：禅道服务地址。
 2. `ZENTAO_PRODUCT`：产品 ID（通常在产品页面 URL 或 API 文档里可见）。
 3. `ZENTAO_TOKEN`：禅道 API token（在账号/API 配置页生成）。
+4. 如果云禅道 token 会过期，可改用 `ZENTAO_ACCOUNT` + `ZENTAO_PASSWORD`，脚本会在 smoke 时临时换取 token。
 
 填哪里：
 
@@ -192,6 +193,9 @@ $env:JIRA_TOKEN = "your-jira-api-token"
 $env:ZENTAO_BASE_URL = "https://zentao.company.com"
 $env:ZENTAO_PRODUCT = "1"
 $env:ZENTAO_TOKEN = "your-zentao-token"
+# 或：
+$env:ZENTAO_ACCOUNT = "your-zentao-account"
+$env:ZENTAO_PASSWORD = "your-zentao-password"
 ```
 
 ---

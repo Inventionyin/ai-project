@@ -23,6 +23,8 @@ _INTEGRATION_ENV_NAMES = [
     "ZENTAO_BASE_URL",
     "ZENTAO_PRODUCT",
     "ZENTAO_TOKEN",
+    "ZENTAO_ACCOUNT",
+    "ZENTAO_PASSWORD",
 ]
 
 
@@ -176,3 +178,20 @@ def test_verify_external_integrations_supports_jira_project_level_smoke():
 
     missing = [token for token in required_tokens if token not in content]
     assert not missing, f"Missing expected Jira project smoke tokens: {missing}"
+
+
+def test_verify_external_integrations_supports_dynamic_zentao_token():
+    repo_root = Path(__file__).resolve().parents[2]
+    script = repo_root / "scripts" / "verify_external_integrations.ps1"
+    content = script.read_text(encoding="utf-8")
+
+    required_tokens = [
+        "function Get-ZentaoToken",
+        'Invoke-RestMethod -Method Post -Uri "$BaseUrl/api.php/v1/tokens"',
+        '"ZENTAO_ACCOUNT+ZENTAO_PASSWORD"',
+        '"ZENTAO_PASSWORD"',
+        "$token = Get-ZentaoToken -BaseUrl $base",
+    ]
+
+    missing = [token for token in required_tokens if token not in content]
+    assert not missing, f"Missing expected Zentao dynamic token tokens: {missing}"

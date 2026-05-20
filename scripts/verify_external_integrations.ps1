@@ -27,7 +27,7 @@ function Write-Usage {
     Write-Host "  WEITESTING_GITHUB_WORKFLOW_FILE or GITHUB_WORKFLOW_FILE"
     Write-Host "  JENKINS_BASE_URL, JENKINS_JOB_NAME, JENKINS_USERNAME, JENKINS_API_TOKEN"
     Write-Host "  JIRA_BASE_URL, JIRA_PROJECT_KEY, JIRA_EMAIL, JIRA_TOKEN"
-    Write-Host "  ZENTAO_BASE_URL, ZENTAO_PRODUCT, ZENTAO_TOKEN"
+    Write-Host "  ZENTAO_BASE_URL, ZENTAO_PRODUCT, ZENTAO_TOKEN or ZENTAO_ACCOUNT + ZENTAO_PASSWORD"
 }
 
 function Get-MaskedValue {
@@ -53,7 +53,8 @@ function Get-RedactedMessage {
         "WEITESTING_GITHUB_TOKEN",
         "JENKINS_API_TOKEN",
         "JIRA_TOKEN",
-        "ZENTAO_TOKEN"
+        "ZENTAO_TOKEN",
+        "ZENTAO_PASSWORD"
     )
     foreach ($envName in $secretEnvNames) {
         $secretValue = [Environment]::GetEnvironmentVariable($envName)
@@ -69,10 +70,52 @@ function Get-RedactedMessage {
     return $redacted
 }
 
+function Get-ZentaoToken {
+    param([string]$BaseUrl)
+
+    $token = [Environment]::GetEnvironmentVariable("ZENTAO_TOKEN")
+    if (-not [string]::IsNullOrWhiteSpace($token)) {
+        return $token
+    }
+
+    $account = [Environment]::GetEnvironmentVariable("ZENTAO_ACCOUNT")
+    $password = [Environment]::GetEnvironmentVariable("ZENTAO_PASSWORD")
+    if ([string]::IsNullOrWhiteSpace($account) -or [string]::IsNullOrWhiteSpace($password)) {
+        throw "Zentao token is missing and ZENTAO_ACCOUNT/ZENTAO_PASSWORD are incomplete."
+    }
+
+    $payload = @{
+        account = $account
+        password = $password
+    } | ConvertTo-Json -Depth 4
+    $response = Invoke-RestMethod -Method Post -Uri "$BaseUrl/api.php/v1/tokens" -ContentType "application/json" -Body $payload -TimeoutSec 10
+    if ([string]::IsNullOrWhiteSpace([string]$response.token)) {
+        throw "Zentao token endpoint returned an empty token."
+    }
+
+    return [string]$response.token
+}
+
 function Get-EnvValue {
     param([string[]]$Names)
 
     foreach ($name in $Names) {
+        if ($name.Contains("+")) {
+            $parts = @($name -split "\+" | ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+            $allPresent = $true
+            foreach ($part in $parts) {
+                $partValue = [Environment]::GetEnvironmentVariable($part)
+                if ([string]::IsNullOrWhiteSpace($partValue)) {
+                    $allPresent = $false
+                    break
+                }
+            }
+            if ($allPresent) {
+                return "<COMPOSITE>"
+            }
+            continue
+        }
+
         $value = [Environment]::GetEnvironmentVariable($name)
         if (-not [string]::IsNullOrWhiteSpace($value)) {
             return $value
@@ -225,7 +268,7 @@ function Invoke-SmokeChecks {
             "Zentao" {
                 try {
                     $base = [Environment]::GetEnvironmentVariable("ZENTAO_BASE_URL").TrimEnd("/")
-                    $token = [Environment]::GetEnvironmentVariable("ZENTAO_TOKEN")
+                    $token = Get-ZentaoToken -BaseUrl $base
                     $product = [Environment]::GetEnvironmentVariable("ZENTAO_PRODUCT")
                     $maskedToken = Get-MaskedValue -Value $token
                     $uri = "$base/api.php/v1/products/$product"
@@ -275,7 +318,7 @@ $definitions = @(
     ) },
     @{ Name = "Jenkins"; Required = @("JENKINS_BASE_URL", "JENKINS_JOB_NAME", "JENKINS_USERNAME", "JENKINS_API_TOKEN") },
     @{ Name = "Jira"; Required = @("JIRA_BASE_URL", "JIRA_PROJECT_KEY", "JIRA_EMAIL", "JIRA_TOKEN") },
-    @{ Name = "Zentao"; Required = @("ZENTAO_BASE_URL", "ZENTAO_PRODUCT", "ZENTAO_TOKEN") }
+    @{ Name = "Zentao"; Required = @("ZENTAO_BASE_URL", "ZENTAO_PRODUCT", @("ZENTAO_TOKEN", "ZENTAO_ACCOUNT+ZENTAO_PASSWORD")) }
 )
 
 $targetSet = Get-TargetSet -TargetNames $Targets
