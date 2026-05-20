@@ -137,11 +137,12 @@ jobs:
           ZENTAO_ACCOUNT: ${{ secrets.ZENTAO_ACCOUNT }}
           ZENTAO_PASSWORD: ${{ secrets.ZENTAO_PASSWORD }}
         run: |
-          $args = @("-Targets", $env:EXTERNAL_SMOKE_TARGETS, "-EnableSmoke", "-FailOnSmokeError")
           if ($env:ENABLE_EXTERNAL_BUSINESS_CLOSURE -eq "true") {
-            $args += "-EnableBusinessClosure"
+            ./scripts/verify_external_integrations.ps1 -Targets $env:EXTERNAL_SMOKE_TARGETS -EnableSmoke -EnableBusinessClosure -FailOnSmokeError
           }
-          ./scripts/verify_external_integrations.ps1 @args
+          else {
+            ./scripts/verify_external_integrations.ps1 -Targets $env:EXTERNAL_SMOKE_TARGETS -EnableSmoke -FailOnSmokeError
+          }
 
       - name: External integrations diagnostics script missing notice
         if: ${{ hashFiles('scripts/verify_external_integrations.ps1') == '' }}
