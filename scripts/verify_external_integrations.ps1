@@ -3,20 +3,22 @@ param(
     [switch]$Help,
     [switch]$DryRun,
     [switch]$EnableSmoke,
-    [switch]$FailOnSmokeError
+    [switch]$FailOnSmokeError,
+    [string]$Targets = ""
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 function Write-Usage {
-    Write-Host "Usage: .\scripts\verify_external_integrations.ps1 [-DryRun] [-EnableSmoke] [-FailOnSmokeError]"
+    Write-Host "Usage: .\scripts\verify_external_integrations.ps1 [-DryRun] [-EnableSmoke] [-FailOnSmokeError] [-Targets <names>]"
     Write-Host ""
     Write-Host "Options:"
     Write-Host "  -Help      Show this help message."
     Write-Host "  -DryRun    Only check configuration, never call external APIs."
     Write-Host "  -EnableSmoke  Run minimal API smoke checks after config READY."
     Write-Host "  -FailOnSmokeError  Return non-zero when any enabled smoke check fails."
+    Write-Host "  -Targets   Optional comma-separated target names: DingTalk, GitHub Actions, Jenkins, Jira, Zentao."
     Write-Host ""
     Write-Host "Environment variables:"
     Write-Host "  DINGTALK_WEBHOOK_URL, optional DINGTALK_WEBHOOK_SECRET"
@@ -236,6 +238,24 @@ function Invoke-SmokeChecks {
     return $failures
 }
 
+function Get-TargetSet {
+    param([string]$TargetNames)
+
+    $targetSet = @{}
+    if ([string]::IsNullOrWhiteSpace($TargetNames)) {
+        return $targetSet
+    }
+
+    foreach ($target in ($TargetNames -split ",")) {
+        $normalized = $target.Trim().ToLowerInvariant()
+        if (-not [string]::IsNullOrWhiteSpace($normalized)) {
+            $targetSet[$normalized] = $true
+        }
+    }
+
+    return $targetSet
+}
+
 if ($Help) {
     Write-Usage
     exit 0
@@ -252,6 +272,15 @@ $definitions = @(
     @{ Name = "Jira"; Required = @("JIRA_BASE_URL", "JIRA_PROJECT_KEY", "JIRA_EMAIL", "JIRA_TOKEN") },
     @{ Name = "Zentao"; Required = @("ZENTAO_BASE_URL", "ZENTAO_PRODUCT", "ZENTAO_TOKEN") }
 )
+
+$targetSet = Get-TargetSet -TargetNames $Targets
+if ($targetSet.Count -gt 0) {
+    $definitions = @($definitions | Where-Object { $targetSet.ContainsKey($_.Name.ToLowerInvariant()) })
+}
+
+if ($definitions.Count -eq 0) {
+    Write-Error "No integration definitions matched -Targets '$Targets'."
+}
 
 $statuses = New-Object System.Collections.Generic.List[object]
 foreach ($definition in $definitions) {

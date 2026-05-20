@@ -11,6 +11,16 @@ on:
         required: false
         default: false
         type: boolean
+      includeExternalSmoke:
+        description: "Run live external integration smoke checks with repository secrets/variables"
+        required: false
+        default: false
+        type: boolean
+      externalSmokeTargets:
+        description: "Comma-separated external smoke targets"
+        required: false
+        default: "Jira"
+        type: string
   pull_request:
   push:
     branches:
@@ -96,6 +106,27 @@ jobs:
         shell: pwsh
         run: |
           ./scripts/verify_external_integrations.ps1 -DryRun
+
+      - name: Run external integrations smoke (manual only)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.includeExternalSmoke }}
+        shell: pwsh
+        env:
+          DINGTALK_WEBHOOK_URL: ${{ secrets.DINGTALK_WEBHOOK_URL }}
+          DINGTALK_WEBHOOK_SECRET: ${{ secrets.DINGTALK_WEBHOOK_SECRET }}
+          JENKINS_BASE_URL: ${{ vars.JENKINS_BASE_URL }}
+          JENKINS_JOB_NAME: ${{ vars.JENKINS_JOB_NAME }}
+          JENKINS_USERNAME: ${{ vars.JENKINS_USERNAME }}
+          JENKINS_API_TOKEN: ${{ secrets.JENKINS_API_TOKEN }}
+          JIRA_BASE_URL: ${{ vars.JIRA_BASE_URL }}
+          JIRA_PROJECT_KEY: ${{ vars.JIRA_PROJECT_KEY }}
+          JIRA_EMAIL: ${{ vars.JIRA_EMAIL }}
+          JIRA_TOKEN: ${{ secrets.JIRA_TOKEN }}
+          EXTERNAL_SMOKE_TARGETS: ${{ inputs.externalSmokeTargets }}
+          ZENTAO_BASE_URL: ${{ vars.ZENTAO_BASE_URL }}
+          ZENTAO_PRODUCT: ${{ vars.ZENTAO_PRODUCT }}
+          ZENTAO_TOKEN: ${{ secrets.ZENTAO_TOKEN }}
+        run: |
+          ./scripts/verify_external_integrations.ps1 -Targets $env:EXTERNAL_SMOKE_TARGETS -EnableSmoke -FailOnSmokeError
 
       - name: External integrations diagnostics script missing notice
         if: ${{ hashFiles('scripts/verify_external_integrations.ps1') == '' }}

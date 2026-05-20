@@ -194,11 +194,24 @@ When enabled, or when the nightly schedule runs:
 
 This keeps frontend real E2E out of every PR by default while still giving you a repeatable manual run and a scheduled mainline safety net.
 
+### External integration smoke in CI
+
+The workflow includes input `includeExternalSmoke` for `workflow_dispatch`.
+
+When enabled, the workflow injects repository Secrets/Variables and runs the targets from `externalSmokeTargets`, which defaults to `Jira`:
+
+```powershell
+.\scripts\verify_external_integrations.ps1 -Targets Jira -EnableSmoke -FailOnSmokeError
+```
+
+This keeps live third-party calls out of pull request, push, and nightly CI by default. Use it only after the target external systems have complete repository Secrets/Variables.
+
 Useful `gh` commands:
 
 ```powershell
 gh workflow run real-e2e --repo Inventionyin/ai-project --ref dev -f includeFrontendRealE2E=false
 gh workflow run real-e2e --repo Inventionyin/ai-project --ref dev -f includeFrontendRealE2E=true
+gh workflow run real-e2e --repo Inventionyin/ai-project --ref dev -f includeFrontendRealE2E=false -f includeExternalSmoke=true -f externalSmokeTargets=Jira
 gh run list --repo Inventionyin/ai-project --workflow real-e2e --limit 10
 gh run watch <run-id> --repo Inventionyin/ai-project --exit-status
 gh run view <run-id> --repo Inventionyin/ai-project --log-failed

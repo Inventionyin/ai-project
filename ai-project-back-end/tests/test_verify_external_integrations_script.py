@@ -123,3 +123,31 @@ def test_verify_external_integrations_uses_non_reserved_github_env_aliases():
     assert result.returncode == 0
     assert "[GitHub Actions] READY" in output
     assert "Missing env: WEITESTING_GITHUB_TOKEN" not in output
+
+
+def test_verify_external_integrations_can_target_jira_only():
+    repo_root = Path(__file__).resolve().parents[2]
+    script = repo_root / "scripts" / "verify_external_integrations.ps1"
+
+    env = _clean_env()
+    env.update(
+        {
+            "JIRA_BASE_URL": "https://aitestplatform.atlassian.net",
+            "JIRA_PROJECT_KEY": "AIT",
+            "JIRA_EMAIL": "user@example.com",
+            "JIRA_TOKEN": "token",
+        }
+    )
+    result = subprocess.run(
+        [_powershell_executable(), "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), "-DryRun", "-Targets", "Jira"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env=env,
+    )
+    output = f"{result.stdout}\n{result.stderr}"
+
+    assert result.returncode == 0
+    assert "[Jira] READY" in output
+    assert "[DingTalk]" not in output
+    assert "[Jenkins]" not in output
