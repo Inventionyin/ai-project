@@ -272,7 +272,7 @@ test.describe('plugins 管理页冒烟', () => {
     })
 
     await page.goto('/projects/1/settings/plugins', { waitUntil: 'domcontentloaded' })
-    await expect(page.getByRole('button', { name: '插件市场' })).toBeVisible()
+    await expect(page.getByRole('navigation').getByRole('button', { name: '插件市场' })).toBeVisible()
     await expect(page.getByRole('button', { name: '已安装' })).toBeVisible()
     await expect(page.getByText('暂无可用插件')).toBeVisible()
   })
