@@ -11,6 +11,10 @@ def test_verify_real_e2e_script_dry_run_path_avoids_outbound_notification_call()
         "if ($DryRun) {",
         "Write-Host \"[DryRun] $Intent\"",
         "return",
+        "Get-DingTalkSignedWebhookUrl",
+        "[System.Security.Cryptography.HMACSHA256]::new",
+        "timestamp=",
+        "sign=",
         "Invoke-RestMethod -Method Post -Uri $WebhookUrl",
     ]
 

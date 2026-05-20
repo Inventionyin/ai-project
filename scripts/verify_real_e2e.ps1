@@ -38,6 +38,32 @@ if ($Help) {
     exit 0
 }
 
+function Get-DingTalkSignedWebhookUrl {
+    param(
+        [string]$WebhookUrl,
+        [string]$Secret
+    )
+
+    if ([string]::IsNullOrWhiteSpace($WebhookUrl) -or [string]::IsNullOrWhiteSpace($Secret)) {
+        return $WebhookUrl
+    }
+
+    $timestamp = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    $stringToSign = "$timestamp`n$Secret"
+    $secretBytes = [System.Text.Encoding]::UTF8.GetBytes($Secret)
+    $signBytes = [System.Text.Encoding]::UTF8.GetBytes($stringToSign)
+    $hmac = [System.Security.Cryptography.HMACSHA256]::new($secretBytes)
+    try {
+        $signature = [Convert]::ToBase64String($hmac.ComputeHash($signBytes))
+    }
+    finally {
+        $hmac.Dispose()
+    }
+    $encodedSignature = [System.Net.WebUtility]::UrlEncode($signature)
+    $separator = if ($WebhookUrl.Contains("?")) { "&" } else { "?" }
+    return "$WebhookUrl${separator}timestamp=$timestamp&sign=$encodedSignature"
+}
+
 function Send-DingTalkSummary {
     param(
         [string]$WebhookUrl,
@@ -51,10 +77,11 @@ function Send-DingTalkSummary {
         return
     }
 
+    $WebhookUrl = Get-DingTalkSignedWebhookUrl -WebhookUrl $WebhookUrl -Secret $Secret
     $stepText = if ($Steps.Count -gt 0) { ($Steps -join ", ") } else { "none" }
     $text = "[WeiTesting Verify][$Status] $Message`nSteps: $stepText`nHost: $env:COMPUTERNAME"
     if (-not [string]::IsNullOrWhiteSpace($Secret)) {
-        $text += "`nWebhookSecretConfigured: true"
+        $text += "`nDingTalk signature enabled: true"
     }
 
     $payload = @{
