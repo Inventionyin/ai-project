@@ -47,6 +47,9 @@ jobs:
       TEST_DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/ai_test_platform_e2e
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/ai_test_platform_e2e
       PYTHONPATH: .
+      WEITESTING_GITHUB_TOKEN: ${{ github.token }}
+      WEITESTING_GITHUB_REPOSITORY: ${{ github.repository }}
+      WEITESTING_GITHUB_WORKFLOW_FILE: .github/workflows/real-e2e.yml
 
     steps:
       - name: Checkout

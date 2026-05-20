@@ -38,15 +38,16 @@ Use **Secrets** for sensitive values:
 
 - `DINGTALK_WEBHOOK_URL`
 - `DINGTALK_WEBHOOK_SECRET` if the DingTalk robot uses signature verification
-- `GITHUB_TOKEN` when testing GitHub REST integration with a PAT
+- `WEITESTING_GITHUB_TOKEN` only when testing GitHub REST integration outside GitHub Actions with a PAT
 - `JENKINS_API_TOKEN`
 - `JIRA_TOKEN`
 - `ZENTAO_TOKEN`
 
 Use **Variables** for non-sensitive values:
 
-- `GITHUB_REPOSITORY=Inventionyin/ai-project`
-- `GITHUB_WORKFLOW_FILE=.github/workflows/real-e2e.yml`
+- Do not create `GITHUB_*` variables in GitHub repository settings. GitHub reserves that prefix.
+- GitHub Actions injects `WEITESTING_GITHUB_REPOSITORY`, `WEITESTING_GITHUB_WORKFLOW_FILE`, and `WEITESTING_GITHUB_TOKEN` automatically for this workflow.
+- For local diagnostics only, set `WEITESTING_GITHUB_REPOSITORY=Inventionyin/ai-project` and `WEITESTING_GITHUB_WORKFLOW_FILE=.github/workflows/real-e2e.yml`.
 - `JENKINS_BASE_URL`
 - `JENKINS_JOB_NAME`
 - `JENKINS_USERNAME`
