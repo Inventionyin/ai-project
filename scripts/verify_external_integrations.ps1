@@ -73,27 +73,27 @@ function Get-RedactedMessage {
 function Get-ZentaoToken {
     param([string]$BaseUrl)
 
+    $account = [Environment]::GetEnvironmentVariable("ZENTAO_ACCOUNT")
+    $password = [Environment]::GetEnvironmentVariable("ZENTAO_PASSWORD")
+    if (-not [string]::IsNullOrWhiteSpace($account) -and -not [string]::IsNullOrWhiteSpace($password)) {
+        $payload = @{
+            account = $account
+            password = $password
+        } | ConvertTo-Json -Depth 4
+        $response = Invoke-RestMethod -Method Post -Uri "$BaseUrl/api.php/v1/tokens" -ContentType "application/json" -Body $payload -TimeoutSec 10
+        if ([string]::IsNullOrWhiteSpace([string]$response.token)) {
+            throw "Zentao token endpoint returned an empty token."
+        }
+
+        return [string]$response.token
+    }
+
     $token = [Environment]::GetEnvironmentVariable("ZENTAO_TOKEN")
     if (-not [string]::IsNullOrWhiteSpace($token)) {
         return $token
     }
 
-    $account = [Environment]::GetEnvironmentVariable("ZENTAO_ACCOUNT")
-    $password = [Environment]::GetEnvironmentVariable("ZENTAO_PASSWORD")
-    if ([string]::IsNullOrWhiteSpace($account) -or [string]::IsNullOrWhiteSpace($password)) {
-        throw "Zentao token is missing and ZENTAO_ACCOUNT/ZENTAO_PASSWORD are incomplete."
-    }
-
-    $payload = @{
-        account = $account
-        password = $password
-    } | ConvertTo-Json -Depth 4
-    $response = Invoke-RestMethod -Method Post -Uri "$BaseUrl/api.php/v1/tokens" -ContentType "application/json" -Body $payload -TimeoutSec 10
-    if ([string]::IsNullOrWhiteSpace([string]$response.token)) {
-        throw "Zentao token endpoint returned an empty token."
-    }
-
-    return [string]$response.token
+    throw "Zentao token is missing and ZENTAO_ACCOUNT/ZENTAO_PASSWORD are incomplete."
 }
 
 function Get-EnvValue {

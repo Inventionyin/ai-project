@@ -2,6 +2,8 @@ import os
 import shutil
 from pathlib import Path
 import subprocess
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
 _INTEGRATION_ENV_NAMES = [
@@ -195,3 +197,73 @@ def test_verify_external_integrations_supports_dynamic_zentao_token():
 
     missing = [token for token in required_tokens if token not in content]
     assert not missing, f"Missing expected Zentao dynamic token tokens: {missing}"
+
+
+def test_verify_external_integrations_prefers_dynamic_zentao_token_when_credentials_exist():
+    repo_root = Path(__file__).resolve().parents[2]
+    script = repo_root / "scripts" / "verify_external_integrations.ps1"
+    calls: list[tuple[str, str | None]] = []
+
+    class ZentaoHandler(BaseHTTPRequestHandler):
+        def do_POST(self):  # noqa: N802
+            calls.append(("POST", self.path))
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"token":"fresh-token"}')
+
+        def do_GET(self):  # noqa: N802
+            calls.append(("GET", self.headers.get("token")))
+            if self.headers.get("token") == "fresh-token":
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"id":1}')
+                return
+            self.send_response(401)
+            self.end_headers()
+
+        def log_message(self, format, *args):  # noqa: A002
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), ZentaoHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        env = _clean_env()
+        env.update(
+            {
+                "ZENTAO_BASE_URL": f"http://127.0.0.1:{server.server_port}",
+                "ZENTAO_PRODUCT": "1",
+                "ZENTAO_TOKEN": "expired-token",
+                "ZENTAO_ACCOUNT": "account",
+                "ZENTAO_PASSWORD": "password",
+            }
+        )
+        result = subprocess.run(
+            [
+                _powershell_executable(),
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(script),
+                "-Targets",
+                "Zentao",
+                "-EnableSmoke",
+                "-FailOnSmokeError",
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=env,
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    output = f"{result.stdout}\n{result.stderr}"
+    assert result.returncode == 0, output
+    assert "[SMOKE] Zentao product API reachable." in output
+    assert ("POST", "/api.php/v1/tokens") in calls
+    assert ("GET", "fresh-token") in calls
