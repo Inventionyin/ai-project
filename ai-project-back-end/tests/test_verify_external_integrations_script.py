@@ -103,6 +103,26 @@ def test_verify_external_integrations_dry_run_shows_missing():
     assert "No external API calls were made." in output
 
 
+def test_verify_external_integrations_supports_business_closure_guardrails():
+    repo_root = Path(__file__).resolve().parents[2]
+    script = repo_root / "scripts" / "verify_external_integrations.ps1"
+    content = script.read_text(encoding="utf-8")
+
+    required_tokens = [
+        "[switch]$EnableBusinessClosure",
+        "Invoke-BusinessClosureChecks",
+        "WEITESTING_BUSINESS_CLOSURE_PREFIX",
+        "[BUSINESS] Jira issue created",
+        "[BUSINESS] Jenkins build trigger accepted",
+        "[BUSINESS] Zentao bug created",
+        "Business closure checks failed",
+        "Business closure is disabled by default",
+    ]
+
+    missing = [token for token in required_tokens if token not in content]
+    assert not missing, f"Missing expected business closure tokens: {missing}"
+
+
 def test_verify_external_integrations_uses_non_reserved_github_env_aliases():
     repo_root = Path(__file__).resolve().parents[2]
     script = repo_root / "scripts" / "verify_external_integrations.ps1"

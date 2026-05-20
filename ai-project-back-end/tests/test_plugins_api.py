@@ -161,7 +161,8 @@ def test_invoke_plugin_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     assert resp.status_code == 200
     data = resp.json()
     assert data["code"] == 0
-    assert set(data["data"].keys()) == {"installationId", "pluginId", "pluginSlug", "status", "sandboxPolicy"}
+    assert {"installationId", "pluginId", "pluginSlug", "status", "sandboxPolicy"}.issubset(set(data["data"].keys()))
+    assert {"executionId", "exitCode", "durationMs", "timedOut", "output", "error"}.issubset(set(data["data"].keys()))
     assert data["data"]["status"] == "accepted"
     assert data["data"]["pluginSlug"] == "jmeter"
 
@@ -375,6 +376,48 @@ async def test_invoke_plugin_installation_allows_ready_callable() -> None:
     assert result.sandboxPolicy.networkMode == "OFF"
     assert session.audit_rows
     assert session.audit_rows[0].detail_json["sandbox_policy"]["networkMode"] == "OFF"
+
+
+@pytest.mark.anyio
+async def test_invoke_plugin_installation_records_sandbox_execution(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.services import plugin as plugin_service
+    from app.services.plugin import invoke_plugin_installation
+    from app.services.plugin_sandbox import PluginSandboxResult
+
+    async def _fake_sandbox(*, plugin_slug, entry_point, payload, sandbox_policy):
+        return PluginSandboxResult(
+            execution_id="exec_123",
+            status="completed",
+            exit_code=0,
+            duration_ms=12,
+            timed_out=False,
+            output={"ok": True},
+            error=None,
+            sandbox_dir=None,
+        )
+
+    monkeypatch.setattr(plugin_service, "run_plugin_sandbox", _fake_sandbox)
+    user = CurrentUser(
+        id=uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+        tenant_id=uuid.UUID("11111111-1111-1111-1111-111111111111"),
+        roles=frozenset({"ADMIN"}),
+    )
+    installation, plugin = _plugin_installation_pair()
+    plugin.entry_point = "builtin.echo"
+    session = _InvokeSession(installation, (installation, plugin))
+
+    result = await invoke_plugin_installation(
+        session,
+        user=user,
+        project_id=installation.project_id,
+        installation_id=installation.id,
+        payload={"ping": "pong"},
+    )
+
+    assert result.status == "completed"
+    assert result.executionId == "exec_123"
+    assert result.durationMs == 12
+    assert session.audit_rows[0].detail_json["execution"]["status"] == "completed"
 
 
 @pytest.mark.anyio

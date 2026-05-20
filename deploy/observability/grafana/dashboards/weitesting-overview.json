@@ -1,0 +1,32 @@
+{
+  "title": "WeiTesting Overview",
+  "schemaVersion": 40,
+  "version": 1,
+  "refresh": "15s",
+  "panels": [
+    {
+      "type": "stat",
+      "title": "API Requests",
+      "gridPos": { "x": 0, "y": 0, "w": 8, "h": 4 },
+      "targets": [
+        { "expr": "sum(rate(weitesting_http_requests_total[5m]))", "legendFormat": "rps" }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Process Uptime",
+      "gridPos": { "x": 8, "y": 0, "w": 8, "h": 4 },
+      "targets": [
+        { "expr": "weitesting_process_uptime_seconds", "legendFormat": "seconds" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "HTTP Requests By Route",
+      "gridPos": { "x": 0, "y": 4, "w": 24, "h": 8 },
+      "targets": [
+        { "expr": "sum by (route, status_class) (rate(weitesting_http_requests_total[5m]))", "legendFormat": "{{route}} {{status_class}}" }
+      ]
+    }
+  ]
+}

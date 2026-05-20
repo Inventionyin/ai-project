@@ -85,6 +85,12 @@ class PluginInvokeResponse(BaseSchema):
     pluginSlug: str
     status: str
     sandboxPolicy: SandboxPolicy
+    executionId: str | None = None
+    exitCode: int | None = None
+    durationMs: int | None = None
+    timedOut: bool = False
+    output: dict | None = None
+    error: str | None = None
 
 
 class PluginInvokeRequest(BaseSchema):
