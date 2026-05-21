@@ -84,6 +84,7 @@ Minimum production settings:
 - Run `deploy/jenkins/backup_jenkins.sh` daily from cron.
 - Keep Jenkins and Grafana behind strong login or Cloudflare Access before inviting external users.
 - Rotate external tokens that were shared during setup before treating this environment as production.
+- Run `deploy/jenkins/restore_drill_jenkins.sh` regularly to prove backups can be extracted.
 
 ## Performance Baseline
 
@@ -97,3 +98,19 @@ The baseline script now measures `/health`, frontend root, configurable API busi
   -TrendPath ".\artifacts\performance-baseline\trend-summary.json" `
   -FailOnWarn
 ```
+
+On Linux servers, `scripts/run_performance_baseline.sh` provides the same trend report without requiring PowerShell.
+
+## Operations Cron
+
+Install recurring operations reports on Ubuntu:
+
+```bash
+sudo REPO_DIR=/opt/weitesting/current \
+  LOG_DIR=/var/log/weitesting \
+  ARTIFACT_DIR=/opt/weitesting/artifacts \
+  USER_NAME=ubuntu \
+  bash deploy/ops/install_ops_cron.sh
+```
+
+This creates `/etc/cron.d/weitesting-ops` with daily performance baseline, production readiness, and Jenkins restore drill jobs.

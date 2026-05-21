@@ -11,6 +11,7 @@ def test_real_e2e_workflow_contains_required_ci_entrypoints():
         "./scripts/verify_real_e2e.ps1",
         "Run performance baseline dry-run",
         "./scripts/run_performance_baseline.ps1 -DryRun",
+        "bash ./scripts/run_performance_baseline.sh --dry-run",
         "Run production readiness dry-run",
         "./scripts/verify_production_readiness.ps1 -DryRun",
         "bash ./scripts/verify_production_readiness.sh --dry-run",
