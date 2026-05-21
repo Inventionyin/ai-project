@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from fastapi import Header, HTTPException, Request
 
+from app.core.config import get_settings
 from app.core.security import decode_access_token
 
 
@@ -36,6 +37,10 @@ async def get_current_user(
         if len(parts) == 2 and parts[0].lower() == "bearer" and parts[1].strip():
             payload = decode_access_token(parts[1].strip())
             return CurrentUser(id=payload.user_id, tenant_id=payload.tenant_id, roles=payload.roles)
+
+    settings = get_settings()
+    if not settings.auth_header_impersonation_enabled:
+        raise HTTPException(status_code=401, detail="Not authenticated")
 
     if not x_user_id or not x_tenant_id:
         raise HTTPException(status_code=401, detail="Not authenticated")

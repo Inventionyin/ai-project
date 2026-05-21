@@ -3,6 +3,9 @@ docker-data/
 .env
 *.log
 backend-*.log
+*.tar
+*.tar.gz
+*.zip
 node_modules/
 dist/
 .DS_Store

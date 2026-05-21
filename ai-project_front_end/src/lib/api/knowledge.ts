@@ -75,7 +75,7 @@ export async function evaluateKnowledgeRecommendations(projectId: string, target
   const normalizedTargetType = requireId(targetType, '目标类型不能为空').toUpperCase()
   const normalizedTargetId = requireId(targetId, '目标 ID 不能为空')
   const normalizedTopK = Math.max(1, Math.min(100, Number(topK || 5)))
-  return requestJson<KnowledgeRecommendationEvaluateResult>(`/projects/${encodeURIComponent(pid)}/knowledge/recommendations/evaluate`, {
+  return requestJson<KnowledgeRecommendationEvaluateResult>(`/api/projects/${encodeURIComponent(pid)}/knowledge/recommendations/evaluate`, {
     method: 'POST',
     headers: { ...authHeader(), 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -94,7 +94,7 @@ export async function updateKnowledgeRecommendationStatus(
   const pid = requireId(projectId, '项目 ID 不能为空')
   const rid = requireId(recommendationId, '推荐 ID 不能为空')
   const normalizedStatus = requireId(status, '推荐状态不能为空').toUpperCase()
-  return requestJson<KnowledgeRecommendation>(`/projects/${encodeURIComponent(pid)}/knowledge/recommendations/${encodeURIComponent(rid)}/status`, {
+  return requestJson<KnowledgeRecommendation>(`/api/projects/${encodeURIComponent(pid)}/knowledge/recommendations/${encodeURIComponent(rid)}/status`, {
     method: 'PUT',
     headers: { ...authHeader(), 'Content-Type': 'application/json' },
     body: JSON.stringify({ status: normalizedStatus })
@@ -104,7 +104,7 @@ export async function updateKnowledgeRecommendationStatus(
 export async function createRunRetrospectiveDraft(projectId: string, runId: string) {
   const pid = requireId(projectId, '项目 ID 不能为空')
   const rid = requireId(runId, '运行 ID 不能为空')
-  return requestJson<KnowledgeRetrospective>(`/projects/${encodeURIComponent(pid)}/knowledge/retrospectives/draft-from-run`, {
+  return requestJson<KnowledgeRetrospective>(`/api/projects/${encodeURIComponent(pid)}/knowledge/retrospectives/draft-from-run`, {
     method: 'POST',
     headers: { ...authHeader(), 'Content-Type': 'application/json' },
     body: JSON.stringify({ runId: rid })
@@ -133,7 +133,7 @@ export async function fetchKnowledgeRetrospectives(projectId: string, query: Kno
   if (query.sourceType) params.set('sourceType', String(query.sourceType).toUpperCase())
   if (query.status) params.set('status', String(query.status).toUpperCase())
   const data = await requestJson<KnowledgeRetrospective[] | KnowledgeRetrospectiveListResult>(
-    `/projects/${encodeURIComponent(pid)}/knowledge/retrospectives?${params.toString()}`,
+    `/api/projects/${encodeURIComponent(pid)}/knowledge/retrospectives?${params.toString()}`,
     { method: 'GET', headers: authHeader() }
   )
   return normalizeList(data, page, pageSize)
@@ -141,7 +141,7 @@ export async function fetchKnowledgeRetrospectives(projectId: string, query: Kno
 
 export async function createKnowledgeRetrospective(projectId: string, payload: KnowledgeRetrospectiveCreatePayload) {
   const pid = requireId(projectId, '项目 ID 不能为空')
-  return requestJson<KnowledgeRetrospective>(`/projects/${encodeURIComponent(pid)}/knowledge/retrospectives`, {
+  return requestJson<KnowledgeRetrospective>(`/api/projects/${encodeURIComponent(pid)}/knowledge/retrospectives`, {
     method: 'POST',
     headers: { ...authHeader(), 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -155,7 +155,7 @@ export async function fetchKnowledgeRetrospectiveDetail(projectId: string, retro
   const pid = requireId(projectId, '项目 ID 不能为空')
   const rid = requireId(retrospectiveId, '复盘 ID 不能为空')
   return requestJson<KnowledgeRetrospective>(
-    `/projects/${encodeURIComponent(pid)}/knowledge/retrospectives/${encodeURIComponent(rid)}`,
+    `/api/projects/${encodeURIComponent(pid)}/knowledge/retrospectives/${encodeURIComponent(rid)}`,
     { method: 'GET', headers: authHeader() }
   )
 }
@@ -164,7 +164,7 @@ export async function updateKnowledgeRetrospective(projectId: string, retrospect
   const pid = requireId(projectId, '项目 ID 不能为空')
   const rid = requireId(retrospectiveId, '复盘 ID 不能为空')
   return requestJson<KnowledgeRetrospective>(
-    `/projects/${encodeURIComponent(pid)}/knowledge/retrospectives/${encodeURIComponent(rid)}`,
+    `/api/projects/${encodeURIComponent(pid)}/knowledge/retrospectives/${encodeURIComponent(rid)}`,
     {
       method: 'PUT',
       headers: { ...authHeader(), 'Content-Type': 'application/json' },
@@ -179,7 +179,7 @@ export async function updateKnowledgeRetrospective(projectId: string, retrospect
 export async function fetchKnowledgeTemplates(projectId: string) {
   const pid = String(projectId || '').trim()
   if (!pid) return []
-  return requestJson<any[]>(`/projects/${encodeURIComponent(pid)}/knowledge/templates`, {
+  return requestJson<any[]>(`/api/projects/${encodeURIComponent(pid)}/knowledge/templates`, {
     method: 'GET',
     headers: authHeader(),
   })
@@ -187,7 +187,7 @@ export async function fetchKnowledgeTemplates(projectId: string) {
 
 export async function createKnowledgeTemplate(projectId: string, payload: { name: string; content: string; category?: string }) {
   const pid = requireId(projectId, '项目 ID 不能为空')
-  return requestJson<any>(`/projects/${encodeURIComponent(pid)}/knowledge/templates`, {
+  return requestJson<any>(`/api/projects/${encodeURIComponent(pid)}/knowledge/templates`, {
     method: 'POST',
     headers: { ...authHeader(), 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -197,7 +197,7 @@ export async function createKnowledgeTemplate(projectId: string, payload: { name
 export async function fetchKnowledgeRules(projectId: string) {
   const pid = String(projectId || '').trim()
   if (!pid) return []
-  return requestJson<any[]>(`/projects/${encodeURIComponent(pid)}/knowledge/rules`, {
+  return requestJson<any[]>(`/api/projects/${encodeURIComponent(pid)}/knowledge/rules`, {
     method: 'GET',
     headers: authHeader(),
   })

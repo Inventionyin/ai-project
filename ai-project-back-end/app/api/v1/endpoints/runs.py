@@ -13,6 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, get_current_user, get_request_id, to_unix_ts
+from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.security import decode_access_token
 from app.models.enums import ArtifactType, CaseRunStatus, RunStatus
@@ -713,7 +714,7 @@ async def get_allure_report_(
         if len(parts) == 2 and parts[0].lower() == "bearer" and parts[1].strip():
             payload = decode_access_token(parts[1].strip())
             user = CurrentUser(id=payload.user_id, tenant_id=payload.tenant_id, roles=payload.roles)
-    elif x_user_id and x_tenant_id:
+    elif x_user_id and x_tenant_id and get_settings().auth_header_impersonation_enabled:
         user = CurrentUser(
             id=uuid.UUID(x_user_id),
             tenant_id=uuid.UUID(x_tenant_id),

@@ -570,7 +570,7 @@ const toggleRegisterConfirmPassword = () => {
 
     <!-- Footer -->
     <div class="text-center">
-      <p class="text-xs text-[#45556C]">© 2024 WeiTesting · 企业内部测试工具</p>
+      <p class="text-xs text-[#45556C]">© {{ new Date().getFullYear() }} WeiTesting · 企业内部测试工具</p>
     </div>
   </div>
 </template>

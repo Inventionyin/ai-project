@@ -162,7 +162,7 @@ export async function fetchRequirementDocs(projectId: string, query: Requirement
   if (query.status) params.set('status', String(query.status).toUpperCase())
   if (query.q) params.set('q', String(query.q))
   const data = await requestJson<RequirementDoc[] | RequirementDocListResult>(
-    `/projects/${encodeURIComponent(pid)}/requirements/docs?${params.toString()}`,
+    `/api/projects/${encodeURIComponent(pid)}/requirements/docs?${params.toString()}`,
     { method: 'GET', headers: authHeader() }
   )
   return normalizeDocList(data, page, pageSize)
@@ -171,7 +171,7 @@ export async function fetchRequirementDocs(projectId: string, query: Requirement
 export async function createRequirementDoc(projectId: string, payload: RequirementDocUpsertPayload) {
   const pid = String(projectId || '').trim()
   if (!pid) throw new Error('项目 ID 不能为空')
-  return requestJson<RequirementDoc>(`/projects/${encodeURIComponent(pid)}/requirements/docs`, {
+  return requestJson<RequirementDoc>(`/api/projects/${encodeURIComponent(pid)}/requirements/docs`, {
     method: 'POST',
     headers: { ...authHeader(), 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -187,7 +187,7 @@ export async function fetchRequirementDoc(projectId: string, docId: string) {
   const did = String(docId || '').trim()
   if (!pid) throw new Error('项目 ID 不能为空')
   if (!did) throw new Error('文档 ID 不能为空')
-  return requestJson<RequirementDoc>(`/projects/${encodeURIComponent(pid)}/requirements/docs/${encodeURIComponent(did)}`, {
+  return requestJson<RequirementDoc>(`/api/projects/${encodeURIComponent(pid)}/requirements/docs/${encodeURIComponent(did)}`, {
     method: 'GET',
     headers: authHeader()
   })
@@ -198,7 +198,7 @@ export async function updateRequirementDoc(projectId: string, docId: string, pay
   const did = String(docId || '').trim()
   if (!pid) throw new Error('项目 ID 不能为空')
   if (!did) throw new Error('文档 ID 不能为空')
-  return requestJson<RequirementDoc>(`/projects/${encodeURIComponent(pid)}/requirements/docs/${encodeURIComponent(did)}`, {
+  return requestJson<RequirementDoc>(`/api/projects/${encodeURIComponent(pid)}/requirements/docs/${encodeURIComponent(did)}`, {
     method: 'PUT',
     headers: { ...authHeader(), 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -214,7 +214,7 @@ export async function deleteRequirementDoc(projectId: string, docId: string) {
   const did = String(docId || '').trim()
   if (!pid) throw new Error('项目 ID 不能为空')
   if (!did) throw new Error('文档 ID 不能为空')
-  return requestJson<Record<string, never>>(`/projects/${encodeURIComponent(pid)}/requirements/docs/${encodeURIComponent(did)}`, {
+  return requestJson<Record<string, never>>(`/api/projects/${encodeURIComponent(pid)}/requirements/docs/${encodeURIComponent(did)}`, {
     method: 'DELETE',
     headers: authHeader()
   })
@@ -226,7 +226,7 @@ export async function fetchRequirementDocVersions(projectId: string, docId: stri
   if (!pid) throw new Error('项目 ID 不能为空')
   if (!did) throw new Error('文档 ID 不能为空')
   const data = await requestJson<RequirementDocVersion[] | { items?: RequirementDocVersion[] }>(
-    `/projects/${encodeURIComponent(pid)}/requirements/docs/${encodeURIComponent(did)}/versions`,
+    `/api/projects/${encodeURIComponent(pid)}/requirements/docs/${encodeURIComponent(did)}/versions`,
     { method: 'GET', headers: authHeader() }
   )
   if (Array.isArray(data)) return data
@@ -246,7 +246,7 @@ export async function uploadRequirementDocVersion(
   form.append('file', payload.file)
   form.append('changeSummary', String(payload.changeSummary || ''))
   form.append('effectiveScope', String(payload.effectiveScope || ''))
-  return requestJson<RequirementDocVersion>(`/projects/${encodeURIComponent(pid)}/requirements/docs/${encodeURIComponent(did)}/versions`, {
+  return requestJson<RequirementDocVersion>(`/api/projects/${encodeURIComponent(pid)}/requirements/docs/${encodeURIComponent(did)}/versions`, {
     method: 'POST',
     headers: authHeader(),
     body: form
@@ -263,7 +263,7 @@ export async function importRequirementDocVersionFromUrl(
   if (!pid) throw new Error('项目 ID 不能为空')
   if (!did) throw new Error('文档 ID 不能为空')
   return requestJson<{ id: string; version: number }>(
-    `/projects/${encodeURIComponent(pid)}/requirements/docs/${encodeURIComponent(did)}/versions/import-url`,
+    `/api/projects/${encodeURIComponent(pid)}/requirements/docs/${encodeURIComponent(did)}/versions/import-url`,
     {
       method: 'POST',
       headers: { ...authHeader(), 'Content-Type': 'application/json' },
@@ -280,7 +280,7 @@ export async function parseRequirementDocVersion(projectId: string, docId: strin
   if (!did) throw new Error('文档 ID 不能为空')
   if (!vid) throw new Error('版本 ID 不能为空')
   return requestJson<Record<string, unknown>>(
-    `/projects/${encodeURIComponent(pid)}/requirements/docs/${encodeURIComponent(did)}/versions/${encodeURIComponent(vid)}/parse`,
+    `/api/projects/${encodeURIComponent(pid)}/requirements/docs/${encodeURIComponent(did)}/versions/${encodeURIComponent(vid)}/parse`,
     { method: 'POST', headers: authHeader() }
   )
 }
@@ -293,7 +293,7 @@ export async function fetchRequirementDocParsedText(projectId: string, docId: st
   if (!did) throw new Error('文档 ID 不能为空')
   if (!vid) throw new Error('版本 ID 不能为空')
   const data = await requestJson<string | { parsedText?: string; text?: string }>(
-    `/projects/${encodeURIComponent(pid)}/requirements/docs/${encodeURIComponent(did)}/versions/${encodeURIComponent(vid)}/parsed-text`,
+    `/api/projects/${encodeURIComponent(pid)}/requirements/docs/${encodeURIComponent(did)}/versions/${encodeURIComponent(vid)}/parsed-text`,
     { method: 'GET', headers: authHeader() }
   )
   if (typeof data === 'string') return data
@@ -308,7 +308,7 @@ export async function generateRequirementAnalysis(projectId: string, docId: stri
   if (!did) throw new Error('文档 ID 不能为空')
   if (!vid) throw new Error('版本 ID 不能为空')
   return requestJson<RequirementAnalysis>(
-    `/projects/${encodeURIComponent(pid)}/requirements/docs/${encodeURIComponent(did)}/versions/${encodeURIComponent(vid)}/analyze`,
+    `/api/projects/${encodeURIComponent(pid)}/requirements/docs/${encodeURIComponent(did)}/versions/${encodeURIComponent(vid)}/analyze`,
     {
       method: 'POST',
       headers: { ...authHeader(), 'Content-Type': 'application/json' },
@@ -324,7 +324,7 @@ export async function fetchRequirementAnalyses(projectId: string, query: { docId
   if (query.docId) params.set('docId', query.docId)
   if (query.versionId) params.set('versionId', query.versionId)
   const suffix = params.toString() ? `?${params.toString()}` : ''
-  return requestJson<RequirementAnalysis[]>(`/projects/${encodeURIComponent(pid)}/requirements/analyses${suffix}`, {
+  return requestJson<RequirementAnalysis[]>(`/api/projects/${encodeURIComponent(pid)}/requirements/analyses${suffix}`, {
     method: 'GET',
     headers: authHeader()
   })
@@ -335,7 +335,7 @@ export async function fetchRequirementAnalysis(projectId: string, analysisId: st
   const aid = String(analysisId || '').trim()
   if (!pid) throw new Error('项目 ID 不能为空')
   if (!aid) throw new Error('分析 ID 不能为空')
-  return requestJson<RequirementAnalysis>(`/projects/${encodeURIComponent(pid)}/requirements/analyses/${encodeURIComponent(aid)}`, {
+  return requestJson<RequirementAnalysis>(`/api/projects/${encodeURIComponent(pid)}/requirements/analyses/${encodeURIComponent(aid)}`, {
     method: 'GET',
     headers: authHeader()
   })
@@ -346,7 +346,7 @@ export async function updateRequirementAnalysis(projectId: string, analysisId: s
   const aid = String(analysisId || '').trim()
   if (!pid) throw new Error('项目 ID 不能为空')
   if (!aid) throw new Error('分析 ID 不能为空')
-  return requestJson<RequirementAnalysis>(`/projects/${encodeURIComponent(pid)}/requirements/analyses/${encodeURIComponent(aid)}`, {
+  return requestJson<RequirementAnalysis>(`/api/projects/${encodeURIComponent(pid)}/requirements/analyses/${encodeURIComponent(aid)}`, {
     method: 'PUT',
     headers: { ...authHeader(), 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
@@ -359,7 +359,7 @@ export async function fetchRequirementAnalysisRevisions(projectId: string, analy
   if (!pid) throw new Error('项目 ID 不能为空')
   if (!aid) throw new Error('分析 ID 不能为空')
   return requestJson<RequirementAnalysisRevision[]>(
-    `/projects/${encodeURIComponent(pid)}/requirements/analyses/${encodeURIComponent(aid)}/revisions`,
+    `/api/projects/${encodeURIComponent(pid)}/requirements/analyses/${encodeURIComponent(aid)}/revisions`,
     {
       method: 'GET',
       headers: authHeader()
@@ -374,7 +374,7 @@ export async function rollbackRequirementAnalysisRevision(projectId: string, ana
   if (!pid) throw new Error('项目 ID 不能为空')
   if (!aid) throw new Error('分析 ID 不能为空')
   if (!rid) throw new Error('修订 ID 不能为空')
-  return requestJson<RequirementAnalysis>(`/projects/${encodeURIComponent(pid)}/requirements/analyses/${encodeURIComponent(aid)}/rollback`, {
+  return requestJson<RequirementAnalysis>(`/api/projects/${encodeURIComponent(pid)}/requirements/analyses/${encodeURIComponent(aid)}/rollback`, {
     method: 'POST',
     headers: { ...authHeader(), 'Content-Type': 'application/json' },
     body: JSON.stringify({ revisionId: rid })
@@ -393,7 +393,7 @@ export async function rollbackRequirementDocVersion(
   if (!did) throw new Error('文档 ID 不能为空')
   if (!vid) throw new Error('版本 ID 不能为空')
   return requestJson<{ id: string; currentVersionId: string }>(
-    `/projects/${encodeURIComponent(pid)}/requirements/docs/${encodeURIComponent(did)}/rollback`,
+    `/api/projects/${encodeURIComponent(pid)}/requirements/docs/${encodeURIComponent(did)}/rollback`,
     {
       method: 'POST',
       headers: { ...authHeader(), 'Content-Type': 'application/json' },
@@ -481,7 +481,7 @@ export async function syncRequirementTestPoints(projectId: string, analysisId: s
   if (!pid) throw new Error('项目 ID 不能为空')
   if (!aid) throw new Error('分析 ID 不能为空')
   const data = await requestJson<RequirementTestPoint[] | { items?: RequirementTestPoint[] }>(
-    `/projects/${encodeURIComponent(pid)}/requirements/analyses/${encodeURIComponent(aid)}/sync-test-points`,
+    `/api/projects/${encodeURIComponent(pid)}/requirements/analyses/${encodeURIComponent(aid)}/sync-test-points`,
     { method: 'POST', headers: authHeader() }
   )
   const rows = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : []
@@ -494,7 +494,7 @@ export async function fetchRequirementTestPoints(projectId: string, analysisId: 
   if (!pid) throw new Error('项目 ID 不能为空')
   if (!aid) throw new Error('分析 ID 不能为空')
   const data = await requestJson<RequirementTestPoint[] | { items?: RequirementTestPoint[] }>(
-    `/projects/${encodeURIComponent(pid)}/requirements/analyses/${encodeURIComponent(aid)}/test-points`,
+    `/api/projects/${encodeURIComponent(pid)}/requirements/analyses/${encodeURIComponent(aid)}/test-points`,
     { method: 'GET', headers: authHeader() }
   )
   const rows = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : []
@@ -507,7 +507,7 @@ export async function updateRequirementTestPoint(projectId: string, testPointId:
   if (!pid) throw new Error('项目 ID 不能为空')
   if (!tid) throw new Error('测试点 ID 不能为空')
   const data = await requestJson<RequirementTestPoint>(
-    `/projects/${encodeURIComponent(pid)}/requirements/test-points/${encodeURIComponent(tid)}`,
+    `/api/projects/${encodeURIComponent(pid)}/requirements/test-points/${encodeURIComponent(tid)}`,
     {
       method: 'PUT',
       headers: { ...authHeader(), 'Content-Type': 'application/json' },
@@ -523,7 +523,7 @@ export async function generateRequirementCaseDrafts(projectId: string, analysisI
   if (!pid) throw new Error('项目 ID 不能为空')
   if (!aid) throw new Error('分析 ID 不能为空')
   const data = await requestJson<GeneratedCaseDraft[] | { items?: GeneratedCaseDraft[] }>(
-    `/projects/${encodeURIComponent(pid)}/requirements/analyses/${encodeURIComponent(aid)}/generate-case-drafts`,
+    `/api/projects/${encodeURIComponent(pid)}/requirements/analyses/${encodeURIComponent(aid)}/generate-case-drafts`,
     {
       method: 'POST',
       headers: { ...authHeader(), 'Content-Type': 'application/json' },
@@ -540,7 +540,7 @@ export async function fetchRequirementCaseDrafts(projectId: string, analysisId: 
   if (!pid) throw new Error('项目 ID 不能为空')
   if (!aid) throw new Error('分析 ID 不能为空')
   const data = await requestJson<GeneratedCaseDraft[] | { items?: GeneratedCaseDraft[] }>(
-    `/projects/${encodeURIComponent(pid)}/requirements/analyses/${encodeURIComponent(aid)}/case-drafts`,
+    `/api/projects/${encodeURIComponent(pid)}/requirements/analyses/${encodeURIComponent(aid)}/case-drafts`,
     { method: 'GET', headers: authHeader() }
   )
   const rows = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : []
@@ -553,7 +553,7 @@ export async function fetchRequirementCaseLinks(projectId: string, analysisId: s
   if (!pid) throw new Error('项目 ID 不能为空')
   if (!aid) throw new Error('分析 ID 不能为空')
   const data = await requestJson<RequirementCaseLink[] | { items?: RequirementCaseLink[] }>(
-    `/projects/${encodeURIComponent(pid)}/requirements/analyses/${encodeURIComponent(aid)}/case-links`,
+    `/api/projects/${encodeURIComponent(pid)}/requirements/analyses/${encodeURIComponent(aid)}/case-links`,
     { method: 'GET', headers: authHeader() }
   )
   const rows = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : []
@@ -565,7 +565,7 @@ export async function bulkApproveRequirementCaseDrafts(projectId: string, draftI
   if (!pid) throw new Error('项目 ID 不能为空')
   const ids = (draftIds || []).map((item) => String(item || '').trim()).filter(Boolean)
   if (ids.length === 0) throw new Error('请先选择需要审核入库的草稿')
-  return requestJson<Record<string, unknown>>(`/projects/${encodeURIComponent(pid)}/requirements/case-drafts/bulk-approve`, {
+  return requestJson<Record<string, unknown>>(`/api/projects/${encodeURIComponent(pid)}/requirements/case-drafts/bulk-approve`, {
     method: 'POST',
     headers: { ...authHeader(), 'Content-Type': 'application/json' },
     body: JSON.stringify({ draftIds: ids })

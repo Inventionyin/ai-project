@@ -5,6 +5,7 @@ import AiTestingPlatformShell from '@/components/figma/ai-testing-platform/AiTes
 const Login = defineAsyncComponent(() => import('../views/Login.vue'))
 const Home = defineAsyncComponent(() => import('../views/Home.vue'))
 const Overview = defineAsyncComponent(() => import('../views/dashboard/Overview.vue'))
+const TrialOperation = defineAsyncComponent(() => import('../views/dashboard/TrialOperation.vue'))
 const CasesPanel = defineAsyncComponent(() => import('@/components/figma/ai-testing-platform/CasesPanel.vue'))
 const SuitesPanel = defineAsyncComponent(() => import('@/components/figma/ai-testing-platform/SuitesPanel.vue'))
 const ApiCollectionsPanel = defineAsyncComponent(() => import('@/components/figma/ai-testing-platform/ApiCollectionsPanel.vue'))
@@ -67,6 +68,7 @@ function createProjectShellPage(activeAssetChild: string, Content: Parameters<ty
 }
 
 const ProjectDashboard = createProjectShellPage('', Overview)
+const ProjectTrialOperation = createProjectShellPage('试运行看板', TrialOperation)
 const ProjectTestCases = createProjectShellPage('用例管理', CasesPanel)
 const ProjectTestCaseDetail = createProjectShellPage('用例管理', TestCaseDetailPanel)
 const ProjectSuites = createProjectShellPage('测试套件', SuitesPanel)
@@ -121,6 +123,10 @@ const router = createRouter({
     {
       path: '/projects/:projectId/dashboard',
       component: ProjectDashboard
+    },
+    {
+      path: '/projects/:projectId/trial-operation',
+      component: ProjectTrialOperation
     },
     {
       path: '/projects/:projectId/assets/testcases',

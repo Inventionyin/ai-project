@@ -80,3 +80,17 @@ python -m pytest tests/ -v
 cd ai-project_front_end
 npm run build
 ```
+
+## 验收与生产检查
+
+```powershell
+# 本地一键验证：后端关键回归 + 前端生产构建
+.\scripts\verify-local.ps1
+
+# 生产公开可达性检查
+.\scripts\check-production.ps1
+```
+
+生产备份与恢复演练脚本见 `scripts/backup-production-postgres.sh` 和
+`scripts/verify-production-backup.sh`，完整交付清单见
+`docs/PRODUCTION_ACCEPTANCE_CHECKLIST.md`。

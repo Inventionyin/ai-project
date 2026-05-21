@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     jwt_secret_key: str = Field(default="", validation_alias="JWT_SECRET_KEY")
     jwt_algorithm: str = "HS256"
     jwt_access_token_expires_in: int = 7200
+    auth_header_impersonation_enabled: bool = False
     runner_workspace_root: str = ""
     runner_python_executable: str = "python"
     runner_allure_command: str = "allure"

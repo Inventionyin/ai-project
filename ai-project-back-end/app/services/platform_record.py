@@ -11,7 +11,12 @@ from app.models.audit import AuditLog
 from app.models.enums import ProjectRole
 from app.models.platform_record import AiJobRecord
 from app.models.project import Project, ProjectMember
-from app.schemas.platform_record import AiJobRecordListItem, AuditLogListItem
+from app.schemas.platform_record import (
+    AiJobRecordListItem,
+    AuditLogListItem,
+    TrialOperationImportRecordCreateRequest,
+    TrialOperationImportRecordItem,
+)
 from app.services.security_policy import mask_sensitive_fields
 
 
@@ -164,3 +169,75 @@ async def list_audit_logs(
         for row in rows.all()
     ]
     return total, items
+
+
+def _to_trial_operation_import_record(row: AuditLog) -> TrialOperationImportRecordItem:
+    detail = dict(row.detail_json or {})
+    return TrialOperationImportRecordItem(
+        id=str(row.id),
+        projectId=str(row.project_id) if row.project_id else None,
+        importType=str(detail.get("importType") or "testcases"),
+        fileName=str(detail.get("fileName") or row.resource_id),
+        status=str(detail.get("status") or "SUCCESS"),
+        totalRows=int(detail.get("totalRows") or 0),
+        successRows=int(detail.get("successRows") or 0),
+        failedRows=int(detail.get("failedRows") or 0),
+        summary=row.summary,
+        detail=dict(detail.get("detail") or {}),
+        createdBy=str(row.user_id) if row.user_id else None,
+        createdAt=int(row.created_at.timestamp()),
+    )
+
+
+async def record_trial_operation_import(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+    payload: TrialOperationImportRecordCreateRequest,
+) -> TrialOperationImportRecordItem:
+    project = await _get_project(db, user=user, project_id=project_id)
+    await _require_project_read(db, user=user, project=project)
+    row = await create_audit_log(
+        db,
+        user=user,
+        project_id=project_id,
+        module="trial-operation-import",
+        action="IMPORT_BATCH",
+        resource_type="trial_operation_import",
+        resource_id=payload.fileName,
+        summary=payload.summary,
+        detail={
+            "importType": payload.importType,
+            "fileName": payload.fileName,
+            "status": payload.status,
+            "totalRows": payload.totalRows,
+            "successRows": payload.successRows,
+            "failedRows": payload.failedRows,
+            "detail": payload.detail,
+        },
+    )
+    return _to_trial_operation_import_record(row)
+
+
+async def list_trial_operation_import_records(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+    page: int,
+    page_size: int,
+) -> tuple[int, list[TrialOperationImportRecordItem]]:
+    project = await _get_project(db, user=user, project_id=project_id)
+    await _require_project_read(db, user=user, project=project)
+    base_stmt = select(AuditLog).where(
+        AuditLog.tenant_id == user.tenant_id,
+        AuditLog.project_id == project_id,
+        AuditLog.module == "trial-operation-import",
+        AuditLog.action == "IMPORT_BATCH",
+    )
+    total = int((await db.execute(select(func.count()).select_from(base_stmt.subquery()))).scalar_one() or 0)
+    rows = (
+        await db.execute(base_stmt.order_by(desc(AuditLog.created_at)).offset((page - 1) * page_size).limit(page_size))
+    ).scalars().all()
+    return total, [_to_trial_operation_import_record(row) for row in rows]
