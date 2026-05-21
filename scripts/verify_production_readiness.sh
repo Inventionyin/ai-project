@@ -173,6 +173,7 @@ def test_jenkins_backup(backup_dir: str):
 checks = [
     test_http_endpoint("app-public-url", APP_URL, required_content='<div id="app"></div>'),
     test_http_endpoint("api-health", join_url(API_BASE_URL, "/health"), required_content='"status":"ok"'),
+    test_http_endpoint("api-metrics", join_url(API_BASE_URL, "/metrics"), required_content="weitesting_observability_ready"),
     test_http_endpoint("grafana-health", join_url(GRAFANA_URL, "/api/health"), required_content='"database"'),
     test_http_endpoint("jenkins-login", join_url(JENKINS_URL, "/login"), required_content="Sign in to Jenkins"),
     test_prometheus_targets(PROMETHEUS_URL),
@@ -184,7 +185,7 @@ warn = sum(1 for item in checks if item["status"] == "WARN")
 conclusion = "BLOCKED" if blocked else ("WARN" if warn else "READY")
 recommended_actions = []
 if any(item["name"] == "prometheus-targets" and item["status"] != "READY" for item in checks):
-    recommended_actions.append("Verify Jenkins /prometheus returns 200; install/enable Jenkins Prometheus plugin and grant scrape access if Jenkins metrics are required.")
+    recommended_actions.append("Repo-local /metrics is checked separately; verify Prometheus scrape config for weitesting-backend and Jenkins /prometheus only if external dashboards/alerts are required.")
 if any(item["name"] == "jenkins-backup" and item["status"] != "READY" for item in checks):
     recommended_actions.append("Run deploy/jenkins/backup_jenkins.sh and perform one restore drill before production cutover.")
 recommended_actions.append("Keep Jenkins and Grafana behind strong login or Cloudflare Access before inviting external users.")

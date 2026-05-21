@@ -15,6 +15,14 @@ from app.schemas.integration_issue import IntegrationIssueCreateRequest, Integra
 from app.services.provider_registry import resolve_issue_provider
 
 _SENSITIVE_TOKENS = ("token", "secret", "password", "apikey", "api_key")
+_CONFIG_ERROR_TOKENS = (
+    "missing_base_url",
+    "missing_project_key",
+    "missing_token",
+    "missing_email",
+    "missing_product",
+    "missing_baseurl",
+)
 
 
 def _is_admin(user: CurrentUser) -> bool:
@@ -88,6 +96,8 @@ def _mask_sensitive(detail: str) -> str:
     lowered = detail.lower()
     if any(key in lowered for key in _SENSITIVE_TOKENS):
         return "issue_provider_error: sensitive value redacted"
+    if any(token in lowered for token in _CONFIG_ERROR_TOKENS):
+        return "issue_provider_error: provider config missing or invalid"
     return detail
 
 

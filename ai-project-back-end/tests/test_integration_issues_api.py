@@ -225,3 +225,34 @@ def test_integration_issue_create_redacts_sensitive_provider_error(monkeypatch: 
         asyncio.run(_run())
     assert exc.value.status_code == 400
     assert exc.value.detail == "issue_provider_error: sensitive value redacted"
+
+
+def test_integration_issue_create_redacts_provider_config_details(monkeypatch: pytest.MonkeyPatch) -> None:
+    user = CurrentUser(
+        id=uuid.UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+        tenant_id=uuid.UUID("11111111-1111-1111-1111-111111111111"),
+        roles=frozenset(),
+    )
+
+    def _provider(_provider: str, **kwargs):
+        raise ValueError("jira_missing_base_url")
+
+    monkeypatch.setattr(integration_issue_service, "resolve_issue_provider", lambda _name: _provider)
+    payload = IntegrationIssueCreateRequest(
+        provider="JIRA",
+        runId="33333333-3333-3333-3333-333333333333",
+        title="x",
+    )
+
+    async def _run():
+        return await integration_issue_service.create_issue_link(
+            _CreateIssueDb(),
+            user=user,
+            project_id=uuid.UUID("22222222-2222-2222-2222-222222222222"),
+            payload=payload,
+        )
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(_run())
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "issue_provider_error: provider config missing or invalid"

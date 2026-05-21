@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from fastapi import Header, HTTPException, Request
 
 from app.core.config import get_settings
+from app.core.observability import normalize_request_id
 from app.core.security import decode_access_token
 
 
@@ -21,9 +22,7 @@ def to_unix_ts(dt) -> int:
 
 async def get_request_id(request: Request) -> str:
     request_id = request.headers.get("X-Request-Id") or request.headers.get("X-RequestId")
-    if request_id:
-        return request_id[:64]
-    return f"req_{uuid.uuid4().hex[:16]}"
+    return normalize_request_id(request_id)
 
 
 async def get_current_user(

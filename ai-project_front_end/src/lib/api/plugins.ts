@@ -1,5 +1,13 @@
 import { requestJson, authHeader } from './client'
 
+export interface SandboxPolicy {
+  permissions: string[]
+  timeoutMs: number
+  networkMode: string
+  allowedHosts: string[]
+  maxPayloadBytes: number
+}
+
 export interface Plugin {
   id: string
   name: string
@@ -17,6 +25,9 @@ export interface Plugin {
   downloadCount: number
   createdAt: number
   updatedAt: number
+  sandboxPolicy: SandboxPolicy
+  sandboxPolicyValid: boolean
+  sandboxPolicyError: string | null
 }
 
 export interface PluginInstallation {
@@ -32,6 +43,9 @@ export interface PluginInstallation {
   installedBy: string | null
   createdAt: number
   updatedAt: number
+  sandboxPolicy: SandboxPolicy
+  sandboxPolicyValid: boolean
+  sandboxPolicyError: string | null
 }
 
 export interface PageData<T> {
@@ -117,6 +131,13 @@ export interface PluginInvokeResponse {
   pluginId: string
   pluginSlug: string
   status: string
+  sandboxPolicy: SandboxPolicy
+  executionId: string | null
+  exitCode: number | null
+  durationMs: number | null
+  timedOut: boolean
+  output: Record<string, unknown> | null
+  error: string | null
 }
 
 export interface PluginInvokeRecord {
@@ -129,10 +150,11 @@ export interface PluginInvokeRecord {
   createdAt: number
 }
 
-export async function invokePlugin(projectId: string, installationId: string): Promise<PluginInvokeResponse> {
+export async function invokePlugin(projectId: string, installationId: string, payload?: Record<string, unknown>): Promise<PluginInvokeResponse> {
   return requestJson<PluginInvokeResponse>(`/api/projects/${projectId}/plugins/installations/${installationId}/invoke`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeader() },
+    body: payload === undefined ? undefined : JSON.stringify({ payload }),
   })
 }
 

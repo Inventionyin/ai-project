@@ -169,6 +169,15 @@ def _to_utc_unix_ts(dt) -> int:
     return int(dt.replace(tzinfo=timezone.utc).timestamp())
 
 
+def _redact_person_id(value) -> str | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    if len(raw) <= 8:
+        return raw
+    return f"{raw[:8]}...{raw[-4:]}"
+
+
 async def _load_run_case_metrics(db: AsyncSession, *, run: Run) -> tuple[int, int, int, int, int]:
     total = int(
         (
@@ -202,13 +211,13 @@ def _to_ci_token_status(project) -> ProjectCiTokenStatusData:
         hint=getattr(project, "ci_token_hint", None),
         rotatedAt=_to_utc_unix_ts(project.ci_token_rotated_at) if getattr(project, "ci_token_rotated_at", None) else None,
         lastUsedAt=_to_utc_unix_ts(project.ci_token_last_used_at) if getattr(project, "ci_token_last_used_at", None) else None,
-        rotatedBy=str(project.ci_token_rotated_by) if getattr(project, "ci_token_rotated_by", None) else None,
+        rotatedBy=_redact_person_id(getattr(project, "ci_token_rotated_by", None)),
         expiresAt=_to_utc_unix_ts(project.ci_token_expires_at) if getattr(project, "ci_token_expires_at", None) else None,
         revokedAt=_to_utc_unix_ts(project.ci_token_revoked_at) if getattr(project, "ci_token_revoked_at", None) else None,
-        revokedBy=str(project.ci_token_revoked_by) if getattr(project, "ci_token_revoked_by", None) else None,
+        revokedBy=_redact_person_id(getattr(project, "ci_token_revoked_by", None)),
         revokedReason=getattr(project, "ci_token_revoked_reason", None),
         leakReportedAt=_to_utc_unix_ts(project.ci_token_leak_reported_at) if getattr(project, "ci_token_leak_reported_at", None) else None,
-        leakReportedBy=str(project.ci_token_leak_reported_by) if getattr(project, "ci_token_leak_reported_by", None) else None,
+        leakReportedBy=_redact_person_id(getattr(project, "ci_token_leak_reported_by", None)),
         leakReportReason=getattr(project, "ci_token_leak_report_reason", None),
         policy=_to_ci_token_policy(project),
     )
@@ -244,13 +253,13 @@ def _to_ci_token_record(token) -> ProjectCiTokenRecordData:
         hint=getattr(token, "token_hint", None),
         rotatedAt=_to_utc_unix_ts(token.rotated_at) if getattr(token, "rotated_at", None) else None,
         lastUsedAt=_to_utc_unix_ts(token.last_used_at) if getattr(token, "last_used_at", None) else None,
-        rotatedBy=str(token.rotated_by) if getattr(token, "rotated_by", None) else None,
+        rotatedBy=_redact_person_id(getattr(token, "rotated_by", None)),
         expiresAt=_to_utc_unix_ts(token.expires_at) if getattr(token, "expires_at", None) else None,
         revokedAt=_to_utc_unix_ts(token.revoked_at) if getattr(token, "revoked_at", None) else None,
-        revokedBy=str(token.revoked_by) if getattr(token, "revoked_by", None) else None,
+        revokedBy=_redact_person_id(getattr(token, "revoked_by", None)),
         revokedReason=getattr(token, "revoked_reason", None),
         leakReportedAt=_to_utc_unix_ts(token.leak_reported_at) if getattr(token, "leak_reported_at", None) else None,
-        leakReportedBy=str(token.leak_reported_by) if getattr(token, "leak_reported_by", None) else None,
+        leakReportedBy=_redact_person_id(getattr(token, "leak_reported_by", None)),
         leakReportReason=getattr(token, "leak_report_reason", None),
         policy=_to_ci_token_record_policy(token),
     )
@@ -286,12 +295,12 @@ async def rotate_ci_token_(
             rotatedAt=_to_utc_unix_ts(project.ci_token_rotated_at),
             expiresAt=_to_utc_unix_ts(project.ci_token_expires_at) if getattr(project, "ci_token_expires_at", None) else None,
             lastUsedAt=_to_utc_unix_ts(project.ci_token_last_used_at) if getattr(project, "ci_token_last_used_at", None) else None,
-            rotatedBy=str(project.ci_token_rotated_by) if getattr(project, "ci_token_rotated_by", None) else None,
+            rotatedBy=_redact_person_id(getattr(project, "ci_token_rotated_by", None)),
             revokedAt=_to_utc_unix_ts(project.ci_token_revoked_at) if getattr(project, "ci_token_revoked_at", None) else None,
-            revokedBy=str(project.ci_token_revoked_by) if getattr(project, "ci_token_revoked_by", None) else None,
+            revokedBy=_redact_person_id(getattr(project, "ci_token_revoked_by", None)),
             revokedReason=getattr(project, "ci_token_revoked_reason", None),
             leakReportedAt=_to_utc_unix_ts(project.ci_token_leak_reported_at) if getattr(project, "ci_token_leak_reported_at", None) else None,
-            leakReportedBy=str(project.ci_token_leak_reported_by) if getattr(project, "ci_token_leak_reported_by", None) else None,
+            leakReportedBy=_redact_person_id(getattr(project, "ci_token_leak_reported_by", None)),
             leakReportReason=getattr(project, "ci_token_leak_report_reason", None),
             policy=_to_ci_token_policy(project),
         ),

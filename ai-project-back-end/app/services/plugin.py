@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import re
 import uuid
 import json
 from packaging.version import Version
@@ -17,14 +16,11 @@ from app.models.project import Project, ProjectMember
 from app.models.audit import AuditLog
 from app.schemas.plugin import PluginDetail, PluginInstallationDetail, PluginInvokeRecordDetail, PluginInvokeResponse, SandboxPolicy
 from app.services.platform_record import create_audit_log
-from app.services.plugin_sandbox import run_plugin_sandbox
+from app.services.plugin_sandbox import run_plugin_sandbox, validate_sandbox_policy
 
 logger = logging.getLogger(__name__)
 
 _PLATFORM_VERSION = "1.0.0"
-_ALLOWED_PERMISSIONS = {"RUN_TEST", "READ_PROJECT", "WRITE_REPORT", "CALL_EXTERNAL"}
-_ALLOWED_NETWORK_MODES = {"OFF", "ALLOWLIST"}
-_HOSTNAME_RE = re.compile(r"^(?=.{1,253}$)(?!-)[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*$")
 _DEFAULT_SANDBOX_POLICY = {
     "permissions": ["RUN_TEST", "READ_PROJECT", "WRITE_REPORT"],
     "timeoutMs": 30000,
@@ -90,69 +86,57 @@ def _json_size_bytes(value: dict | None) -> int:
     return len(json.dumps(value, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
 
 
-def _is_valid_hostname(host: str) -> bool:
-    return bool(_HOSTNAME_RE.fullmatch(host))
+def _sandbox_policy_error_message(context: str, errors: list[str]) -> str:
+    return f"{context} sandboxPolicy is invalid; migrate this plugin configuration before execution: {'; '.join(errors)}"
 
 
-def _normalize_sandbox_policy(config: dict | None, *, context: str) -> dict:
+def _normalize_sandbox_policy(config: dict | None, *, context: str, strict: bool = True) -> dict:
     config_obj = dict(config or {})
     raw_policy = config_obj.get("sandboxPolicy")
     if raw_policy is None:
         raw_policy = {}
     if not isinstance(raw_policy, dict):
+        if not strict:
+            return config_obj
         raise HTTPException(status_code=400, detail=f"{context} sandboxPolicy must be an object")
 
     merged = dict(_DEFAULT_SANDBOX_POLICY)
     merged.update(raw_policy)
+    errors = validate_sandbox_policy(merged)
+    if errors and strict:
+        raise HTTPException(status_code=400, detail=_sandbox_policy_error_message(context, errors))
 
-    permissions = merged.get("permissions")
-    if not isinstance(permissions, list) or any(not isinstance(p, str) for p in permissions):
-        raise HTTPException(status_code=400, detail=f"{context} sandboxPolicy.permissions must be a string list")
-    invalid_permissions = [p for p in permissions if p not in _ALLOWED_PERMISSIONS]
-    if invalid_permissions:
-        raise HTTPException(status_code=400, detail=f"{context} sandboxPolicy.permissions contains invalid values")
-
-    timeout_ms = merged.get("timeoutMs")
-    if not isinstance(timeout_ms, int) or not (100 <= timeout_ms <= 120000):
-        raise HTTPException(status_code=400, detail=f"{context} sandboxPolicy.timeoutMs must be 100..120000")
-
-    max_payload_bytes = merged.get("maxPayloadBytes")
-    if not isinstance(max_payload_bytes, int) or not (1024 <= max_payload_bytes <= 1048576):
-        raise HTTPException(status_code=400, detail=f"{context} sandboxPolicy.maxPayloadBytes must be 1024..1048576")
-
-    network_mode = merged.get("networkMode")
-    if network_mode not in _ALLOWED_NETWORK_MODES:
-        raise HTTPException(status_code=400, detail=f"{context} sandboxPolicy.networkMode must be OFF or ALLOWLIST")
-
-    allowed_hosts = merged.get("allowedHosts")
-    if not isinstance(allowed_hosts, list) or any(not isinstance(h, str) for h in allowed_hosts):
-        raise HTTPException(status_code=400, detail=f"{context} sandboxPolicy.allowedHosts must be a string list")
-    if network_mode == "OFF" and allowed_hosts:
-        raise HTTPException(status_code=400, detail=f"{context} sandboxPolicy.allowedHosts must be empty when networkMode=OFF")
-    if network_mode == "ALLOWLIST":
-        if not allowed_hosts:
-            raise HTTPException(status_code=400, detail=f"{context} sandboxPolicy.allowedHosts required when networkMode=ALLOWLIST")
-        if any(not _is_valid_hostname(h) for h in allowed_hosts):
-            raise HTTPException(status_code=400, detail=f"{context} sandboxPolicy.allowedHosts contains invalid hostname")
-
-    normalized_policy = {
-        "permissions": permissions,
-        "timeoutMs": timeout_ms,
-        "networkMode": network_mode,
-        "allowedHosts": allowed_hosts,
-        "maxPayloadBytes": max_payload_bytes,
-    }
-    config_obj["sandboxPolicy"] = normalized_policy
+    if not errors:
+        config_obj["sandboxPolicy"] = {
+            "permissions": merged["permissions"],
+            "timeoutMs": merged["timeoutMs"],
+            "networkMode": merged["networkMode"],
+            "allowedHosts": merged["allowedHosts"],
+            "maxPayloadBytes": merged["maxPayloadBytes"],
+        }
     return config_obj
 
 
 def _sandbox_policy_from_config(config: dict | None) -> SandboxPolicy:
-    normalized = _normalize_sandbox_policy(config, context="Plugin config")
-    return SandboxPolicy.model_validate(normalized["sandboxPolicy"])
+    normalized = _normalize_sandbox_policy(config, context="Plugin config", strict=False)
+    policy = normalized.get("sandboxPolicy")
+    if not isinstance(policy, dict) or validate_sandbox_policy(policy):
+        policy = dict(_DEFAULT_SANDBOX_POLICY)
+    return SandboxPolicy.model_validate(policy)
+
+
+def _sandbox_policy_diagnostic(config: dict | None, *, context: str) -> tuple[SandboxPolicy, bool, str | None]:
+    normalized = _normalize_sandbox_policy(config, context=context, strict=False)
+    policy = normalized.get("sandboxPolicy")
+    errors = validate_sandbox_policy(policy if isinstance(policy, dict) else None)
+    if errors:
+        return SandboxPolicy.model_validate(_DEFAULT_SANDBOX_POLICY), False, _sandbox_policy_error_message(context, errors)
+    return SandboxPolicy.model_validate(policy), True, None
 
 
 def _to_plugin_detail(row: Plugin) -> PluginDetail:
     config_schema = dict(row.config_schema_json) if row.config_schema_json else None
+    sandbox_policy, sandbox_policy_valid, sandbox_policy_error = _sandbox_policy_diagnostic(config_schema, context="Plugin config")
     return PluginDetail(
         id=str(row.id),
         name=row.name,
@@ -170,12 +154,15 @@ def _to_plugin_detail(row: Plugin) -> PluginDetail:
         downloadCount=row.download_count,
         createdAt=int(row.created_at.timestamp()),
         updatedAt=int(row.updated_at.timestamp()),
-        sandboxPolicy=_sandbox_policy_from_config(config_schema),
+        sandboxPolicy=sandbox_policy,
+        sandboxPolicyValid=sandbox_policy_valid,
+        sandboxPolicyError=sandbox_policy_error,
     )
 
 
 def _to_install_detail(row: PluginInstallation, plugin: Plugin | None = None) -> PluginInstallationDetail:
     config = dict(row.config_json) if row.config_json else None
+    sandbox_policy, sandbox_policy_valid, sandbox_policy_error = _sandbox_policy_diagnostic(config, context="Installation config")
     return PluginInstallationDetail(
         id=str(row.id),
         projectId=str(row.project_id),
@@ -189,7 +176,9 @@ def _to_install_detail(row: PluginInstallation, plugin: Plugin | None = None) ->
         installedBy=str(row.installed_by) if row.installed_by else None,
         createdAt=int(row.created_at.timestamp()),
         updatedAt=int(row.updated_at.timestamp()),
-        sandboxPolicy=_sandbox_policy_from_config(config),
+        sandboxPolicy=sandbox_policy,
+        sandboxPolicyValid=sandbox_policy_valid,
+        sandboxPolicyError=sandbox_policy_error,
     )
 
 
@@ -313,6 +302,8 @@ async def update_plugin(
             elif key == "entry_point":
                 row.entry_point = value
             elif key == "enabled":
+                if value:
+                    _normalize_sandbox_policy(dict(row.config_schema_json) if row.config_schema_json else None, context="Plugin config")
                 row.enabled = value
             elif key == "icon_url":
                 row.icon_url = value
@@ -417,8 +408,13 @@ async def toggle_plugin(
         raise HTTPException(status_code=404, detail="Installation not found")
     if row.status != PluginInstallStatus.INSTALLED.value:
         raise HTTPException(status_code=400, detail="Can only toggle installed plugins")
+    if enabled:
+        config = dict(row.config_json) if row.config_json else None
+        _normalize_sandbox_policy(config, context="Installation config")
     plugin = await db.scalar(select(Plugin).where(Plugin.id == row.plugin_id))
     if plugin:
+        if enabled:
+            _normalize_sandbox_policy(dict(plugin.config_schema_json) if plugin.config_schema_json else None, context="Plugin config")
         plugin.enabled = enabled
     await db.flush()
     action = "ENABLE_PLUGIN" if enabled else "DISABLE_PLUGIN"
@@ -479,6 +475,10 @@ async def invoke_plugin_installation(
     normalized_config = _normalize_sandbox_policy(
         dict(installation.config_json) if installation.config_json else None,
         context="Installation config",
+    )
+    _normalize_sandbox_policy(
+        dict(plugin.config_schema_json) if plugin.config_schema_json else None,
+        context="Plugin config",
     )
     policy = normalized_config["sandboxPolicy"]
     if _json_size_bytes(payload) > int(policy["maxPayloadBytes"]):

@@ -203,6 +203,7 @@ function Test-JenkinsBackup {
 $checks = @()
 $checks += Test-HttpEndpoint -Name "app-public-url" -Url $AppUrl -ExpectedStatusCodes @(200) -RequiredContent "<div id=`"app`"></div>"
 $checks += Test-HttpEndpoint -Name "api-health" -Url (Join-Url -BaseUrl $ApiBaseUrl -Path "/health") -ExpectedStatusCodes @(200) -RequiredContent '"status":"ok"'
+$checks += Test-HttpEndpoint -Name "api-metrics" -Url (Join-Url -BaseUrl $ApiBaseUrl -Path "/metrics") -ExpectedStatusCodes @(200) -RequiredContent "weitesting_observability_ready"
 $checks += Test-HttpEndpoint -Name "grafana-health" -Url (Join-Url -BaseUrl $GrafanaUrl -Path "/api/health") -ExpectedStatusCodes @(200) -RequiredContent '"database"'
 $checks += Test-HttpEndpoint -Name "jenkins-login" -Url (Join-Url -BaseUrl $JenkinsUrl -Path "/login") -ExpectedStatusCodes @(200) -RequiredContent "Sign in to Jenkins"
 $checks += Test-PrometheusTargets -BaseUrl $PrometheusUrl
@@ -220,7 +221,7 @@ elseif ($warnCount -gt 0) {
 
 $recommendedActions = @()
 if (($checks | Where-Object { $_.name -eq "prometheus-targets" -and $_.status -ne "READY" } | Measure-Object).Count -gt 0) {
-    $recommendedActions += "Verify Jenkins /prometheus returns 200; install/enable Jenkins Prometheus plugin and grant scrape access if Jenkins metrics are required."
+    $recommendedActions += "Repo-local /metrics is checked separately; verify Prometheus scrape config for weitesting-backend and Jenkins /prometheus only if external dashboards/alerts are required."
 }
 if (($checks | Where-Object { $_.name -eq "jenkins-backup" -and $_.status -ne "READY" } | Measure-Object).Count -gt 0) {
     $recommendedActions += "Run deploy/jenkins/backup_jenkins.sh and perform one restore drill before production cutover."
