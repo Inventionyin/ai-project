@@ -38,6 +38,7 @@ const SecurityAudit = defineAsyncComponent(() => import('@/views/settings/Securi
 const CiTokenGovernance = defineAsyncComponent(() => import('@/views/settings/CiTokenGovernance.vue'))
 const AiCapabilities = defineAsyncComponent(() => import('@/views/settings/AiCapabilities.vue'))
 const OpsHealth = defineAsyncComponent(() => import('@/views/settings/OpsHealth.vue'))
+const AcceptanceCenter = defineAsyncComponent(() => import('@/views/settings/AcceptanceCenter.vue'))
 
 function createProjectShellPage(activeAssetChild: string, Content: Parameters<typeof h>[0]) {
   return defineComponent({
@@ -233,6 +234,10 @@ const router = createRouter({
     {
       path: '/projects/:projectId/settings/ops-health',
       component: createProjectShellPage('运维健康', OpsHealth)
+    },
+    {
+      path: '/projects/:projectId/settings/acceptance',
+      component: createProjectShellPage('验收中心', AcceptanceCenter)
     },
     {
       path: '/projects/:projectId/requirements/docs',
