@@ -22,7 +22,7 @@
 
 | 检查 | 结果 | 说明 |
 |---|---|---|
-| `verify_external_integrations.ps1 -DryRun` | WAITING_INPUT | DingTalk、GitHub Actions、本地 Jenkins、Jira、Zentao 环境变量均未在当前终端设置 |
+| `verify_external_integrations.ps1 -DryRun` | DONE | 本地 PowerShell 当前终端未加载第三方环境变量，因此本地 dry-run 会显示 DingTalk/Jenkins/Jira/Zentao missing；这不代表 GitHub Secrets/Variables 未配置 |
 | `verify_production_readiness.ps1 -DryRun` | READY_TO_RUN | 默认检查目标为 `app/api/jenkins/grafana.evanshine.me` 和本机 Prometheus |
 | `run_performance_baseline.ps1 -DryRun` | READY_TO_RUN | 默认目标为本机 `8000/4173`，真实生产基线需指定 app/api URL |
 
@@ -36,6 +36,26 @@ notepad .\scripts\external-integrations.local.ps1
 ```
 
 `scripts/external-integrations.local.ps1` 已加入 `.gitignore`，用于你在本机填真实值，不会进入提交。
+
+## 2026-05-21 GitHub Actions 真实外部系统验收记录
+
+GitHub Actions 会从仓库 `Secrets / Variables` 注入外部系统配置，本地 PowerShell dry-run 读取不到这些值。以下记录以 GitHub Actions `real-e2e.yml` 的实际运行结果为准：
+
+| Run | 输入 | 结果 | 证据 |
+|---|---|---|---|
+| `#63` | `externalSmokeTargets=Jira`，业务闭环关闭 | DONE | Jira account API reachable；Jira project `AIT` reachable |
+| `#64` | `externalSmokeTargets=Jira,Zentao,Jenkins,DingTalk`，业务闭环关闭 | DONE | DingTalk webhook accepted；Jenkins job metadata reachable；Jira account/project reachable；Zentao product API reachable |
+| `#65` | `externalSmokeTargets=Jira,Zentao,Jenkins,DingTalk`，业务闭环开启 | DONE | Jenkins build trigger accepted；Jira issue `AIT-11` created/deleted；Zentao bug `5` created/deleted；DingTalk webhook accepted |
+
+对应 GitHub Actions 页面：
+
+```text
+https://github.com/Inventionyin/ai-project/actions/runs/26235196113
+https://github.com/Inventionyin/ai-project/actions/runs/26235455869
+https://github.com/Inventionyin/ai-project/actions/runs/26235787731
+```
+
+结论：你之前填入的 GitHub Secrets/Variables 已经被 CI 正确读取，真实外部系统 smoke 和可逆业务闭环均已通过。
 
 ## 你之前已经创建/提供过的线索
 
@@ -54,9 +74,9 @@ notepad .\scripts\external-integrations.local.ps1
 
 | 编号 | 模块 | 状态 | 需要你/客户提供 | 我能执行的动作 | 验收证据 |
 |---|---|---|---|---|---|
-| A1 | 真实外部系统配置诊断 | READY_TO_RUN | GitHub Secrets/Variables 或本地 env | 跑 `verify_external_integrations.ps1 -DryRun` | dry-run 全部 READY 输出 |
-| A2 | 真实外部系统 smoke | READY_TO_RUN | 外网/VPN、有效 token | 跑 `verify_external_integrations.ps1 -EnableSmoke -FailOnSmokeError` | DingTalk/Jira/Jenkins/Zentao smoke 输出 |
-| A3 | 真实业务闭环 | READY_TO_RUN | 允许创建/删除测试 issue/bug，允许触发 Jenkins job | 跑 `verify_external_integrations.ps1 -EnableSmoke -EnableBusinessClosure -FailOnSmokeError` | Jira issue 创建/删除、禅道 bug 创建/删除、Jenkins build accepted、钉钉消息 |
+| A1 | 真实外部系统配置诊断 | DONE | GitHub Secrets/Variables 已配置 | GitHub Actions `real-e2e.yml` 已读取配置 | Run #63/#64/#65 |
+| A2 | 真实外部系统 smoke | DONE | 外网、有效 token | GitHub Actions 已执行 smoke | DingTalk/Jira/Jenkins/Zentao smoke 输出 |
+| A3 | 真实业务闭环 | DONE | 已允许创建/删除测试 issue/bug，允许触发 Jenkins job | GitHub Actions 已执行 business closure | Jira issue 创建/删除、禅道 bug 创建/删除、Jenkins build accepted、钉钉消息 |
 | B1 | 域名解析 | WAITING_INPUT | DNS 控制台权限或截图确认 | 配置/核对 `app/api/jenkins/grafana` A/CNAME | DNS 生效截图或 `nslookup` 输出 |
 | B2 | HTTPS | WAITING_INPUT | 服务器 sudo 权限、最终域名 | 配置 Nginx/certbot | `https://...` 访问成功 |
 | B3 | 访问控制 | WAITING_INPUT | 是否使用 Cloudflare/强登录策略 | 配置 Jenkins/Grafana 访问限制 | 匿名访问被拒，授权用户可进 |
