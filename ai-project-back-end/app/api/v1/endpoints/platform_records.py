@@ -8,8 +8,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import CurrentUser, get_current_user, get_request_id
 from app.core.database import get_db
 from app.schemas.common import ApiResponse, PageData
-from app.schemas.platform_record import AiJobRecordListItem, AuditLogListItem
-from app.services.platform_record import list_ai_job_records, list_audit_logs
+from app.schemas.platform_record import (
+    AiJobRecordListItem,
+    AuditLogListItem,
+    TrialOperationImportRecordCreateRequest,
+    TrialOperationImportRecordItem,
+)
+from app.services.platform_record import (
+    list_ai_job_records,
+    list_audit_logs,
+    list_trial_operation_import_records,
+    record_trial_operation_import,
+)
 
 router = APIRouter(prefix="/projects/{projectId}/platform")
 
@@ -38,3 +48,33 @@ async def list_project_audit_logs(
 ) -> ApiResponse[PageData[AuditLogListItem]]:
     total, items = await list_audit_logs(db, user=user, project_id=projectId, page=page, page_size=pageSize)
     return ApiResponse(data=PageData(page=page, pageSize=pageSize, total=total, items=items), requestId=request_id)
+
+
+@router.get("/trial-operation/import-records", response_model=ApiResponse[PageData[TrialOperationImportRecordItem]])
+async def list_project_trial_operation_import_records(
+    projectId: uuid.UUID,
+    page: int = Query(1, ge=1),
+    pageSize: int = Query(6, ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    request_id: str = Depends(get_request_id),
+) -> ApiResponse[PageData[TrialOperationImportRecordItem]]:
+    total, items = await list_trial_operation_import_records(db, user=user, project_id=projectId, page=page, page_size=pageSize)
+    return ApiResponse(data=PageData(page=page, pageSize=pageSize, total=total, items=items), requestId=request_id)
+
+
+@router.post("/trial-operation/import-records", response_model=ApiResponse[TrialOperationImportRecordItem])
+async def create_project_trial_operation_import_record(
+    projectId: uuid.UUID,
+    payload: TrialOperationImportRecordCreateRequest,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    request_id: str = Depends(get_request_id),
+) -> ApiResponse[TrialOperationImportRecordItem]:
+    try:
+        data = await record_trial_operation_import(db, user=user, project_id=projectId, payload=payload)
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    return ApiResponse(data=data, requestId=request_id)

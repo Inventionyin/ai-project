@@ -2,8 +2,12 @@
 
 # Local logs and runtime artifacts
 *.log
+backend-*.log
 *.out.log
 *.err.log
+*.tar
+*.tar.gz
+*.zip
 artifacts/
 var/
 ai-project-back-end/var/
@@ -19,3 +23,7 @@ ai-project_front_end/dist/
 *.tmp.png
 tmp-*.png
 ai-project_front_end/tmp-*.png
+node_modules/
+dist/
+.DS_Store
+Thumbs.db

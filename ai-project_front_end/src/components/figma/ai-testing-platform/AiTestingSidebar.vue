@@ -85,6 +85,7 @@ const projectId = computed(() => {
 
 const resolvedActiveAssetChild = computed(() => {
   if (typeof activeAssetChild === 'string') return activeAssetChild
+  if (route.path.startsWith(`/projects/${projectId.value}/trial-operation`)) return '试运行看板'
   if (route.path.startsWith(`/projects/${projectId.value}/assets/suites`)) return '测试套件'
   if (route.path.startsWith(`/projects/${projectId.value}/assets/testcases`)) return '用例管理'
   if (route.path.startsWith(`/projects/${projectId.value}/assets/apis`)) return '接口集合'
@@ -127,7 +128,8 @@ function isExtraLinkActive(item: LinkItem) {
 }
 
 const mainLinks = computed<LinkItem[]>(() => [
-  { label: '仪表盘', icon: navDashboard, to: `/projects/${projectId.value}/dashboard` }
+  { label: '仪表盘', icon: navDashboard, to: `/projects/${projectId.value}/dashboard` },
+  { label: '试运行看板', icon: navDashboard, to: `/projects/${projectId.value}/trial-operation` }
 ])
 
 const groups = computed<GroupItem[]>(() => [

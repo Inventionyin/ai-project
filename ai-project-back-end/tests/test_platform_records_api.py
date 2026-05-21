@@ -14,6 +14,7 @@ from app.api.v1.endpoints import platform_records as platform_records_endpoint
 from app.core.database import get_db
 from app.models.enums import ProjectRole
 from app.models.project import Project
+from app.schemas.platform_record import TrialOperationImportRecordCreateRequest
 
 
 @dataclass
@@ -102,6 +103,85 @@ def test_list_audit_logs(monkeypatch: pytest.MonkeyPatch) -> None:
     assert payload["code"] == 0
     assert payload["data"]["page"] == 2
     assert payload["data"]["items"][0]["module"] == "TESTCASE_BINDING"
+
+
+def test_record_trial_operation_import(monkeypatch: pytest.MonkeyPatch) -> None:
+    project_id = uuid.UUID("22222222-2222-2222-2222-222222222222")
+
+    async def _fake_record_import(db, *, user, project_id, payload):
+        assert isinstance(payload, TrialOperationImportRecordCreateRequest)
+        assert payload.importType == "testcases"
+        assert payload.fileName == "cases.csv"
+        assert payload.totalRows == 12
+        return {
+            "id": "55555555-5555-5555-5555-555555555555",
+            "projectId": str(project_id),
+            "importType": "testcases",
+            "fileName": "cases.csv",
+            "status": "SUCCESS",
+            "totalRows": 12,
+            "successRows": 11,
+            "failedRows": 1,
+            "summary": "测试用例导入完成：成功 11 条，失败 1 条",
+            "detail": {"fields": {"title": "用例标题"}},
+            "createdBy": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+            "createdAt": 1710004321,
+        }
+
+    monkeypatch.setattr(platform_records_endpoint, "record_trial_operation_import", _fake_record_import)
+    client = TestClient(_build_app())
+    resp = client.post(
+        f"/api/projects/{project_id}/platform/trial-operation/import-records",
+        json={
+            "importType": "testcases",
+            "fileName": "cases.csv",
+            "status": "SUCCESS",
+            "totalRows": 12,
+            "successRows": 11,
+            "failedRows": 1,
+            "summary": "测试用例导入完成：成功 11 条，失败 1 条",
+            "detail": {"fields": {"title": "用例标题"}},
+        },
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["code"] == 0
+    assert payload["data"]["importType"] == "testcases"
+    assert payload["data"]["failedRows"] == 1
+
+
+def test_list_trial_operation_import_records(monkeypatch: pytest.MonkeyPatch) -> None:
+    project_id = uuid.UUID("22222222-2222-2222-2222-222222222222")
+
+    async def _fake_list_imports(db, *, user, project_id, page, page_size):
+        assert page == 1
+        assert page_size == 6
+        return 1, [
+            {
+                "id": "55555555-5555-5555-5555-555555555555",
+                "projectId": str(project_id),
+                "importType": "defects",
+                "fileName": "defects.json",
+                "status": "PARTIAL_SUCCESS",
+                "totalRows": 20,
+                "successRows": 18,
+                "failedRows": 2,
+                "summary": "缺陷导入完成：成功 18 条，失败 2 条",
+                "detail": {},
+                "createdBy": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+                "createdAt": 1710004321,
+            }
+        ]
+
+    monkeypatch.setattr(platform_records_endpoint, "list_trial_operation_import_records", _fake_list_imports)
+    client = TestClient(_build_app())
+    resp = client.get(f"/api/projects/{project_id}/platform/trial-operation/import-records?page=1&pageSize=6")
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["code"] == 0
+    assert payload["data"]["total"] == 1
+    assert payload["data"]["items"][0]["importType"] == "defects"
+    assert payload["data"]["items"][0]["status"] == "PARTIAL_SUCCESS"
 
 
 @dataclass

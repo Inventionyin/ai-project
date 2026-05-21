@@ -64,3 +64,66 @@ class DashboardTrendItem(BaseSchema):
 class DashboardTrendData(BaseSchema):
     days: Literal[7, 14, 30]
     items: list[DashboardTrendItem] = Field(default_factory=list)
+
+
+class DashboardTrialOperationClusterItem(BaseSchema):
+    clusterKey: str = Field(min_length=1, max_length=128)
+    count: int = Field(ge=0)
+    sampleTitles: list[str] = Field(default_factory=list)
+    rootCauseHint: str = Field(min_length=1, max_length=255)
+    confidence: float = Field(ge=0, le=1)
+
+
+class DashboardTrialOperationRiskHint(BaseSchema):
+    defectId: IdStr
+    title: str = Field(min_length=1, max_length=255)
+    status: str = Field(min_length=1, max_length=32)
+    severity: str = Field(min_length=1, max_length=16)
+    updatedAt: UnixTs
+    riskScore: float = Field(ge=0)
+    hint: str = Field(min_length=1, max_length=255)
+
+
+class DashboardTrialOperationAcceptanceSummary(BaseSchema):
+    conclusion: str = Field(min_length=1, max_length=64)
+    score: int = Field(ge=0, le=100)
+    level: Literal["PASS", "WARNING", "BLOCKED", "INSUFFICIENT"]
+    highlights: list[str] = Field(default_factory=list, max_length=5)
+    risks: list[str] = Field(default_factory=list, max_length=4)
+    nextActions: list[str] = Field(default_factory=list, max_length=4)
+
+
+class DashboardTrialOperationData(BaseSchema):
+    metrics: dict[str, int] = Field(default_factory=dict)
+    testcasePriorityDistribution: dict[str, int] = Field(default_factory=dict)
+    testcaseStatusDistribution: dict[str, int] = Field(default_factory=dict)
+    testcaseTypeDistribution: dict[str, int] = Field(default_factory=dict)
+    testcaseFeatureDistribution: dict[str, int] = Field(default_factory=dict)
+    defectSeverityDistribution: dict[str, int] = Field(default_factory=dict)
+    defectStatusDistribution: dict[str, int] = Field(default_factory=dict)
+    topDefectClusters: list[DashboardTrialOperationClusterItem] = Field(default_factory=list)
+    topRiskHints: list[DashboardTrialOperationRiskHint] = Field(default_factory=list)
+    sampleTestcases: list[str] = Field(default_factory=list)
+    acceptanceSummary: DashboardTrialOperationAcceptanceSummary
+
+
+class DashboardTrialOperationReportData(BaseSchema):
+    title: str = Field(min_length=1, max_length=128)
+    generatedAt: UnixTs
+    markdown: str = Field(min_length=1)
+    summary: DashboardTrialOperationAcceptanceSummary
+
+
+class DashboardTrialOperationReportSnapshotCreateRequest(DashboardTrialOperationReportData):
+    pass
+
+
+class DashboardTrialOperationReportSnapshotData(DashboardTrialOperationReportData):
+    id: IdStr
+    projectId: IdStr | None = None
+    score: int | None = Field(default=None, ge=0, le=100)
+    level: Literal["PASS", "WARNING", "BLOCKED", "INSUFFICIENT"] | None = None
+    acceptanceScore: int | None = Field(default=None, ge=0, le=100)
+    acceptanceLevel: Literal["PASS", "WARNING", "BLOCKED", "INSUFFICIENT"] | None = None
+    createdBy: IdStr | None = None
+    createdAt: UnixTs
