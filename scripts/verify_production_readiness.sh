@@ -170,6 +170,34 @@ def test_jenkins_backup(backup_dir: str):
     })
 
 
+def test_observability_rule_files():
+    prometheus_config = os.path.join("deploy", "observability", "prometheus.yml")
+    alert_rules = os.path.join("deploy", "observability", "alert-rules.yml")
+    if not os.path.exists(prometheus_config) or not os.path.exists(alert_rules):
+        return check("observability-rule-files", "BLOCKED", "Prometheus config or alert-rules.yml is missing.", {
+            "prometheusConfig": prometheus_config,
+            "alertRules": alert_rules,
+        })
+    with open(prometheus_config, encoding="utf-8") as fh:
+        prometheus_content = fh.read()
+    with open(alert_rules, encoding="utf-8") as fh:
+        alert_content = fh.read()
+    required_tokens = [
+        "rule_files:",
+        "alert-rules.yml",
+        "WeiTestingApiDown",
+        "WeiTestingHighServerErrorRate",
+        "WeiTestingObservabilityNotReady",
+    ]
+    missing = [
+        token for token in required_tokens
+        if token not in prometheus_content and token not in alert_content
+    ]
+    if missing:
+        return check("observability-rule-files", "WARN", "Observability rule files are present but incomplete.", {"missing": missing})
+    return check("observability-rule-files", "READY", "Prometheus alert rule files are present.")
+
+
 checks = [
     test_http_endpoint("app-public-url", APP_URL, required_content='<div id="app"></div>'),
     test_http_endpoint("api-health", join_url(API_BASE_URL, "/health"), required_content='"status":"ok"'),
@@ -178,6 +206,7 @@ checks = [
     test_http_endpoint("jenkins-login", join_url(JENKINS_URL, "/login"), required_content="Sign in to Jenkins"),
     test_prometheus_targets(PROMETHEUS_URL),
     test_jenkins_backup(JENKINS_BACKUP_DIR),
+    test_observability_rule_files(),
 ]
 
 blocked = sum(1 for item in checks if item["status"] == "BLOCKED")

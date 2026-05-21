@@ -92,6 +92,7 @@ test.describe('run detail integration issues', () => {
     await page.locator('label:has-text("jira baseUrl") input').fill('https://jira.example.com')
     await page.locator('label:has-text("jira email") input').fill('qa@example.com')
     await page.locator('label:has-text("jira token") input').fill('jira-token-placeholder')
+    await page.getByLabel('真实创建外部缺陷').check()
     await page.getByRole('button', { name: '创建外部 Issue' }).click()
     await expect(page.getByText('Issue 创建请求已提交').first()).toBeVisible()
 
@@ -125,8 +126,10 @@ test.describe('run detail integration issues', () => {
       credentials: {
         email: 'qa@example.com',
         token: 'jira-token-placeholder'
-      }
+      },
+      executeRequest: true
     })
+    expect((issuePayloads[0].config as Record<string, unknown>).realCreateEnabled).toBe(true)
 
     expect(issuePayloads[1]).toMatchObject({
       provider: 'ZENTAO',

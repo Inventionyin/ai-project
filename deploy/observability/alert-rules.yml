@@ -1,0 +1,59 @@
+groups:
+  - name: weitesting-api-readiness
+    rules:
+      - alert: WeiTestingApiDown
+        expr: up{job="weitesting-backend"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: weitesting-api
+        annotations:
+          summary: WeiTesting API scrape target is down
+          description: Prometheus cannot scrape the backend /metrics endpoint.
+
+      - alert: WeiTestingObservabilityNotReady
+        expr: weitesting_observability_ready != 1
+        for: 5m
+        labels:
+          severity: warning
+          service: weitesting-api
+        annotations:
+          summary: WeiTesting observability readiness metric is not healthy
+          description: The backend is reachable but did not report weitesting_observability_ready=1.
+
+      - alert: WeiTestingHighServerErrorRate
+        expr: |
+          (
+            sum(rate(weitesting_http_server_errors_total[5m]))
+            /
+            clamp_min(sum(rate(weitesting_http_requests_total[5m])), 0.001)
+          ) > 0.02
+        for: 10m
+        labels:
+          severity: warning
+          service: weitesting-api
+        annotations:
+          summary: WeiTesting API 5xx rate is above 2%
+          description: Server-side errors are above the trial-operation SLO threshold.
+
+      - alert: WeiTestingHttpInFlightStuck
+        expr: weitesting_http_requests_in_flight > 50
+        for: 10m
+        labels:
+          severity: warning
+          service: weitesting-api
+        annotations:
+          summary: WeiTesting API has a high number of in-flight requests
+          description: Request concurrency stayed high for 10 minutes; check slow endpoints and worker saturation.
+
+  - name: weitesting-jenkins-readiness
+    rules:
+      - alert: WeiTestingJenkinsMetricsDown
+        expr: up{job="jenkins"} == 0
+        for: 5m
+        labels:
+          severity: warning
+          service: jenkins
+        annotations:
+          summary: Jenkins Prometheus scrape target is down
+          description: Verify Jenkins /prometheus, plugin permissions, and network access from Prometheus.

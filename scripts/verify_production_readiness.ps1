@@ -200,6 +200,29 @@ function Test-JenkinsBackup {
     }
 }
 
+function Test-ObservabilityRuleFiles {
+    $prometheusConfig = ".\deploy\observability\prometheus.yml"
+    $alertRules = ".\deploy\observability\alert-rules.yml"
+    if (-not (Test-Path -LiteralPath $prometheusConfig) -or -not (Test-Path -LiteralPath $alertRules)) {
+        return New-CheckResult -Name "observability-rule-files" -Status "BLOCKED" -Message "Prometheus config or alert-rules.yml is missing." -Details @{
+            prometheusConfig = $prometheusConfig
+            alertRules = $alertRules
+        }
+    }
+
+    $prometheusContent = Get-Content -Raw -Path $prometheusConfig
+    $alertContent = Get-Content -Raw -Path $alertRules
+    $requiredTokens = @("rule_files:", "alert-rules.yml", "WeiTestingApiDown", "WeiTestingHighServerErrorRate", "WeiTestingObservabilityNotReady")
+    $missing = @($requiredTokens | Where-Object { -not $prometheusContent.Contains($_) -and -not $alertContent.Contains($_) })
+    if ($missing.Count -gt 0) {
+        return New-CheckResult -Name "observability-rule-files" -Status "WARN" -Message "Observability rule files are present but incomplete." -Details @{
+            missing = $missing
+        }
+    }
+
+    return New-CheckResult -Name "observability-rule-files" -Status "READY" -Message "Prometheus alert rule files are present."
+}
+
 $checks = @()
 $checks += Test-HttpEndpoint -Name "app-public-url" -Url $AppUrl -ExpectedStatusCodes @(200) -RequiredContent "<div id=`"app`"></div>"
 $checks += Test-HttpEndpoint -Name "api-health" -Url (Join-Url -BaseUrl $ApiBaseUrl -Path "/health") -ExpectedStatusCodes @(200) -RequiredContent '"status":"ok"'
@@ -208,6 +231,7 @@ $checks += Test-HttpEndpoint -Name "grafana-health" -Url (Join-Url -BaseUrl $Gra
 $checks += Test-HttpEndpoint -Name "jenkins-login" -Url (Join-Url -BaseUrl $JenkinsUrl -Path "/login") -ExpectedStatusCodes @(200) -RequiredContent "Sign in to Jenkins"
 $checks += Test-PrometheusTargets -BaseUrl $PrometheusUrl
 $checks += Test-JenkinsBackup -BackupDir $JenkinsBackupDir
+$checks += Test-ObservabilityRuleFiles
 
 $blockedCount = @($checks | Where-Object { $_.status -eq "BLOCKED" }).Count
 $warnCount = @($checks | Where-Object { $_.status -eq "WARN" }).Count

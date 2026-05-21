@@ -60,6 +60,12 @@ def test_performance_baseline_script_contains_required_contract():
         "exitCode",
         "$backendThresholdP95Ms = 1000",
         "$frontendThresholdP95Ms = 2000",
+        "$businessThresholdP95Ms = $BusinessThresholdP95Ms",
+        "[int]$BusinessThresholdP95Ms = 2000",
+        "metadata",
+        "gitCommit",
+        "scriptVersion",
+        "COMPUTERNAME",
         "Get-DingTalkSignedWebhookUrl",
         "[System.Security.Cryptography.HMACSHA256]::new",
         "timestamp=",
@@ -74,3 +80,33 @@ def test_performance_baseline_script_contains_required_contract():
 
     missing = [token for token in required_tokens if token not in content]
     assert not missing, f"Missing expected script tokens: {missing}"
+
+
+def test_bash_performance_baseline_script_matches_operator_contract():
+    repo_root = Path(__file__).resolve().parents[2]
+    script_path = repo_root / "scripts" / "run_performance_baseline.sh"
+    content = script_path.read_text(encoding="utf-8")
+
+    required_tokens = [
+        "SKIP_BACKEND_SMOKE=0",
+        "SKIP_FRONTEND_SMOKE=0",
+        "BUSINESS_THRESHOLD_P95_MS=2000",
+        "DINGTALK_WEBHOOK_URL",
+        "DINGTALK_WEBHOOK_SECRET",
+        "--skip-backend-smoke",
+        "--skip-frontend-smoke",
+        "--business-threshold-p95-ms",
+        "skipBackendSmoke",
+        "skipFrontendSmoke",
+        "skipped_result",
+        "send_dingtalk",
+        "sign_dingtalk_url",
+        "metadata",
+        "gitCommit",
+        "scriptVersion",
+        "socket.gethostname",
+        '"businessP95Ms"',
+    ]
+
+    missing = [token for token in required_tokens if token not in content]
+    assert not missing, f"Missing expected bash script tokens: {missing}"

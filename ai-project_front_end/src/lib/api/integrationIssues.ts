@@ -12,6 +12,8 @@ export type CreateIntegrationIssuePayload = {
   issueType?: string
   config?: Record<string, unknown>
   credentials?: Record<string, unknown>
+  executeRequest?: boolean
+  timeoutSeconds?: number
 }
 
 export type IntegrationIssueItem = {

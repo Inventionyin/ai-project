@@ -16,6 +16,8 @@ param(
     [string]$BusinessUserId = $env:PERF_BASELINE_USER_ID,
     [string]$BusinessTenantId = $env:PERF_BASELINE_TENANT_ID,
     [string]$BusinessRoles = $env:PERF_BASELINE_ROLES,
+    [ValidateRange(1, 600000)]
+    [int]$BusinessThresholdP95Ms = 2000,
     [string]$TrendPath = ".\artifacts\performance-baseline\trend-summary.json",
     [string]$DingTalkWebhookUrl = $env:DINGTALK_WEBHOOK_URL,
     [string]$DingTalkWebhookSecret = $env:DINGTALK_WEBHOOK_SECRET
@@ -26,6 +28,8 @@ $ErrorActionPreference = "Stop"
 
 $backendThresholdP95Ms = 1000
 $frontendThresholdP95Ms = 2000
+$businessThresholdP95Ms = $BusinessThresholdP95Ms
+$scriptVersion = "2026.05.21"
 
 if ($Help) {
     Write-Host "Usage: .\scripts\run_performance_baseline.ps1 [options]"
@@ -35,6 +39,7 @@ if ($Help) {
     Write-Host "  -SkipBackendSmoke -SkipFrontendSmoke -Iterations <1..1000>"
     Write-Host "  -BusinessPaths <comma-separated API paths> -BusinessHeadersJson <json> -TrendPath <path>"
     Write-Host "  -BusinessAuthorization <token> -BusinessUserId <uuid> -BusinessTenantId <uuid> -BusinessRoles <csv>"
+    Write-Host "  -BusinessThresholdP95Ms <ms> (default: 2000)"
     Write-Host "  -FailOnWarn (exit non-zero when conclusion is WARN or BLOCKED)"
     Write-Host "  -DryRun (print planned checks only)"
     Write-Host "  -DingTalkWebhookUrl <url> (or env DINGTALK_WEBHOOK_URL)"
@@ -298,6 +303,7 @@ if ($DryRun) {
     Write-Host "[DryRun] Frontend target: $FrontendUrl (skip=$([bool]$SkipFrontendSmoke))"
     Write-Host "[DryRun] Iterations: $Iterations"
     Write-Host "[DryRun] Business paths: $BusinessPaths"
+    Write-Host "[DryRun] BusinessThresholdP95Ms: $businessThresholdP95Ms"
     Write-Host "[DryRun] TrendPath: $TrendPath"
     Write-Host "[DryRun] OutputPath: $OutputPath"
     Write-Host "[DryRun] FailOnWarn: $([bool]$FailOnWarn)"
@@ -453,13 +459,30 @@ elseif (($backendResult.errorCount -gt 0) -or ($frontendResult.errorCount -gt 0)
 elseif (($businessResults | Where-Object { $_.errorCount -gt 0 -or $_.successfulSamples -eq 0 } | Measure-Object).Count -gt 0) {
     $conclusion = "WARN"
 }
+elseif (($businessResults | Where-Object { $_.p95Ms -ne $null -and $_.p95Ms -gt $businessThresholdP95Ms } | Measure-Object).Count -gt 0) {
+    $conclusion = "WARN"
+}
 elseif ((-not $backendResult.skipped -and $backendResult.p95Ms -gt $backendThresholdP95Ms) -or
         (-not $frontendResult.skipped -and $frontendResult.p95Ms -gt $frontendThresholdP95Ms)) {
     $conclusion = "WARN"
 }
 
+try {
+    $gitCommit = (git rev-parse --short HEAD 2>$null)
+}
+catch {
+    $gitCommit = $null
+}
+
 $report = [PSCustomObject]@{
     generatedAt = [DateTimeOffset]::UtcNow.ToString("o")
+    metadata = [PSCustomObject]@{
+        scriptVersion = $scriptVersion
+        gitCommit = $gitCommit
+        host = $env:COMPUTERNAME
+        os = [System.Runtime.InteropServices.RuntimeInformation]::OSDescription
+        powershellVersion = $PSVersionTable.PSVersion.ToString()
+    }
     targets = [PSCustomObject]@{
         apiBaseUrl = $ApiBaseUrl
         backendHealthUrl = $backendHealthUrl
@@ -485,6 +508,7 @@ $report = [PSCustomObject]@{
     thresholds = [PSCustomObject]@{
         backendP95Ms = $backendThresholdP95Ms
         frontendP95Ms = $frontendThresholdP95Ms
+        businessP95Ms = $businessThresholdP95Ms
     }
     conclusion = $conclusion
     gate = [PSCustomObject]@{

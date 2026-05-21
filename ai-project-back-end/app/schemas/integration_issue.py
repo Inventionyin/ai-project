@@ -21,6 +21,8 @@ class IntegrationIssueCreateRequest(BaseSchema):
     issueType: str | None = Field(default=None, min_length=1, max_length=64)
     config: dict[str, object] | None = None
     credentials: dict[str, object] | None = None
+    executeRequest: bool = False
+    timeoutSeconds: float | None = Field(default=None, ge=1, le=60)
 
 
 class IntegrationIssueDetail(BaseSchema):

@@ -7,11 +7,16 @@ OUTPUT_PATH="./artifacts/performance-baseline/baseline-report.json"
 TREND_PATH="./artifacts/performance-baseline/trend-summary.json"
 ITERATIONS=10
 BUSINESS_PATHS="/api/ops/health/summary"
+BUSINESS_THRESHOLD_P95_MS=2000
 BUSINESS_HEADERS_JSON="${PERF_BASELINE_BUSINESS_HEADERS_JSON:-}"
 BUSINESS_AUTHORIZATION="${PERF_BASELINE_AUTHORIZATION:-}"
 BUSINESS_USER_ID="${PERF_BASELINE_USER_ID:-}"
 BUSINESS_TENANT_ID="${PERF_BASELINE_TENANT_ID:-}"
 BUSINESS_ROLES="${PERF_BASELINE_ROLES:-}"
+DINGTALK_WEBHOOK_URL="${DINGTALK_WEBHOOK_URL:-}"
+DINGTALK_WEBHOOK_SECRET="${DINGTALK_WEBHOOK_SECRET:-}"
+SKIP_BACKEND_SMOKE=0
+SKIP_FRONTEND_SMOKE=0
 FAIL_ON_WARN=0
 DRY_RUN=0
 
@@ -26,11 +31,16 @@ Options:
   --trend-path <path>
   --iterations <n>
   --business-paths <comma-separated paths>
+  --business-threshold-p95-ms <ms>
   --business-headers-json <json object>
   --business-authorization <bearer token or raw token>
   --business-user-id <uuid>
   --business-tenant-id <uuid>
   --business-roles <comma-separated roles>
+  --skip-backend-smoke
+  --skip-frontend-smoke
+  --dingtalk-webhook-url <url>
+  --dingtalk-webhook-secret <secret>
   --fail-on-warn
   --dry-run
   --help
@@ -45,11 +55,16 @@ while [[ $# -gt 0 ]]; do
     --trend-path) TREND_PATH="$2"; shift 2 ;;
     --iterations) ITERATIONS="$2"; shift 2 ;;
     --business-paths) BUSINESS_PATHS="$2"; shift 2 ;;
+    --business-threshold-p95-ms) BUSINESS_THRESHOLD_P95_MS="$2"; shift 2 ;;
     --business-headers-json) BUSINESS_HEADERS_JSON="$2"; shift 2 ;;
     --business-authorization) BUSINESS_AUTHORIZATION="$2"; shift 2 ;;
     --business-user-id) BUSINESS_USER_ID="$2"; shift 2 ;;
     --business-tenant-id) BUSINESS_TENANT_ID="$2"; shift 2 ;;
     --business-roles) BUSINESS_ROLES="$2"; shift 2 ;;
+    --skip-backend-smoke) SKIP_BACKEND_SMOKE=1; shift ;;
+    --skip-frontend-smoke) SKIP_FRONTEND_SMOKE=1; shift ;;
+    --dingtalk-webhook-url) DINGTALK_WEBHOOK_URL="$2"; shift 2 ;;
+    --dingtalk-webhook-secret) DINGTALK_WEBHOOK_SECRET="$2"; shift 2 ;;
     --fail-on-warn) FAIL_ON_WARN=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     --help|-h) usage; exit 0 ;;
@@ -64,20 +79,29 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
   echo "[DryRun] TrendPath: $TREND_PATH"
   echo "[DryRun] Iterations: $ITERATIONS"
   echo "[DryRun] BusinessPaths: $BUSINESS_PATHS"
+  echo "[DryRun] BusinessThresholdP95Ms: $BUSINESS_THRESHOLD_P95_MS"
   echo "[DryRun] BusinessHeadersConfigured: $([[ -n "$BUSINESS_HEADERS_JSON$BUSINESS_AUTHORIZATION$BUSINESS_USER_ID$BUSINESS_TENANT_ID" ]] && echo 1 || echo 0)"
+  echo "[DryRun] SkipBackendSmoke: $SKIP_BACKEND_SMOKE"
+  echo "[DryRun] SkipFrontendSmoke: $SKIP_FRONTEND_SMOKE"
   echo "[DryRun] FailOnWarn: $FAIL_ON_WARN"
   exit 0
 fi
 
-python3 - "$API_BASE_URL" "$FRONTEND_URL" "$OUTPUT_PATH" "$TREND_PATH" "$ITERATIONS" "$BUSINESS_PATHS" "$FAIL_ON_WARN" "$BUSINESS_HEADERS_JSON" "$BUSINESS_AUTHORIZATION" "$BUSINESS_USER_ID" "$BUSINESS_TENANT_ID" "$BUSINESS_ROLES" <<'PY'
+python3 - "$API_BASE_URL" "$FRONTEND_URL" "$OUTPUT_PATH" "$TREND_PATH" "$ITERATIONS" "$BUSINESS_PATHS" "$BUSINESS_THRESHOLD_P95_MS" "$SKIP_BACKEND_SMOKE" "$SKIP_FRONTEND_SMOKE" "$FAIL_ON_WARN" "$BUSINESS_HEADERS_JSON" "$BUSINESS_AUTHORIZATION" "$BUSINESS_USER_ID" "$BUSINESS_TENANT_ID" "$BUSINESS_ROLES" "$DINGTALK_WEBHOOK_URL" "$DINGTALK_WEBHOOK_SECRET" <<'PY'
+import base64
 import datetime as dt
+import hashlib
+import hmac
 import json
 import math
 import os
+import socket
+import subprocess
 import sys
 import time
 import urllib.error
 import urllib.request
+import urllib.parse
 
 (
     API_BASE_URL,
@@ -86,21 +110,37 @@ import urllib.request
     TREND_PATH,
     ITERATIONS,
     BUSINESS_PATHS,
+    BUSINESS_THRESHOLD_P95_MS,
+    SKIP_BACKEND_SMOKE,
+    SKIP_FRONTEND_SMOKE,
     FAIL_ON_WARN,
     BUSINESS_HEADERS_JSON,
     BUSINESS_AUTHORIZATION,
     BUSINESS_USER_ID,
     BUSINESS_TENANT_ID,
     BUSINESS_ROLES,
+    DINGTALK_WEBHOOK_URL,
+    DINGTALK_WEBHOOK_SECRET,
 ) = sys.argv[1:]
 ITERATIONS = int(ITERATIONS)
+BUSINESS_THRESHOLD_P95_MS = int(BUSINESS_THRESHOLD_P95_MS)
+SKIP_BACKEND_SMOKE = SKIP_BACKEND_SMOKE == "1"
+SKIP_FRONTEND_SMOKE = SKIP_FRONTEND_SMOKE == "1"
 FAIL_ON_WARN = FAIL_ON_WARN == "1"
 BACKEND_THRESHOLD_P95_MS = 1000
 FRONTEND_THRESHOLD_P95_MS = 2000
+SCRIPT_VERSION = "2026.05.21"
 
 
 def join_url(base: str, path: str) -> str:
     return base.rstrip("/") + path
+
+
+def git_commit():
+    try:
+        return subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], stderr=subprocess.DEVNULL, text=True).strip()
+    except Exception:
+        return None
 
 
 def percentile(values, percentile_value):
@@ -267,20 +307,76 @@ def measure_endpoint(name: str, url: str, count: int, headers=None):
     return result
 
 
-backend = measure_endpoint("backend-health", join_url(API_BASE_URL, "/health"), ITERATIONS)
-frontend = measure_endpoint("frontend-root", FRONTEND_URL, ITERATIONS)
+def skipped_result(name: str, url: str):
+    return {
+        "name": name,
+        "url": url,
+        "sampleCount": 0,
+        "successfulSamples": 0,
+        "successRatePct": None,
+        "errorRatePct": None,
+        "meanMs": None,
+        "minMs": None,
+        "p50Ms": None,
+        "p90Ms": None,
+        "p95Ms": None,
+        "maxMs": None,
+        "errorCount": 0,
+        "timeoutCount": 0,
+        "samples": [],
+        "skipped": True,
+    }
+
+
+def sign_dingtalk_url(webhook_url: str, secret: str):
+    if not webhook_url or not secret:
+        return webhook_url
+    timestamp = str(int(time.time() * 1000))
+    string_to_sign = f"{timestamp}\n{secret}".encode("utf-8")
+    digest = hmac.new(secret.encode("utf-8"), string_to_sign, hashlib.sha256).digest()
+    signature = urllib.parse.quote_plus(base64.b64encode(digest).decode("utf-8"))
+    separator = "&" if "?" in webhook_url else "?"
+    return f"{webhook_url}{separator}timestamp={timestamp}&sign={signature}"
+
+
+def send_dingtalk(status: str, message: str):
+    if not DINGTALK_WEBHOOK_URL.strip():
+        return
+    url = sign_dingtalk_url(DINGTALK_WEBHOOK_URL.strip(), DINGTALK_WEBHOOK_SECRET.strip())
+    payload = json.dumps({
+        "msgtype": "text",
+        "text": {
+            "content": f"[Performance Baseline][{status}] {message}\nHost: {socket.gethostname()}"
+        },
+    }).encode("utf-8")
+    request = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json; charset=utf-8"}, method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            response.read()
+        print("[Performance Baseline] DingTalk notification sent.")
+    except Exception as exc:
+        print(f"[Performance Baseline] DingTalk notification failed: {exc}", file=sys.stderr)
+
+
+backend = skipped_result("backend-health", join_url(API_BASE_URL, "/health")) if SKIP_BACKEND_SMOKE else measure_endpoint("backend-health", join_url(API_BASE_URL, "/health"), ITERATIONS)
+frontend = skipped_result("frontend-root", FRONTEND_URL) if SKIP_FRONTEND_SMOKE else measure_endpoint("frontend-root", FRONTEND_URL, ITERATIONS)
 business_request_headers = business_headers()
 business = []
-for path in [item.strip() for item in BUSINESS_PATHS.split(",") if item.strip()]:
-    normalized = path if path.startswith("/") else f"/{path}"
-    business.append(measure_endpoint(f"business:{normalized}", join_url(API_BASE_URL, normalized), ITERATIONS, business_request_headers))
+if not SKIP_BACKEND_SMOKE:
+    for path in [item.strip() for item in BUSINESS_PATHS.split(",") if item.strip()]:
+        normalized = path if path.startswith("/") else f"/{path}"
+        business.append(measure_endpoint(f"business:{normalized}", join_url(API_BASE_URL, normalized), ITERATIONS, business_request_headers))
 
 conclusion = "READY"
-if backend["successfulSamples"] == 0 or frontend["successfulSamples"] == 0:
+if backend["skipped"] and frontend["skipped"]:
+    conclusion = "BLOCKED"
+elif (not backend["skipped"] and backend["successfulSamples"] == 0) or (not frontend["skipped"] and frontend["successfulSamples"] == 0):
     conclusion = "BLOCKED"
 elif backend["errorCount"] > 0 or frontend["errorCount"] > 0:
     conclusion = "WARN"
 elif any(item["errorCount"] > 0 or item["successfulSamples"] == 0 for item in business):
+    conclusion = "WARN"
+elif any(item["p95Ms"] is not None and item["p95Ms"] > BUSINESS_THRESHOLD_P95_MS for item in business):
     conclusion = "WARN"
 elif (backend["p95Ms"] is not None and backend["p95Ms"] > BACKEND_THRESHOLD_P95_MS) or (
     frontend["p95Ms"] is not None and frontend["p95Ms"] > FRONTEND_THRESHOLD_P95_MS
@@ -289,6 +385,13 @@ elif (backend["p95Ms"] is not None and backend["p95Ms"] > BACKEND_THRESHOLD_P95_
 
 report = {
     "generatedAt": dt.datetime.now(dt.timezone.utc).isoformat(),
+    "metadata": {
+        "scriptVersion": SCRIPT_VERSION,
+        "gitCommit": git_commit(),
+        "host": socket.gethostname(),
+        "os": sys.platform,
+        "pythonVersion": sys.version.split()[0],
+    },
     "targets": {
         "apiBaseUrl": API_BASE_URL,
         "backendHealthUrl": join_url(API_BASE_URL, "/health"),
@@ -298,6 +401,8 @@ report = {
         "businessHeadersConfigured": bool(business_request_headers),
         "businessAuthMode": "authorization" if "Authorization" in business_request_headers else ("impersonation" if "X-User-Id" in business_request_headers and "X-Tenant-Id" in business_request_headers else "none"),
         "iterations": ITERATIONS,
+        "skipBackendSmoke": SKIP_BACKEND_SMOKE,
+        "skipFrontendSmoke": SKIP_FRONTEND_SMOKE,
     },
     "results": {
         "backend": backend,
@@ -312,6 +417,7 @@ report = {
     "thresholds": {
         "backendP95Ms": BACKEND_THRESHOLD_P95_MS,
         "frontendP95Ms": FRONTEND_THRESHOLD_P95_MS,
+        "businessP95Ms": BUSINESS_THRESHOLD_P95_MS,
     },
     "conclusion": conclusion,
     "gate": {
@@ -413,6 +519,7 @@ if comparison["previousGeneratedAt"]:
 else:
     print("Trend comparison: no previous run yet")
 print(f"Conclusion: {conclusion}")
+send_dingtalk(conclusion, f"Output: {OUTPUT_PATH}")
 if report["gate"]["shouldFail"]:
     print("Performance baseline gate failed (FailOnWarn enabled).", file=sys.stderr)
     sys.exit(report["gate"]["exitCode"])
