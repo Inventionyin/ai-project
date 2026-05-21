@@ -106,6 +106,12 @@ jobs:
         run: |
           ./scripts/run_performance_baseline.ps1 -DryRun
 
+      - name: Run production readiness dry-run
+        shell: pwsh
+        run: |
+          ./scripts/verify_production_readiness.ps1 -DryRun
+          bash ./scripts/verify_production_readiness.sh --dry-run
+
       - name: Run external integrations diagnostics dry-run (if script exists)
         if: ${{ hashFiles('scripts/verify_external_integrations.ps1') != '' }}
         shell: pwsh
