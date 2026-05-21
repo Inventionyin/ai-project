@@ -100,5 +100,6 @@ npm run build
 - 项目开发规范：`docs/development-standards.md`
 - 测试规范：`docs/testing-standards.md`
 - AI 协作开发规则：`docs/ai-coding-rules.md`
+- 最终验收推进表：`docs/final-acceptance-roadmap.md`
 
 后续人工或 AI 继续开发时，默认先按上述规范检查目录、接口、页面入口、测试和验收证据。
