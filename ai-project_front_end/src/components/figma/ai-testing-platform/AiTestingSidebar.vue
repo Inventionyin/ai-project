@@ -104,6 +104,7 @@ const resolvedActiveAssetChild = computed(() => {
   if (route.path.startsWith(`/projects/${projectId.value}/settings/ci-token-governance`)) return 'CI Token 治理'
   if (route.path.startsWith(`/projects/${projectId.value}/settings/ai-capabilities`)) return 'AI 能力中心'
   if (route.path.startsWith(`/projects/${projectId.value}/settings/ops-health`)) return '运维健康'
+  if (route.path.startsWith(`/projects/${projectId.value}/settings/acceptance`)) return '验收中心'
   if (route.path.startsWith('/figma/untitled-47-1415')) return '测试套件'
   if (route.path.startsWith('/figma/untitled-34-158')) return '用例管理'
   if (route.path.startsWith('/figma/untitled-9-3')) return '用例管理'
@@ -175,7 +176,8 @@ const settingsLinks = computed<LinkItem[]>(() => [
   { label: '安全审计', icon: navAudit, to: `/projects/${projectId.value}/settings/security-audit` },
   { label: 'CI Token 治理', icon: navIntegrations, to: `/projects/${projectId.value}/settings/ci-token-governance` },
   { label: 'AI 能力中心', icon: navAsset, to: `/projects/${projectId.value}/settings/ai-capabilities` },
-  { label: '运维健康', icon: navAudit, to: `/projects/${projectId.value}/settings/ops-health` }
+  { label: '运维健康', icon: navAudit, to: `/projects/${projectId.value}/settings/ops-health` },
+  { label: '验收中心', icon: navAudit, to: `/projects/${projectId.value}/settings/acceptance` }
 ])
 </script>
 

@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api.v1.endpoints.auth import router as auth_router
 from app.api.v1.endpoints.dashboard import router as dashboard_router
+from app.api.v1.endpoints.acceptance import router as acceptance_router
 from app.api.v1.endpoints.environments import router as environments_router
 from app.api.v1.endpoints.api_targets import router as api_targets_router
 from app.api.v1.endpoints.projects import router as projects_router
@@ -41,6 +42,7 @@ router.include_router(environments_router, tags=["environments"])
 router.include_router(runs_router, tags=["runs"])
 router.include_router(collections_router, tags=["collections"])
 router.include_router(dashboard_router, tags=["dashboard"])
+router.include_router(acceptance_router, tags=["acceptance"])
 router.include_router(worker_router, tags=["workers"])
 router.include_router(doc_ingest_router, tags=["doc-ingest"])
 router.include_router(ui_tests_router, tags=["ui-tests"])
