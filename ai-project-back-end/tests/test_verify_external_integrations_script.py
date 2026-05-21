@@ -123,6 +123,20 @@ def test_verify_external_integrations_supports_business_closure_guardrails():
     assert not missing, f"Missing expected business closure tokens: {missing}"
 
 
+def test_verify_external_integrations_marks_cleanup_failures_as_business_failures():
+    repo_root = Path(__file__).resolve().parents[2]
+    script = repo_root / "scripts" / "verify_external_integrations.ps1"
+    content = script.read_text(encoding="utf-8")
+
+    required_tokens = [
+        "Add-BusinessClosureFailure",
+        'cleanup failed',
+    ]
+
+    missing = [token for token in required_tokens if token not in content]
+    assert not missing, f"Missing expected cleanup failure tokens: {missing}"
+
+
 def test_verify_external_integrations_business_closure_has_provider_specific_fallbacks():
     repo_root = Path(__file__).resolve().parents[2]
     script = repo_root / "scripts" / "verify_external_integrations.ps1"

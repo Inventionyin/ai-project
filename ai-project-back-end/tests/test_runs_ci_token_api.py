@@ -346,6 +346,39 @@ def test_named_ci_tokens_rotate_list_policy_revoke_and_leak(monkeypatch: pytest.
     assert leak_resp.json()["data"]["state"] == "leaked"
 
 
+def test_ci_token_status_redacts_operator_ids(monkeypatch: pytest.MonkeyPatch) -> None:
+    project_id = uuid.UUID("22222222-2222-2222-2222-222222222222")
+    now = datetime.utcfromtimestamp(1710000000)
+    expires_at = datetime.utcfromtimestamp(1710864000)
+
+    async def _fake_status(db, *, user, project_id):
+        return SimpleNamespace(
+            id=project_id,
+            ci_token_hash="hash",
+            ci_token_hint="ci_x...abcd",
+            ci_token_rotated_at=now,
+            ci_token_last_used_at=now,
+            ci_token_rotated_by=uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+            ci_token_expires_at=expires_at,
+            ci_token_revoked_at=None,
+            ci_token_revoked_by=None,
+            ci_token_revoked_reason=None,
+            ci_token_leak_reported_at=None,
+            ci_token_leak_reported_by=None,
+            ci_token_allowed_runner_types=["DEFAULT"],
+            ci_token_allowed_testcase_ids=[],
+            ci_token_max_testcase_count=3,
+        )
+
+    monkeypatch.setattr(runs_endpoint, "get_project_ci_token_status", _fake_status)
+
+    client = TestClient(_build_app())
+    resp = client.get(f"/api/runs/ci-token/status?projectId={project_id}")
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["rotatedBy"] == "aaaaaaaa...aaaa"
+
+
 def test_ci_trigger_success_sets_trigger_type_ci(monkeypatch: pytest.MonkeyPatch) -> None:
     project_id = uuid.UUID("22222222-2222-2222-2222-222222222222")
     run_id = uuid.UUID("33333333-3333-3333-3333-333333333333")

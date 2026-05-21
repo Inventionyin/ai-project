@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
+
+from app.services.plugin_sandbox import validate_sandbox_policy
 
 
 def _read_request() -> dict:
@@ -19,14 +22,32 @@ def _write_response(payload: dict) -> None:
     sys.stdout.flush()
 
 
+def _error(code: str, message: str, details: list[str] | None = None) -> dict:
+    return {"code": code, "message": message, "details": details or []}
+
+
+def _validate_runtime_request(request: dict) -> dict:
+    policy = request.get("sandboxPolicy") if isinstance(request.get("sandboxPolicy"), dict) else {}
+    details = validate_sandbox_policy(policy)
+    payload = request.get("payload") if isinstance(request.get("payload"), dict) else {}
+    payload_size = len(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+    max_payload = policy.get("maxPayloadBytes") if isinstance(policy.get("maxPayloadBytes"), int) else 0
+    if max_payload and payload_size > max_payload:
+        details.append("payload exceeds sandboxPolicy.maxPayloadBytes")
+    if details:
+        raise RuntimeError(json.dumps(_error("policy_invalid", "Sandbox policy is invalid", details), ensure_ascii=False))
+    return policy
+
+
 def _run(entry_point: str, request: dict) -> dict:
     payload = request.get("payload") if isinstance(request.get("payload"), dict) else {}
-    policy = request.get("sandboxPolicy") if isinstance(request.get("sandboxPolicy"), dict) else {}
+    policy = _validate_runtime_request(request)
     network_mode = str(policy.get("networkMode") or "OFF")
     allowed_hosts = set(policy.get("allowedHosts") or [])
 
     if entry_point == "builtin.echo":
-        return {"payload": payload, "networkMode": network_mode}
+        leaked_env = sorted(name for name in os.environ if any(marker in name.lower() for marker in ("token", "secret", "password", "key")))
+        return {"payload": payload, "networkMode": network_mode, "leakedSecretEnv": leaked_env}
 
     if entry_point == "builtin.sleep":
         time.sleep(float(payload.get("seconds") or 0))
@@ -37,6 +58,8 @@ def _run(entry_point: str, request: dict) -> dict:
         host = urlparse(url).hostname or ""
         if network_mode == "OFF":
             raise RuntimeError("Outbound network is blocked by sandboxPolicy.networkMode=OFF")
+        if "CALL_EXTERNAL" not in set(policy.get("permissions") or []):
+            raise RuntimeError("CALL_EXTERNAL permission is required for builtin.http-get")
         if network_mode == "ALLOWLIST" and host not in allowed_hosts:
             raise RuntimeError(f"Host is not allowed by sandboxPolicy.allowedHosts: {host}")
         request_obj = Request(url, headers={"User-Agent": "WeiTesting-PluginSandbox/1.0"})
@@ -53,7 +76,15 @@ def main() -> int:
         _write_response({"ok": True, "output": response})
         return 0
     except Exception as exc:  # pragma: no cover - subprocess boundary
-        _write_response({"ok": False, "error": str(exc)})
+        text = str(exc)
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, dict) and parsed.get("code"):
+                _write_response({"ok": False, "error": parsed})
+                return 1
+        except json.JSONDecodeError:
+            pass
+        _write_response({"ok": False, "error": _error("runtime_error", text)})
         return 1
 
 

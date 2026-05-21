@@ -65,7 +65,7 @@ export async function fetchRequirementChangeSets(projectId: string, docId: strin
   const pid = requireId(projectId, '项目 ID 不能为空')
   const did = requireId(docId, '文档 ID 不能为空')
   const data = await requestJson<RequirementChangeSetDetail[] | { items?: RequirementChangeSetDetail[] }>(
-    `/projects/${encodeURIComponent(pid)}/requirements/docs/${encodeURIComponent(did)}/change-sets`,
+    `/api/projects/${encodeURIComponent(pid)}/requirements/docs/${encodeURIComponent(did)}/change-sets`,
     { method: 'GET', headers: authHeader() }
   )
   return normalizeChangeSetList(data)
@@ -77,7 +77,7 @@ export async function createRequirementChangeSet(projectId: string, docId: strin
   const baselineVersionId = requireId(payload.baselineVersionId, '基线版本不能为空')
   const targetVersionId = requireId(payload.targetVersionId, '目标版本不能为空')
   if (baselineVersionId === targetVersionId) throw new Error('基线版本和目标版本不能相同')
-  return requestJson<RequirementChangeSetDetail>(`/projects/${encodeURIComponent(pid)}/requirements/docs/${encodeURIComponent(did)}/change-sets`, {
+  return requestJson<RequirementChangeSetDetail>(`/api/projects/${encodeURIComponent(pid)}/requirements/docs/${encodeURIComponent(did)}/change-sets`, {
     method: 'POST',
     headers: { ...authHeader(), 'Content-Type': 'application/json' },
     body: JSON.stringify({ baselineVersionId, targetVersionId })
@@ -88,7 +88,7 @@ export async function fetchRequirementChangeSetDetail(projectId: string, changeS
   const pid = requireId(projectId, '项目 ID 不能为空')
   const cid = requireId(changeSetId, '变更分析 ID 不能为空')
   return requestJson<RequirementChangeSetDetail>(
-    `/projects/${encodeURIComponent(pid)}/requirements/change-sets/${encodeURIComponent(cid)}`,
+    `/api/projects/${encodeURIComponent(pid)}/requirements/change-sets/${encodeURIComponent(cid)}`,
     { method: 'GET', headers: authHeader() }
   )
 }
@@ -97,7 +97,7 @@ export async function generateRequirementRegressionSet(projectId: string, change
   const pid = requireId(projectId, '项目 ID 不能为空')
   const cid = requireId(changeSetId, '变更分析 ID 不能为空')
   return requestJson<RequirementRegressionSetDetail>(
-    `/projects/${encodeURIComponent(pid)}/requirements/change-sets/${encodeURIComponent(cid)}/regression-set`,
+    `/api/projects/${encodeURIComponent(pid)}/requirements/change-sets/${encodeURIComponent(cid)}/regression-set`,
     { method: 'POST', headers: authHeader() }
   )
 }
@@ -106,7 +106,7 @@ export async function fetchRequirementRegressionSetByChangeSet(projectId: string
   const pid = requireId(projectId, '项目 ID 不能为空')
   const cid = requireId(changeSetId, '变更分析 ID 不能为空')
   return requestJson<RequirementRegressionSetDetail | null>(
-    `/projects/${encodeURIComponent(pid)}/requirements/change-sets/${encodeURIComponent(cid)}/regression-set`,
+    `/api/projects/${encodeURIComponent(pid)}/requirements/change-sets/${encodeURIComponent(cid)}/regression-set`,
     { method: 'GET', headers: authHeader() }
   )
 }
@@ -115,7 +115,7 @@ export async function fetchRequirementRegressionSet(projectId: string, regressio
   const pid = requireId(projectId, '项目 ID 不能为空')
   const rid = requireId(regressionSetId, '回归集 ID 不能为空')
   return requestJson<RequirementRegressionSetDetail>(
-    `/projects/${encodeURIComponent(pid)}/requirements/regression-sets/${encodeURIComponent(rid)}`,
+    `/api/projects/${encodeURIComponent(pid)}/requirements/regression-sets/${encodeURIComponent(rid)}`,
     { method: 'GET', headers: authHeader() }
   )
 }

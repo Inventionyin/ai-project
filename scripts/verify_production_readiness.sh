@@ -170,13 +170,43 @@ def test_jenkins_backup(backup_dir: str):
     })
 
 
+def test_observability_rule_files():
+    prometheus_config = os.path.join("deploy", "observability", "prometheus.yml")
+    alert_rules = os.path.join("deploy", "observability", "alert-rules.yml")
+    if not os.path.exists(prometheus_config) or not os.path.exists(alert_rules):
+        return check("observability-rule-files", "BLOCKED", "Prometheus config or alert-rules.yml is missing.", {
+            "prometheusConfig": prometheus_config,
+            "alertRules": alert_rules,
+        })
+    with open(prometheus_config, encoding="utf-8") as fh:
+        prometheus_content = fh.read()
+    with open(alert_rules, encoding="utf-8") as fh:
+        alert_content = fh.read()
+    required_tokens = [
+        "rule_files:",
+        "alert-rules.yml",
+        "WeiTestingApiDown",
+        "WeiTestingHighServerErrorRate",
+        "WeiTestingObservabilityNotReady",
+    ]
+    missing = [
+        token for token in required_tokens
+        if token not in prometheus_content and token not in alert_content
+    ]
+    if missing:
+        return check("observability-rule-files", "WARN", "Observability rule files are present but incomplete.", {"missing": missing})
+    return check("observability-rule-files", "READY", "Prometheus alert rule files are present.")
+
+
 checks = [
     test_http_endpoint("app-public-url", APP_URL, required_content='<div id="app"></div>'),
     test_http_endpoint("api-health", join_url(API_BASE_URL, "/health"), required_content='"status":"ok"'),
+    test_http_endpoint("api-metrics", join_url(API_BASE_URL, "/metrics"), required_content="weitesting_observability_ready"),
     test_http_endpoint("grafana-health", join_url(GRAFANA_URL, "/api/health"), required_content='"database"'),
     test_http_endpoint("jenkins-login", join_url(JENKINS_URL, "/login"), required_content="Sign in to Jenkins"),
     test_prometheus_targets(PROMETHEUS_URL),
     test_jenkins_backup(JENKINS_BACKUP_DIR),
+    test_observability_rule_files(),
 ]
 
 blocked = sum(1 for item in checks if item["status"] == "BLOCKED")
@@ -184,7 +214,7 @@ warn = sum(1 for item in checks if item["status"] == "WARN")
 conclusion = "BLOCKED" if blocked else ("WARN" if warn else "READY")
 recommended_actions = []
 if any(item["name"] == "prometheus-targets" and item["status"] != "READY" for item in checks):
-    recommended_actions.append("Verify Jenkins /prometheus returns 200; install/enable Jenkins Prometheus plugin and grant scrape access if Jenkins metrics are required.")
+    recommended_actions.append("Repo-local /metrics is checked separately; verify Prometheus scrape config for weitesting-backend and Jenkins /prometheus only if external dashboards/alerts are required.")
 if any(item["name"] == "jenkins-backup" and item["status"] != "READY" for item in checks):
     recommended_actions.append("Run deploy/jenkins/backup_jenkins.sh and perform one restore drill before production cutover.")
 recommended_actions.append("Keep Jenkins and Grafana behind strong login or Cloudflare Access before inviting external users.")

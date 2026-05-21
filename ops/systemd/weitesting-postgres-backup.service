@@ -1,0 +1,9 @@
+[Unit]
+Description=WeiTesting PostgreSQL backup
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/opt/weitesting/backend/.env
+Environment=BACKUP_DIR=/opt/weitesting/backups/postgres
+Environment=RETENTION_DAYS=14
+ExecStart=/usr/local/bin/weitesting-backup-postgres

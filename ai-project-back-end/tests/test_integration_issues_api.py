@@ -225,3 +225,108 @@ def test_integration_issue_create_redacts_sensitive_provider_error(monkeypatch: 
         asyncio.run(_run())
     assert exc.value.status_code == 400
     assert exc.value.detail == "issue_provider_error: sensitive value redacted"
+
+
+def test_integration_issue_create_redacts_provider_config_details(monkeypatch: pytest.MonkeyPatch) -> None:
+    user = CurrentUser(
+        id=uuid.UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+        tenant_id=uuid.UUID("11111111-1111-1111-1111-111111111111"),
+        roles=frozenset(),
+    )
+
+    def _provider(_provider: str, **kwargs):
+        raise ValueError("jira_missing_base_url")
+
+    monkeypatch.setattr(integration_issue_service, "resolve_issue_provider", lambda _name: _provider)
+    payload = IntegrationIssueCreateRequest(
+        provider="JIRA",
+        runId="33333333-3333-3333-3333-333333333333",
+        title="x",
+    )
+
+    async def _run():
+        return await integration_issue_service.create_issue_link(
+            _CreateIssueDb(),
+            user=user,
+            project_id=uuid.UUID("22222222-2222-2222-2222-222222222222"),
+            payload=payload,
+        )
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(_run())
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "issue_provider_error: provider config missing or invalid"
+
+
+def test_integration_issue_create_passes_execute_request_flag_to_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    user = CurrentUser(
+        id=uuid.UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+        tenant_id=uuid.UUID("11111111-1111-1111-1111-111111111111"),
+        roles=frozenset(),
+    )
+    observed: dict[str, object] = {}
+
+    def _provider(_provider: str, **kwargs):
+        observed.update(kwargs)
+        return integration_issue_service.IssueProviderResult(
+            issue_key="JIRA-123",
+            url="https://jira.example/browse/JIRA-123",
+        )
+
+    monkeypatch.setattr(integration_issue_service, "resolve_issue_provider", lambda _name: _provider)
+    payload = IntegrationIssueCreateRequest(
+        provider="JIRA",
+        runId="33333333-3333-3333-3333-333333333333",
+        title="真实创建",
+        executeRequest=True,
+        timeoutSeconds=3.5,
+        config={"realCreateEnabled": True},
+    )
+
+    async def _run():
+        return await integration_issue_service.create_issue_link(
+            _CreateIssueDb(),
+            user=user,
+            project_id=uuid.UUID("22222222-2222-2222-2222-222222222222"),
+            payload=payload,
+        )
+
+    detail = asyncio.run(_run())
+    assert detail.issueKey == "JIRA-123"
+    assert observed["execute_request"] is True
+    assert observed["timeout"] == 3.5
+
+
+def test_integration_issue_create_blocks_execute_request_without_config_opt_in(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = CurrentUser(
+        id=uuid.UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+        tenant_id=uuid.UUID("11111111-1111-1111-1111-111111111111"),
+        roles=frozenset(),
+    )
+
+    def _provider(_provider: str, **kwargs):
+        raise AssertionError("provider should not be called when real creation is not configured")
+
+    monkeypatch.setattr(integration_issue_service, "resolve_issue_provider", lambda _name: _provider)
+    payload = IntegrationIssueCreateRequest(
+        provider="JIRA",
+        runId="33333333-3333-3333-3333-333333333333",
+        title="真实创建",
+        executeRequest=True,
+        config={},
+    )
+
+    async def _run():
+        return await integration_issue_service.create_issue_link(
+            _CreateIssueDb(),
+            user=user,
+            project_id=uuid.UUID("22222222-2222-2222-2222-222222222222"),
+            payload=payload,
+        )
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(_run())
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "real_issue_creation_not_enabled"

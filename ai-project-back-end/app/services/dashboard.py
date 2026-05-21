@@ -5,15 +5,18 @@ import uuid
 from datetime import date, datetime, time, timedelta
 
 from fastapi import HTTPException
-from sqlalchemy import and_, case, func, or_, select
+from sqlalchemy import and_, case, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, to_unix_ts
+from app.models.audit import AuditLog
 from app.models.enums import CaseRunStatus, Priority, ProjectRole, RunStatus
+from app.models.defect import Defect
 from app.models.project import Project, ProjectMember
 from app.models.run import CaseRun, Run
 from app.models.suite import Suite
 from app.models.testcase import TestCase
+from app.models.requirement import RequirementDoc
 from app.schemas.dashboard import (
     DashboardFailureTopData,
     DashboardFailureTopSuiteItem,
@@ -21,9 +24,20 @@ from app.schemas.dashboard import (
     DashboardQualityGateData,
     DashboardQualityGateItem,
     DashboardSummaryData,
+    DashboardTrialOperationAcceptanceSummary,
+    DashboardTrialOperationData,
+    DashboardTrialOperationReportData,
+    DashboardTrialOperationReportSnapshotCreateRequest,
+    DashboardTrialOperationReportSnapshotData,
     DashboardTrendData,
     DashboardTrendItem,
 )
+from app.services.defect import list_defect_clusters, list_defect_risk_hints
+
+
+_TRIAL_OPERATION_REPORT_SNAPSHOT_MODULE = "trial-operation-report"
+_TRIAL_OPERATION_REPORT_SNAPSHOT_ACTION = "SNAPSHOT_REPORT"
+_TRIAL_OPERATION_REPORT_SNAPSHOT_RESOURCE_TYPE = "trial_operation_report_snapshot"
 
 
 def _is_admin(user: CurrentUser) -> bool:
@@ -158,6 +172,44 @@ def _format_percent(value: float) -> str:
     if rounded.is_integer():
         return f"{int(rounded)}%"
     return f"{rounded:.1f}%"
+
+
+def _enum_key(value: object) -> str:
+    raw = getattr(value, "value", value)
+    return str(raw or "未填写")
+
+
+async def _count_rows(db: AsyncSession, model: object, *, tenant_id: uuid.UUID, project_id: uuid.UUID) -> int:
+    return int(
+        (
+            await db.execute(
+                select(func.count())
+                .select_from(model)
+                .where(model.tenant_id == tenant_id, model.project_id == project_id)
+            )
+        ).scalar_one()
+        or 0
+    )
+
+
+async def _distribution(
+    db: AsyncSession,
+    field: object,
+    *,
+    tenant_id: uuid.UUID,
+    project_id: uuid.UUID,
+    limit: int | None = None,
+) -> dict[str, int]:
+    stmt = (
+        select(field, func.count())
+        .where(field.class_.tenant_id == tenant_id, field.class_.project_id == project_id)
+        .group_by(field)
+        .order_by(func.count().desc())
+    )
+    if limit is not None:
+        stmt = stmt.limit(limit)
+    rows = (await db.execute(stmt)).all()
+    return {_enum_key(key): int(count or 0) for key, count in rows}
 
 
 def _build_unknown_quality_gate() -> DashboardQualityGateData:
@@ -523,3 +575,321 @@ async def get_dashboard_quality_gate(
         linkedRunId=str(latest_run.id),
         gates=gates,
     )
+
+
+async def get_dashboard_trial_operation(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+) -> DashboardTrialOperationData:
+    project = await _get_project(db, user=user, project_id=project_id)
+    await _require_project_read(db, user=user, project=project)
+
+    requirement_docs = await _count_rows(db, RequirementDoc, tenant_id=user.tenant_id, project_id=project.id)
+    testcases = await _count_rows(db, TestCase, tenant_id=user.tenant_id, project_id=project.id)
+    defects = await _count_rows(db, Defect, tenant_id=user.tenant_id, project_id=project.id)
+
+    clusters = await list_defect_clusters(db, user=user, project_id=project.id)
+    risk_hints = await list_defect_risk_hints(db, user=user, project_id=project.id)
+
+    sample_rows = (
+        await db.execute(
+            select(TestCase.title)
+            .where(TestCase.tenant_id == user.tenant_id, TestCase.project_id == project.id)
+            .order_by(TestCase.updated_at.desc().nullslast(), TestCase.id.desc())
+            .limit(8)
+        )
+    ).all()
+
+    defect_severity_distribution = await _distribution(
+        db, Defect.severity, tenant_id=user.tenant_id, project_id=project.id
+    )
+    acceptance_summary = _build_trial_operation_acceptance_summary(
+        metrics={
+            "requirementDocs": requirement_docs,
+            "testcases": testcases,
+            "defects": defects,
+            "defectClusters": len(clusters),
+            "riskHints": len(risk_hints),
+        },
+        defect_severity_distribution=defect_severity_distribution,
+    )
+
+    return DashboardTrialOperationData(
+        metrics={
+            "requirementDocs": requirement_docs,
+            "testcases": testcases,
+            "defects": defects,
+            "defectClusters": len(clusters),
+            "riskHints": len(risk_hints),
+        },
+        testcasePriorityDistribution=await _distribution(
+            db, TestCase.priority, tenant_id=user.tenant_id, project_id=project.id
+        ),
+        testcaseStatusDistribution=await _distribution(
+            db, TestCase.status, tenant_id=user.tenant_id, project_id=project.id
+        ),
+        testcaseTypeDistribution=await _distribution(
+            db, TestCase.type, tenant_id=user.tenant_id, project_id=project.id
+        ),
+        testcaseFeatureDistribution=await _distribution(
+            db, TestCase.feature, tenant_id=user.tenant_id, project_id=project.id, limit=16
+        ),
+        defectSeverityDistribution=defect_severity_distribution,
+        defectStatusDistribution=await _distribution(
+            db, Defect.status, tenant_id=user.tenant_id, project_id=project.id
+        ),
+        topDefectClusters=[item.model_dump() for item in clusters[:8]],
+        topRiskHints=[item.model_dump() for item in risk_hints[:8]],
+        sampleTestcases=[str(row[0]) for row in sample_rows if row and row[0]],
+        acceptanceSummary=acceptance_summary,
+    )
+
+
+def _build_trial_operation_acceptance_summary(
+    *,
+    metrics: dict[str, int],
+    defect_severity_distribution: dict[str, int],
+) -> DashboardTrialOperationAcceptanceSummary:
+    requirement_docs = int(metrics.get("requirementDocs", 0) or 0)
+    testcases = int(metrics.get("testcases", 0) or 0)
+    defects = int(metrics.get("defects", 0) or 0)
+    risk_hints = int(metrics.get("riskHints", 0) or 0)
+    p0_defects = int(defect_severity_distribution.get("P0", 0) or 0)
+
+    highlights = [
+        f"已纳入 {testcases} 条测试用例",
+        f"覆盖 {requirement_docs} 份需求文档",
+        f"已汇总 {defects} 条缺陷记录",
+    ]
+
+    risks: list[str] = []
+    next_actions: list[str] = []
+    if p0_defects > 0:
+        risks.append(f"仍有 {p0_defects} 个 P0 缺陷未关闭")
+        next_actions.append("优先关闭 P0 缺陷并补充回归")
+    if risk_hints > 20:
+        risks.append(f"当前风险提示总量 {risk_hints} 条")
+        next_actions.append("按风险提示清单推进修复验收")
+
+    if testcases == 0 or requirement_docs == 0:
+        score = 30 if (testcases > 0 or requirement_docs > 0) else 0
+        return DashboardTrialOperationAcceptanceSummary(
+            conclusion="数据不足",
+            score=score,
+            level="INSUFFICIENT",
+            highlights=highlights[:3],
+            risks=(risks + ["需求文档或测试用例基线不足"])[:4],
+            nextActions=(next_actions + ["补充需求文档和测试用例后再评审"])[:4],
+        )
+
+    if p0_defects > 0:
+        score = max(50, 72 - min(p0_defects, 10))
+        level = "BLOCKED" if p0_defects >= 5 else "WARNING"
+        conclusion = "建议暂缓" if level == "BLOCKED" else "建议谨慎通过"
+        return DashboardTrialOperationAcceptanceSummary(
+            conclusion=conclusion,
+            score=score,
+            level=level,
+            highlights=highlights[:3],
+            risks=risks[:4],
+            nextActions=(next_actions + ["明确修复完成标准与复测窗口"])[:4],
+        )
+
+    if risk_hints > 20:
+        score = max(50, 79 - min((risk_hints - 20) // 5, 15))
+        return DashboardTrialOperationAcceptanceSummary(
+            conclusion="建议谨慎通过",
+            score=score,
+            level="WARNING",
+            highlights=highlights[:3],
+            risks=risks[:4],
+            nextActions=(next_actions + ["按风险等级拆分治理责任人"])[:4],
+        )
+
+    score = 88 + min(12, requirement_docs // 20 + testcases // 300)
+    return DashboardTrialOperationAcceptanceSummary(
+        conclusion="建议通过",
+        score=min(100, score),
+        level="PASS",
+        highlights=highlights[:3],
+        risks=[],
+        nextActions=["持续跟踪新增缺陷与回归结果", "保持需求与用例字段完整性"][:4],
+    )
+
+
+def _render_trial_operation_report_markdown(data: DashboardTrialOperationData) -> str:
+    def _lines(items: list[str], *, limit: int | None = None) -> list[str]:
+        picked = items[:limit] if limit is not None else items
+        if not picked:
+            return ["- 暂无"]
+        return [f"- {item}" for item in picked]
+
+    metrics = data.metrics
+    summary = data.acceptanceSummary
+    cluster_lines = [
+        f"- {item.clusterKey}: {item.count}（置信度 {round(item.confidence * 100)}%）"
+        for item in data.topDefectClusters[:5]
+    ] or ["- 暂无"]
+    risk_hint_lines = [
+        f"- [{item.severity}] {item.title}（风险分 {item.riskScore:.1f}）"
+        for item in data.topRiskHints[:5]
+    ] or ["- 暂无"]
+
+    lines: list[str] = [
+        "# WeiTesting 真实数据试运行验收报告",
+        "",
+        "## 结论",
+        f"- 结论：{summary.conclusion}",
+        f"- 评分：{summary.score}",
+        f"- 等级：{summary.level}",
+        "",
+        "## 核心数据",
+        f"- 需求文档：{int(metrics.get('requirementDocs', 0) or 0)}",
+        f"- 测试用例：{int(metrics.get('testcases', 0) or 0)}",
+        f"- 缺陷：{int(metrics.get('defects', 0) or 0)}",
+        f"- 缺陷聚类：{int(metrics.get('defectClusters', 0) or 0)}",
+        f"- 风险提示：{int(metrics.get('riskHints', 0) or 0)}",
+        "",
+        "### 缺陷聚类（Top）",
+        *cluster_lines,
+        "",
+        "### 风险提示（Top）",
+        *risk_hint_lines,
+        "",
+        "## 亮点",
+        *_lines(summary.highlights),
+        "",
+        "## 风险",
+        *_lines(summary.risks),
+        "",
+        "## 下一步",
+        *_lines(summary.nextActions),
+        "",
+        "## 样例用例",
+        *_lines(data.sampleTestcases, limit=5),
+    ]
+    return "\n".join(lines)
+
+
+async def get_dashboard_trial_operation_report(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+) -> DashboardTrialOperationReportData:
+    trial_data = await get_dashboard_trial_operation(db, user=user, project_id=project_id)
+    return DashboardTrialOperationReportData(
+        title="WeiTesting 真实数据试运行验收报告",
+        generatedAt=to_unix_ts(datetime.utcnow()),
+        markdown=_render_trial_operation_report_markdown(trial_data),
+        summary=trial_data.acceptanceSummary,
+    )
+
+
+def _to_trial_operation_report_snapshot(row: AuditLog) -> DashboardTrialOperationReportSnapshotData:
+    detail = dict(row.detail_json or {})
+    summary = dict(detail.get("summary") or {})
+    score = detail.get("score", detail.get("acceptanceScore"))
+    level = detail.get("level", detail.get("acceptanceLevel"))
+    return DashboardTrialOperationReportSnapshotData(
+        id=str(row.id),
+        projectId=str(row.project_id) if row.project_id else None,
+        title=str(detail.get("title") or row.summary or "WeiTesting 真实数据试运行验收报告"),
+        generatedAt=int(detail.get("generatedAt") or 0),
+        markdown=str(detail.get("markdown") or ""),
+        summary=summary,
+        score=score,
+        level=level,
+        acceptanceScore=score,
+        acceptanceLevel=level,
+        createdBy=str(row.user_id) if row.user_id else None,
+        createdAt=to_unix_ts(row.created_at),
+    )
+
+
+def _trial_operation_report_snapshot_detail(report: DashboardTrialOperationReportData) -> dict:
+    payload = report.model_dump()
+    summary = payload.get("summary") or {}
+    payload["score"] = summary.get("score")
+    payload["level"] = summary.get("level")
+    payload["acceptanceScore"] = payload["score"]
+    payload["acceptanceLevel"] = payload["level"]
+    return payload
+
+
+async def create_dashboard_trial_operation_report_snapshot(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+    payload: DashboardTrialOperationReportSnapshotCreateRequest | None = None,
+) -> DashboardTrialOperationReportSnapshotData:
+    project = await _get_project(db, user=user, project_id=project_id)
+    await _require_project_read(db, user=user, project=project)
+
+    report = payload or await get_dashboard_trial_operation_report(db, user=user, project_id=project_id)
+    detail = _trial_operation_report_snapshot_detail(report)
+    row = AuditLog(
+        tenant_id=user.tenant_id,
+        project_id=project.id,
+        user_id=user.id,
+        module=_TRIAL_OPERATION_REPORT_SNAPSHOT_MODULE,
+        action=_TRIAL_OPERATION_REPORT_SNAPSHOT_ACTION,
+        resource_type=_TRIAL_OPERATION_REPORT_SNAPSHOT_RESOURCE_TYPE,
+        resource_id=str(uuid.uuid4()),
+        summary=report.title,
+        detail_json=detail,
+    )
+    db.add(row)
+    await db.flush()
+    return _to_trial_operation_report_snapshot(row)
+
+
+async def list_dashboard_trial_operation_report_snapshots(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+    page: int,
+    page_size: int,
+) -> tuple[int, list[DashboardTrialOperationReportSnapshotData]]:
+    project = await _get_project(db, user=user, project_id=project_id)
+    await _require_project_read(db, user=user, project=project)
+    base_stmt = select(AuditLog).where(
+        AuditLog.tenant_id == user.tenant_id,
+        AuditLog.project_id == project.id,
+        AuditLog.module == _TRIAL_OPERATION_REPORT_SNAPSHOT_MODULE,
+        AuditLog.action == _TRIAL_OPERATION_REPORT_SNAPSHOT_ACTION,
+        AuditLog.resource_type == _TRIAL_OPERATION_REPORT_SNAPSHOT_RESOURCE_TYPE,
+    )
+    total = int((await db.execute(select(func.count()).select_from(base_stmt.subquery()))).scalar_one() or 0)
+    rows = (
+        await db.execute(base_stmt.order_by(desc(AuditLog.created_at)).offset((page - 1) * page_size).limit(page_size))
+    ).scalars().all()
+    return total, [_to_trial_operation_report_snapshot(row) for row in rows]
+
+
+async def get_dashboard_trial_operation_report_snapshot(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+    snapshot_id: uuid.UUID,
+) -> DashboardTrialOperationReportSnapshotData:
+    project = await _get_project(db, user=user, project_id=project_id)
+    await _require_project_read(db, user=user, project=project)
+    row = await db.scalar(
+        select(AuditLog).where(
+            AuditLog.id == snapshot_id,
+            AuditLog.tenant_id == user.tenant_id,
+            AuditLog.project_id == project.id,
+            AuditLog.module == _TRIAL_OPERATION_REPORT_SNAPSHOT_MODULE,
+            AuditLog.action == _TRIAL_OPERATION_REPORT_SNAPSHOT_ACTION,
+            AuditLog.resource_type == _TRIAL_OPERATION_REPORT_SNAPSHOT_RESOURCE_TYPE,
+        )
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="trial_operation_report_snapshot_not_found")
+    return _to_trial_operation_report_snapshot(row)

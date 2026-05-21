@@ -52,6 +52,8 @@ class PluginDetail(BaseSchema):
     createdAt: int
     updatedAt: int
     sandboxPolicy: SandboxPolicy
+    sandboxPolicyValid: bool = True
+    sandboxPolicyError: str | None = None
 
 
 class PluginInstallRequest(BaseSchema):
@@ -73,6 +75,8 @@ class PluginInstallationDetail(BaseSchema):
     createdAt: int
     updatedAt: int
     sandboxPolicy: SandboxPolicy
+    sandboxPolicyValid: bool = True
+    sandboxPolicyError: str | None = None
 
 
 class PluginToggleRequest(BaseSchema):

@@ -46,6 +46,7 @@ const issueDescription = ref('')
 const issueUrl = ref('')
 const issueProjectKey = ref('')
 const issueType = ref('')
+const issueExecuteRequest = ref(false)
 const jiraBaseUrl = ref('')
 const jiraEmail = ref('')
 const jiraToken = ref('')
@@ -330,6 +331,8 @@ async function handleCreateIntegrationIssue() {
     issueType?: string
     config?: Record<string, unknown>
     credentials?: Record<string, unknown>
+    executeRequest?: boolean
+    timeoutSeconds?: number
   } = {
     provider,
     runId: rid,
@@ -373,6 +376,11 @@ async function handleCreateIntegrationIssue() {
   } else {
     payload.config = {}
     payload.credentials = {}
+  }
+  if (issueExecuteRequest.value && provider !== 'GENERIC') {
+    payload.executeRequest = true
+    payload.timeoutSeconds = 10
+    payload.config = { ...(payload.config || {}), realCreateEnabled: true }
   }
 
   creatingIssue.value = true
@@ -542,6 +550,10 @@ watch(
             <label class="text-[12px] leading-[16px] text-[#717182] md:col-span-2">
               url
               <input v-model="issueUrl" class="mt-[4px] h-[32px] w-full rounded-[8px] border border-black/10 bg-white px-[8px] text-[12px] text-[#0A0A0A]" />
+            </label>
+            <label class="flex items-center gap-[8px] text-[12px] leading-[16px] text-[#717182] md:col-span-2">
+              <input v-model="issueExecuteRequest" type="checkbox" class="h-[14px] w-[14px]" />
+              真实创建外部缺陷
             </label>
           </div>
 

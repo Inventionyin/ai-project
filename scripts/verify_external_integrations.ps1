@@ -105,6 +105,19 @@ function Get-ExternalErrorMessage {
     return Get-RedactedMessage -Message $message
 }
 
+function Add-BusinessClosureFailure {
+    param(
+        [System.Collections.Generic.List[string]]$Failures,
+        [string]$Name,
+        [string]$Message
+    )
+
+    if (-not $Failures.Contains($Name)) {
+        $Failures.Add($Name) | Out-Null
+    }
+    Write-Warning ("[BUSINESS] {0} cleanup failed: {1}" -f $Name, (Get-RedactedMessage -Message $Message))
+}
+
 function Get-ZentaoToken {
     param([string]$BaseUrl)
 
@@ -458,7 +471,7 @@ function Invoke-BusinessClosureChecks {
                         Write-Host ("[BUSINESS] Jira issue deleted: {0}" -f $created.key)
                     }
                     catch {
-                        Write-Warning ("[BUSINESS] Jira cleanup failed: {0}" -f (Get-RedactedMessage -Message $_.Exception.Message))
+                        Add-BusinessClosureFailure -Failures $failures -Name "Jira" -Message $_.Exception.Message
                     }
                 }
                 catch {
@@ -523,7 +536,7 @@ function Invoke-BusinessClosureChecks {
                             Write-Host ("[BUSINESS] Zentao bug deleted: {0}" -f $bugId)
                         }
                         catch {
-                            Write-Warning ("[BUSINESS] Zentao cleanup failed: {0}" -f (Get-RedactedMessage -Message $_.Exception.Message))
+                            Add-BusinessClosureFailure -Failures $failures -Name "Zentao" -Message $_.Exception.Message
                         }
                     }
                 }

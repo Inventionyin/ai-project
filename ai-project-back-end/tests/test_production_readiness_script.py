@@ -45,7 +45,12 @@ def test_production_readiness_script_contains_required_contract():
         "Test-HttpEndpoint",
         "Test-PrometheusTargets",
         "Test-JenkinsBackup",
+        "Test-ObservabilityRuleFiles",
+        "alert-rules.yml",
         "/health",
+        "/metrics",
+        "api-metrics",
+        "weitesting_observability_ready",
         "/api/health",
         "/api/v1/targets?state=active",
         "jenkins",
@@ -54,13 +59,38 @@ def test_production_readiness_script_contains_required_contract():
         "WARN",
         "BLOCKED",
         "recommendedActions",
-        "Verify Jenkins /prometheus returns 200",
+        "Repo-local /metrics is checked separately",
         "Keep Jenkins and Grafana behind strong login or Cloudflare Access",
         "Production readiness gate failed (FailOnWarn enabled).",
     ]
 
     missing = [token for token in required_tokens if token not in content]
     assert not missing, f"Missing expected production readiness tokens: {missing}"
+
+
+def test_observability_alert_rules_and_slo_docs_are_committed():
+    repo_root = Path(__file__).resolve().parents[2]
+    prometheus = (repo_root / "deploy" / "observability" / "prometheus.yml").read_text(encoding="utf-8")
+    alert_rules = (repo_root / "deploy" / "observability" / "alert-rules.yml").read_text(encoding="utf-8")
+    slo_doc = (repo_root / "docs" / "slo.md").read_text(encoding="utf-8")
+    sandbox_doc = (repo_root / "docs" / "plugin-sandbox-boundary.md").read_text(encoding="utf-8")
+    token_doc = (repo_root / "docs" / "token-governance.md").read_text(encoding="utf-8")
+
+    assert "rule_files:" in prometheus
+    assert "alert-rules.yml" in prometheus
+    for token in [
+        "WeiTestingApiDown",
+        "WeiTestingHighServerErrorRate",
+        "WeiTestingObservabilityNotReady",
+        "weitesting_observability_ready",
+    ]:
+        assert token in alert_rules
+    for token in ["Availability", "Latency", "Error Budget", "Notification Outbox", "CI Token"]:
+        assert token in slo_doc
+    for token in ["process-level", "not a container", "CALL_EXTERNAL", "allowedHosts"]:
+        assert token in sandbox_doc
+    for token in ["Named CI Token", "external system token", "rotation", "expiry"]:
+        assert token in token_doc
 
 
 def test_production_readiness_dry_run_is_offline_and_documents_targets():
@@ -122,7 +152,12 @@ def test_production_readiness_bash_script_contains_required_contract():
         "JENKINS_BACKUP_DIR=",
         "OUTPUT_PATH=",
         "urllib.request",
+        "test_observability_rule_files",
+        "alert-rules.yml",
         "/health",
+        "/metrics",
+        "api-metrics",
+        "weitesting_observability_ready",
         "/api/health",
         "/api/v1/targets?state=active",
         "weitesting-backend",
@@ -131,7 +166,7 @@ def test_production_readiness_bash_script_contains_required_contract():
         "WARN",
         "BLOCKED",
         "recommendedActions",
-        "Verify Jenkins /prometheus returns 200",
+        "Repo-local /metrics is checked separately",
         "Keep Jenkins and Grafana behind strong login or Cloudflare Access",
         "Production readiness gate failed (FailOnWarn enabled).",
     ]

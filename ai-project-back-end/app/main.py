@@ -36,7 +36,7 @@ from app.api.health import router as health_router
 from app.core.config import get_settings
 from app.core.database import get_sessionmaker
 from app.core.observability import mask_sensitive_mapping, mask_sensitive_text
-from app.core.metrics import record_http_request, render_prometheus_metrics
+from app.core.metrics import decrement_in_flight_request, increment_in_flight_request, normalize_route_label, record_http_request, render_prometheus_metrics
 from app.services.integration_delivery import run_notification_outbox_consumer
 from app.services.doc_parse_job import run_doc_parse_job_consumer
 
@@ -45,6 +45,7 @@ logger = logging.getLogger(__name__)
 # Request logging middleware
 async def log_requests(request: Request, call_next):
     request_id = await get_request_id(request)
+    request.state.request_id = request_id
     path = request.url.path
     if request.query_params:
         path += f"?{mask_sensitive_mapping(dict(request.query_params))}"
@@ -53,15 +54,22 @@ async def log_requests(request: Request, call_next):
     
     import time
     start_time = time.time()
-    
-    response = await call_next(request)
-    response.headers["X-Request-Id"] = request_id
-    
-    process_time = (time.time() - start_time) * 1000
-    record_http_request(request.method, request.url.path, response.status_code, process_time / 1000.0)
-    logger.info(f"[{request_id}] Completed request: {request.method} {path} - Status: {response.status_code} - Time: {process_time:.2f}ms")
-    
-    return response
+    route = normalize_route_label(request.url.path)
+    in_flight_key = increment_in_flight_request(request.method, request.url.path, route=route)
+    response = None
+    try:
+        response = await call_next(request)
+        route = getattr(request.scope.get("route"), "path", None) or route
+        return response
+    finally:
+        process_time = (time.time() - start_time) * 1000
+        status_code = response.status_code if response is not None else 500
+        if response is not None:
+            response.headers["X-Request-Id"] = request_id
+            response.headers["X-Response-Time-Ms"] = f"{process_time:.2f}"
+        record_http_request(request.method, request.url.path, status_code, process_time / 1000.0, route=route)
+        decrement_in_flight_request(in_flight_key)
+        logger.info(f"[{request_id}] Completed request: {request.method} {path} - Status: {status_code} - Time: {process_time:.2f}ms")
 
 
 def _run_migrations() -> None:

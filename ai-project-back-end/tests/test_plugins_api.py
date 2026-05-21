@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 import pytest
 from fastapi import FastAPI
@@ -79,6 +80,40 @@ def test_create_plugin(monkeypatch: pytest.MonkeyPatch) -> None:
     data = resp.json()
     assert data["code"] == 0
     assert data["data"]["slug"] == "jmeter"
+
+
+@pytest.mark.anyio
+async def test_create_plugin_rejects_loose_sandbox_policy_shape() -> None:
+    from app.services.plugin import create_plugin
+
+    class _CreateSession:
+        async def scalar(self, _stmt):
+            return None
+
+        def add(self, _row):
+            return None
+
+        async def flush(self):
+            return None
+
+    user = CurrentUser(
+        id=uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+        tenant_id=uuid.UUID("11111111-1111-1111-1111-111111111111"),
+        roles=frozenset({"ADMIN"}),
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await create_plugin(
+            _CreateSession(),
+            user=user,
+            name="bad-policy",
+            slug="bad-policy",
+            version="1.0.0",
+            config_schema={"sandboxPolicy": {"permissions": "RUN_TEST", "timeoutMs": 1000, "networkMode": "OFF", "allowedHosts": [], "maxPayloadBytes": 4096}},
+        )
+
+    assert exc.value.status_code == 400
+    assert "string list" in str(exc.value.detail)
 
 
 def test_list_plugins(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -421,6 +456,41 @@ async def test_invoke_plugin_installation_records_sandbox_execution(monkeypatch:
 
 
 @pytest.mark.anyio
+async def test_invoke_plugin_installation_rejects_legacy_loose_policy(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.services.plugin import invoke_plugin_installation
+
+    user = CurrentUser(
+        id=uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+        tenant_id=uuid.UUID("11111111-1111-1111-1111-111111111111"),
+        roles=frozenset({"ADMIN"}),
+    )
+    installation, plugin = _plugin_installation_pair()
+    installation.config_json = {
+        "sandboxPolicy": {
+            "permissions": ["RUN_TEST"],
+            "timeoutMs": "1000",
+            "networkMode": "OFF",
+            "allowedHosts": [],
+            "maxPayloadBytes": 4096,
+            "legacy": True,
+        }
+    }
+    session = _InvokeSession(installation, (installation, plugin))
+
+    with pytest.raises(HTTPException) as exc:
+        await invoke_plugin_installation(
+            session,
+            user=user,
+            project_id=installation.project_id,
+            installation_id=installation.id,
+        )
+
+    assert exc.value.status_code == 400
+    assert "legacy" in str(exc.value.detail).lower() or "sandboxpolicy" in str(exc.value.detail).lower()
+    assert not session.audit_rows
+
+
+@pytest.mark.anyio
 async def test_create_plugin_rejects_invalid_sandbox_policy_permissions() -> None:
     from app.services.plugin import create_plugin
 
@@ -453,7 +523,7 @@ async def test_create_plugin_rejects_invalid_sandbox_policy_permissions() -> Non
 
 
 @pytest.mark.anyio
-async def test_create_plugin_accepts_allowlist_sandbox_hosts() -> None:
+async def test_create_plugin_accepts_allowlist_sandbox_hosts_with_external_permission() -> None:
     from app.services.plugin import invoke_plugin_installation
 
     user = CurrentUser(
@@ -464,7 +534,7 @@ async def test_create_plugin_accepts_allowlist_sandbox_hosts() -> None:
     installation, plugin = _plugin_installation_pair()
     installation.config_json = {
         "sandboxPolicy": {
-            "permissions": ["RUN_TEST"],
+            "permissions": ["RUN_TEST", "CALL_EXTERNAL"],
             "timeoutMs": 1000,
             "networkMode": "ALLOWLIST",
             "allowedHosts": ["api.example.com", "internal-service"],
@@ -481,6 +551,48 @@ async def test_create_plugin_accepts_allowlist_sandbox_hosts() -> None:
 
     assert result.sandboxPolicy.networkMode == "ALLOWLIST"
     assert result.sandboxPolicy.allowedHosts == ["api.example.com", "internal-service"]
+
+
+def test_installation_detail_exposes_legacy_policy_diagnostics() -> None:
+    from app.services.plugin import _to_install_detail
+
+    installation, plugin = _plugin_installation_pair()
+    now = datetime.now(timezone.utc)
+    installation.created_at = now
+    installation.updated_at = now
+    installation.config_json = {
+        "sandboxPolicy": {
+            "permissions": ["RUN_TEST"],
+            "timeoutMs": "1000",
+            "networkMode": "OFF",
+            "allowedHosts": [],
+            "maxPayloadBytes": 4096,
+            "legacy": True,
+        }
+    }
+
+    detail = _to_install_detail(installation, plugin)
+
+    assert detail.sandboxPolicy.networkMode == "OFF"
+    assert detail.sandboxPolicyValid is False
+    assert detail.sandboxPolicyError
+    assert "migrate" in detail.sandboxPolicyError.lower()
+
+
+def test_plugin_detail_exposes_non_object_policy_diagnostics() -> None:
+    from app.services.plugin import _to_plugin_detail
+
+    _, plugin = _plugin_installation_pair()
+    now = datetime.now(timezone.utc)
+    plugin.created_at = now
+    plugin.updated_at = now
+    plugin.config_schema_json = {"sandboxPolicy": "legacy"}
+
+    detail = _to_plugin_detail(plugin)
+
+    assert detail.sandboxPolicyValid is False
+    assert detail.sandboxPolicyError
+    assert "migrate" in detail.sandboxPolicyError.lower()
 
 
 @pytest.mark.anyio

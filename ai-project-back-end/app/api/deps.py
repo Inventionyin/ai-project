@@ -5,6 +5,8 @@ from dataclasses import dataclass
 
 from fastapi import Header, HTTPException, Request
 
+from app.core.config import get_settings
+from app.core.observability import normalize_request_id
 from app.core.security import decode_access_token
 
 
@@ -20,9 +22,7 @@ def to_unix_ts(dt) -> int:
 
 async def get_request_id(request: Request) -> str:
     request_id = request.headers.get("X-Request-Id") or request.headers.get("X-RequestId")
-    if request_id:
-        return request_id[:64]
-    return f"req_{uuid.uuid4().hex[:16]}"
+    return normalize_request_id(request_id)
 
 
 async def get_current_user(
@@ -36,6 +36,10 @@ async def get_current_user(
         if len(parts) == 2 and parts[0].lower() == "bearer" and parts[1].strip():
             payload = decode_access_token(parts[1].strip())
             return CurrentUser(id=payload.user_id, tenant_id=payload.tenant_id, roles=payload.roles)
+
+    settings = get_settings()
+    if not settings.auth_header_impersonation_enabled:
+        raise HTTPException(status_code=401, detail="Not authenticated")
 
     if not x_user_id or not x_tenant_id:
         raise HTTPException(status_code=401, detail="Not authenticated")

@@ -51,10 +51,11 @@ bash ./scripts/run_performance_baseline.sh --help
 bash ./scripts/run_performance_baseline.sh --dry-run
 ```
 
-This script is a repeatable local smoke baseline, not a full load or stress test. It measures simple request latency to:
+This script is a repeatable local smoke baseline, not a full load or stress test. It measures request latency to:
 
 - backend `GET /health`
 - frontend root URL
+- configurable business API paths such as `GET /api/ops/health/summary` and `GET /api/projects/home-stats`
 
 Default behavior:
 
@@ -62,6 +63,8 @@ Default behavior:
 - backend threshold: `p95 <= 1000ms`
 - frontend threshold: `p95 <= 2000ms`
 - output: `.\artifacts\performance-baseline\baseline-report.json`
+- trend output: `.\artifacts\performance-baseline\trend-summary.json`
+- concise console summary: p95, mean, success rate, errors, and previous-run p95 delta when available
 
 Optional flags:
 
@@ -70,8 +73,26 @@ Optional flags:
   -ApiBaseUrl "http://127.0.0.1:8000" `
   -FrontendUrl "http://127.0.0.1:4173" `
   -OutputPath ".\artifacts\performance-baseline\baseline-$(Get-Date -Format yyyyMMdd-HHmmss).json" `
+  -BusinessPaths "/api/ops/health/summary,/api/projects/home-stats" `
   -SkipFrontendSmoke `
   -Iterations 20
+```
+
+Business paths should represent real operator flows. When the target requires auth, provide either a bearer token or controlled-environment impersonation headers:
+
+```powershell
+$env:PERF_BASELINE_AUTHORIZATION="eyJ..."
+$env:PERF_BASELINE_USER_ID="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+$env:PERF_BASELINE_TENANT_ID="11111111-1111-1111-1111-111111111111"
+$env:PERF_BASELINE_ROLES="ADMIN"
+```
+
+Equivalent Linux flags:
+
+```bash
+bash ./scripts/run_performance_baseline.sh \
+  --business-paths "/api/ops/health/summary,/api/projects/home-stats" \
+  --business-authorization "$PERF_BASELINE_AUTHORIZATION"
 ```
 
 DingTalk notification (optional, via env vars; do not hardcode token):
@@ -82,7 +103,7 @@ $env:DINGTALK_WEBHOOK_SECRET="***"
 .\scripts\run_performance_baseline.ps1
 ```
 
-For trend tracking, keep timestamped JSON reports under `artifacts/performance-baseline/` and attach them to PRs or CI artifacts when comparing regressions.
+For trend tracking, keep timestamped JSON reports under `artifacts/performance-baseline/` and attach them to PRs or CI artifacts when comparing regressions. The report includes `summary`, `trend.latest`, and `comparison` fields for p95, mean, success-rate, error-count, and timeout deltas.
 
 ## Operations cron and restore drill
 
@@ -141,10 +162,13 @@ This script checks the deployed environment after domain, tunnel, observability,
 
 - public frontend URL
 - public backend health URL
+- backend `/metrics` endpoint with the repo-local `weitesting_observability_ready` metric
 - Grafana health endpoint
 - Jenkins login endpoint
 - Prometheus active targets for `weitesting-backend` and `jenkins`
 - latest Jenkins backup archive
+
+Backend `/health` and `/metrics` are repo-local observability checks. Prometheus targets, Grafana health, Jenkins login, Jenkins scrape access, and backup freshness are external infrastructure checks.
 
 Default targets are the current Oracle/Cloudflare deployment:
 

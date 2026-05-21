@@ -200,13 +200,38 @@ function Test-JenkinsBackup {
     }
 }
 
+function Test-ObservabilityRuleFiles {
+    $prometheusConfig = ".\deploy\observability\prometheus.yml"
+    $alertRules = ".\deploy\observability\alert-rules.yml"
+    if (-not (Test-Path -LiteralPath $prometheusConfig) -or -not (Test-Path -LiteralPath $alertRules)) {
+        return New-CheckResult -Name "observability-rule-files" -Status "BLOCKED" -Message "Prometheus config or alert-rules.yml is missing." -Details @{
+            prometheusConfig = $prometheusConfig
+            alertRules = $alertRules
+        }
+    }
+
+    $prometheusContent = Get-Content -Raw -Path $prometheusConfig
+    $alertContent = Get-Content -Raw -Path $alertRules
+    $requiredTokens = @("rule_files:", "alert-rules.yml", "WeiTestingApiDown", "WeiTestingHighServerErrorRate", "WeiTestingObservabilityNotReady")
+    $missing = @($requiredTokens | Where-Object { -not $prometheusContent.Contains($_) -and -not $alertContent.Contains($_) })
+    if ($missing.Count -gt 0) {
+        return New-CheckResult -Name "observability-rule-files" -Status "WARN" -Message "Observability rule files are present but incomplete." -Details @{
+            missing = $missing
+        }
+    }
+
+    return New-CheckResult -Name "observability-rule-files" -Status "READY" -Message "Prometheus alert rule files are present."
+}
+
 $checks = @()
 $checks += Test-HttpEndpoint -Name "app-public-url" -Url $AppUrl -ExpectedStatusCodes @(200) -RequiredContent "<div id=`"app`"></div>"
 $checks += Test-HttpEndpoint -Name "api-health" -Url (Join-Url -BaseUrl $ApiBaseUrl -Path "/health") -ExpectedStatusCodes @(200) -RequiredContent '"status":"ok"'
+$checks += Test-HttpEndpoint -Name "api-metrics" -Url (Join-Url -BaseUrl $ApiBaseUrl -Path "/metrics") -ExpectedStatusCodes @(200) -RequiredContent "weitesting_observability_ready"
 $checks += Test-HttpEndpoint -Name "grafana-health" -Url (Join-Url -BaseUrl $GrafanaUrl -Path "/api/health") -ExpectedStatusCodes @(200) -RequiredContent '"database"'
 $checks += Test-HttpEndpoint -Name "jenkins-login" -Url (Join-Url -BaseUrl $JenkinsUrl -Path "/login") -ExpectedStatusCodes @(200) -RequiredContent "Sign in to Jenkins"
 $checks += Test-PrometheusTargets -BaseUrl $PrometheusUrl
 $checks += Test-JenkinsBackup -BackupDir $JenkinsBackupDir
+$checks += Test-ObservabilityRuleFiles
 
 $blockedCount = @($checks | Where-Object { $_.status -eq "BLOCKED" }).Count
 $warnCount = @($checks | Where-Object { $_.status -eq "WARN" }).Count
@@ -220,7 +245,7 @@ elseif ($warnCount -gt 0) {
 
 $recommendedActions = @()
 if (($checks | Where-Object { $_.name -eq "prometheus-targets" -and $_.status -ne "READY" } | Measure-Object).Count -gt 0) {
-    $recommendedActions += "Verify Jenkins /prometheus returns 200; install/enable Jenkins Prometheus plugin and grant scrape access if Jenkins metrics are required."
+    $recommendedActions += "Repo-local /metrics is checked separately; verify Prometheus scrape config for weitesting-backend and Jenkins /prometheus only if external dashboards/alerts are required."
 }
 if (($checks | Where-Object { $_.name -eq "jenkins-backup" -and $_.status -ne "READY" } | Measure-Object).Count -gt 0) {
     $recommendedActions += "Run deploy/jenkins/backup_jenkins.sh and perform one restore drill before production cutover."

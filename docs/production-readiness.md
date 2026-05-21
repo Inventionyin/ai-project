@@ -28,9 +28,9 @@ bash ./scripts/verify_production_readiness.sh \
   --jenkins-backup-dir /opt/weitesting/backups/jenkins
 ```
 
-The script checks public app/API/Grafana/Jenkins URLs, Prometheus target health, and the latest Jenkins backup archive. It writes a JSON report to `artifacts/production-readiness/readiness-report.json`.
+The script checks public app/API URLs, repo-local backend observability (`/health` and `/metrics`), Grafana/Jenkins reachability, Prometheus target health, and the latest Jenkins backup archive. It writes a JSON report to `artifacts/production-readiness/readiness-report.json`.
 
-Use `-FailOnWarn` only when every optional production hardening item is expected to be complete. Jenkins Prometheus scrape failures are reported as `WARN`, because the app can operate without Jenkins metrics while the Jenkins Prometheus plugin/permissions are still being finalized.
+Use `-FailOnWarn` only when every optional production hardening item is expected to be complete. The backend `/metrics` endpoint is a repo-local readiness check. Prometheus target health, Grafana dashboards, and Jenkins Prometheus scrape health are external infrastructure checks and can remain `WARN` while those systems are being finalized.
 
 ## Domains
 
@@ -49,7 +49,13 @@ sudo certbot --nginx -d app.example.com -d api.example.com -d jenkins.example.co
 
 ## Observability
 
-The backend exposes Prometheus text metrics at `/metrics`.
+The backend exposes repo-local observability without extra services:
+
+- `GET /health` returns the public database-backed health signal.
+- `GET /metrics` returns Prometheus text metrics with normalized request IDs in logs/headers, route-safe request labels, request count, duration sum/count/max, server error count, in-flight gauge, process uptime, and `weitesting_observability_ready`.
+- `GET /api/ops/health/summary` returns the authenticated operator summary for database, outbox, workers, DevOps runs, plugins, and CI token coverage.
+
+Prometheus and Grafana are still external infrastructure. Prometheus must scrape `/metrics` and Grafana/Alertmanager must provide dashboards and alert routing.
 
 Start Prometheus and Grafana:
 
@@ -71,7 +77,7 @@ Connectivity smoke remains the default. Reversible business closure checks requi
   -FailOnSmokeError
 ```
 
-The business closure mode creates and cleans up a Jira issue and Zentao bug, and triggers a Jenkins build.
+The business closure mode creates and cleans up a Jira issue and Zentao bug, and triggers a Jenkins build. Cleanup failures now count as business-closure failures so the probe reflects whether the loop really closed.
 
 ## Jenkins
 

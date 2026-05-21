@@ -12,9 +12,17 @@ from app.models.integration import IssueLink
 from app.models.project import Project, ProjectMember
 from app.models.run import CaseRun, Run
 from app.schemas.integration_issue import IntegrationIssueCreateRequest, IntegrationIssueDetail
-from app.services.provider_registry import resolve_issue_provider
+from app.services.provider_registry import IssueProviderResult, resolve_issue_provider
 
 _SENSITIVE_TOKENS = ("token", "secret", "password", "apikey", "api_key")
+_CONFIG_ERROR_TOKENS = (
+    "missing_base_url",
+    "missing_project_key",
+    "missing_token",
+    "missing_email",
+    "missing_product",
+    "missing_baseurl",
+)
 
 
 def _is_admin(user: CurrentUser) -> bool:
@@ -80,7 +88,7 @@ def _to_issue_detail(row: IssueLink) -> IntegrationIssueDetail:
         provider=row.provider,
         issueKey=row.issue_key,
         url=row.url,
-        createdAt=to_unix_ts(row.created_at),
+        createdAt=to_unix_ts(row.created_at) if row.created_at else None,
     )
 
 
@@ -88,7 +96,21 @@ def _mask_sensitive(detail: str) -> str:
     lowered = detail.lower()
     if any(key in lowered for key in _SENSITIVE_TOKENS):
         return "issue_provider_error: sensitive value redacted"
+    if any(token in lowered for token in _CONFIG_ERROR_TOKENS):
+        return "issue_provider_error: provider config missing or invalid"
     return detail
+
+
+def _real_issue_creation_enabled(config: dict[str, object] | None) -> bool:
+    if not isinstance(config, dict):
+        return False
+    for key in ("realCreateEnabled", "executeRequestEnabled", "allowExternalCreate"):
+        raw = config.get(key)
+        if isinstance(raw, bool):
+            return raw
+        if isinstance(raw, str) and raw.strip().lower() in {"1", "true", "yes", "on"}:
+            return True
+    return False
 
 
 async def _ensure_run_belongs_project(
@@ -151,6 +173,9 @@ async def create_issue_link(
     issue_provider = resolve_issue_provider(provider)
     if issue_provider is None:
         raise HTTPException(status_code=400, detail="invalid_provider")
+    execute_request = bool(payload.executeRequest)
+    if execute_request and not _real_issue_creation_enabled(payload.config):
+        raise HTTPException(status_code=400, detail="real_issue_creation_not_enabled")
     try:
         issue_result = issue_provider(
             provider,
@@ -161,6 +186,8 @@ async def create_issue_link(
             issue_type=payload.issueType,
             config=payload.config,
             credentials=payload.credentials,
+            execute_request=execute_request,
+            timeout=payload.timeoutSeconds,
             project_id=str(project.id),
             run_id=str(run.id),
             case_run_id=(str(case_run_id) if case_run_id is not None else None),
