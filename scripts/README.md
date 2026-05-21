@@ -73,6 +73,76 @@ $env:DINGTALK_WEBHOOK_SECRET="***"
 
 For trend tracking, keep timestamped JSON reports under `artifacts/performance-baseline/` and attach them to PRs or CI artifacts when comparing regressions.
 
+## Production readiness self-check
+
+```powershell
+.\scripts\verify_production_readiness.ps1
+```
+
+Linux/server equivalent:
+
+```bash
+bash ./scripts/verify_production_readiness.sh
+```
+
+Quick help / dry-run:
+
+```powershell
+.\scripts\verify_production_readiness.ps1 -Help
+.\scripts\verify_production_readiness.ps1 -DryRun
+```
+
+```bash
+bash ./scripts/verify_production_readiness.sh --help
+bash ./scripts/verify_production_readiness.sh --dry-run
+```
+
+This script checks the deployed environment after domain, tunnel, observability, or Jenkins changes:
+
+- public frontend URL
+- public backend health URL
+- Grafana health endpoint
+- Jenkins login endpoint
+- Prometheus active targets for `weitesting-backend` and `jenkins`
+- latest Jenkins backup archive
+
+Default targets are the current Oracle/Cloudflare deployment:
+
+```text
+https://app.evanshine.me
+https://api.evanshine.me
+https://grafana.evanshine.me
+https://jenkins.evanshine.me
+http://127.0.0.1:9090
+/opt/weitesting/backups/jenkins
+```
+
+Override them when checking a different deployment:
+
+```powershell
+.\scripts\verify_production_readiness.ps1 `
+  -AppUrl "https://app.example.com" `
+  -ApiBaseUrl "https://api.example.com" `
+  -GrafanaUrl "https://grafana.example.com" `
+  -JenkinsUrl "https://jenkins.example.com" `
+  -PrometheusUrl "http://127.0.0.1:9090" `
+  -JenkinsBackupDir "/opt/weitesting/backups/jenkins" `
+  -OutputPath ".\artifacts\production-readiness\readiness-$(Get-Date -Format yyyyMMdd-HHmmss).json"
+```
+
+```bash
+bash ./scripts/verify_production_readiness.sh \
+  --app-url "https://app.example.com" \
+  --api-base-url "https://api.example.com" \
+  --grafana-url "https://grafana.example.com" \
+  --jenkins-url "https://jenkins.example.com" \
+  --prometheus-url "http://127.0.0.1:9090" \
+  --jenkins-backup-dir "/opt/weitesting/backups/jenkins" \
+  --output-path "./artifacts/production-readiness/readiness-$(date +%Y%m%d-%H%M%S).json"
+```
+
+Use `-FailOnWarn` only after optional hardening is expected to be complete. For example, Jenkins Prometheus `403` is reported as `WARN` because the app can operate while Jenkins metrics are still being enabled.
+
 ## Default gate
 
 ```powershell
@@ -172,6 +242,9 @@ Default CI phases (same gate as local script):
 3. Frontend deps install (`npm ci`)
 4. Playwright Chromium install
 5. `.\scripts\verify_real_e2e.ps1` (backend pytest, frontend build, generated Playwright E2E)
+6. `.\scripts\run_performance_baseline.ps1 -DryRun`
+7. `.\scripts\verify_production_readiness.ps1 -DryRun` and `bash ./scripts/verify_production_readiness.sh --dry-run`
+8. `.\scripts\verify_external_integrations.ps1 -DryRun`
 
 PostgreSQL service is provided in CI as:
 

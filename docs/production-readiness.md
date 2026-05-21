@@ -2,6 +2,36 @@
 
 This checklist turns the current local/CI setup into an operator-ready deployment.
 
+## Production Readiness Gate
+
+Run the production self-check after deployment or domain changes:
+
+```powershell
+.\scripts\verify_production_readiness.ps1 `
+  -AppUrl https://app.example.com `
+  -ApiBaseUrl https://api.example.com `
+  -GrafanaUrl https://grafana.example.com `
+  -JenkinsUrl https://jenkins.example.com `
+  -PrometheusUrl http://127.0.0.1:9090 `
+  -JenkinsBackupDir /opt/weitesting/backups/jenkins
+```
+
+On Linux servers, use the Bash equivalent:
+
+```bash
+bash ./scripts/verify_production_readiness.sh \
+  --app-url https://app.example.com \
+  --api-base-url https://api.example.com \
+  --grafana-url https://grafana.example.com \
+  --jenkins-url https://jenkins.example.com \
+  --prometheus-url http://127.0.0.1:9090 \
+  --jenkins-backup-dir /opt/weitesting/backups/jenkins
+```
+
+The script checks public app/API/Grafana/Jenkins URLs, Prometheus target health, and the latest Jenkins backup archive. It writes a JSON report to `artifacts/production-readiness/readiness-report.json`.
+
+Use `-FailOnWarn` only when every optional production hardening item is expected to be complete. Jenkins Prometheus scrape failures are reported as `WARN`, because the app can operate without Jenkins metrics while the Jenkins Prometheus plugin/permissions are still being finalized.
+
 ## Domains
 
 Point these DNS A records at the Oracle host:
@@ -52,6 +82,8 @@ Minimum production settings:
 - Use API tokens, not passwords.
 - Install the Prometheus plugin if Jenkins metrics are needed.
 - Run `deploy/jenkins/backup_jenkins.sh` daily from cron.
+- Keep Jenkins and Grafana behind strong login or Cloudflare Access before inviting external users.
+- Rotate external tokens that were shared during setup before treating this environment as production.
 
 ## Performance Baseline
 
