@@ -33,11 +33,22 @@ It stops listening processes on ports `8000`, `5173`, and `4173`.
 .\scripts\run_performance_baseline.ps1
 ```
 
+Linux/server equivalent:
+
+```bash
+bash ./scripts/run_performance_baseline.sh
+```
+
 Quick help / dry-run:
 
 ```powershell
 .\scripts\run_performance_baseline.ps1 -Help
 .\scripts\run_performance_baseline.ps1 -DryRun
+```
+
+```bash
+bash ./scripts/run_performance_baseline.sh --help
+bash ./scripts/run_performance_baseline.sh --dry-run
 ```
 
 This script is a repeatable local smoke baseline, not a full load or stress test. It measures simple request latency to:
@@ -72,6 +83,35 @@ $env:DINGTALK_WEBHOOK_SECRET="***"
 ```
 
 For trend tracking, keep timestamped JSON reports under `artifacts/performance-baseline/` and attach them to PRs or CI artifacts when comparing regressions.
+
+## Operations cron and restore drill
+
+Install daily server-side operations jobs on Ubuntu:
+
+```bash
+sudo REPO_DIR=/opt/weitesting/current \
+  LOG_DIR=/var/log/weitesting \
+  ARTIFACT_DIR=/opt/weitesting/artifacts \
+  USER_NAME=ubuntu \
+  bash deploy/ops/install_ops_cron.sh
+```
+
+This installs `/etc/cron.d/weitesting-ops` with daily jobs for:
+
+- performance baseline trend reports
+- production readiness reports
+- Jenkins restore drill reports
+
+Run a Jenkins restore drill manually:
+
+```bash
+sudo bash deploy/jenkins/restore_drill_jenkins.sh \
+  --backup-dir /opt/weitesting/backups/jenkins \
+  --drill-dir /opt/weitesting/restore-drills/jenkins \
+  --output-path /opt/weitesting/artifacts/jenkins-restore-drill/latest.json
+```
+
+The restore drill extracts the backup to a disposable directory and checks required Jenkins home paths. It never writes into the live `JENKINS_HOME`.
 
 ## Production readiness self-check
 

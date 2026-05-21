@@ -105,6 +105,7 @@ jobs:
         shell: pwsh
         run: |
           ./scripts/run_performance_baseline.ps1 -DryRun
+          bash ./scripts/run_performance_baseline.sh --dry-run
 
       - name: Run production readiness dry-run
         shell: pwsh
