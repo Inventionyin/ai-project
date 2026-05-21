@@ -23,6 +23,7 @@ ai-project_front_end/dist/
 *.tmp.png
 tmp-*.png
 ai-project_front_end/tmp-*.png
+scripts/*.local.ps1
 node_modules/
 dist/
 .DS_Store

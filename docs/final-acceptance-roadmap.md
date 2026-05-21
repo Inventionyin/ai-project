@@ -16,6 +16,27 @@
 
 平台主体代码已经合入 `dev`，生产验收中心、外部系统诊断脚本、生产就绪脚本、性能基线脚本、PostgreSQL/Jenkins 备份与恢复演练脚本均已具备。接下来要做的是在你的真实环境里逐项执行，并把输出报告、截图、URL 或平台快照作为证据归档。
 
+## 2026-05-21 当前诊断结果
+
+已执行不调用第三方的 dry-run：
+
+| 检查 | 结果 | 说明 |
+|---|---|---|
+| `verify_external_integrations.ps1 -DryRun` | WAITING_INPUT | DingTalk、GitHub Actions、本地 Jenkins、Jira、Zentao 环境变量均未在当前终端设置 |
+| `verify_production_readiness.ps1 -DryRun` | READY_TO_RUN | 默认检查目标为 `app/api/jenkins/grafana.evanshine.me` 和本机 Prometheus |
+| `run_performance_baseline.ps1 -DryRun` | READY_TO_RUN | 默认目标为本机 `8000/4173`，真实生产基线需指定 app/api URL |
+
+已新增本地环境变量模板：
+
+```powershell
+Copy-Item .\scripts\external-integrations.env.example.ps1 .\scripts\external-integrations.local.ps1
+notepad .\scripts\external-integrations.local.ps1
+. .\scripts\external-integrations.local.ps1
+.\scripts\verify_external_integrations.ps1 -DryRun
+```
+
+`scripts/external-integrations.local.ps1` 已加入 `.gitignore`，用于你在本机填真实值，不会进入提交。
+
 ## 你之前已经创建/提供过的线索
 
 | 项 | 当前记录 | 下一步 |
