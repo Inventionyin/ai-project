@@ -225,6 +225,7 @@ function Test-ObservabilityRuleFiles {
 
 $checks = @()
 $checks += Test-HttpEndpoint -Name "app-public-url" -Url $AppUrl -ExpectedStatusCodes @(200) -RequiredContent "<div id=`"app`"></div>"
+$checks += Test-HttpEndpoint -Name "app-same-origin-api" -Url (Join-Url -BaseUrl $AppUrl -Path "/api/projects") -ExpectedStatusCodes @(200) -RequiredContent '"code":40101'
 $checks += Test-HttpEndpoint -Name "api-health" -Url (Join-Url -BaseUrl $ApiBaseUrl -Path "/health") -ExpectedStatusCodes @(200) -RequiredContent '"status":"ok"'
 $checks += Test-HttpEndpoint -Name "api-metrics" -Url (Join-Url -BaseUrl $ApiBaseUrl -Path "/metrics") -ExpectedStatusCodes @(200) -RequiredContent "weitesting_observability_ready"
 $checks += Test-HttpEndpoint -Name "grafana-health" -Url (Join-Url -BaseUrl $GrafanaUrl -Path "/api/health") -ExpectedStatusCodes @(200) -RequiredContent '"database"'

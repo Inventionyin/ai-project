@@ -200,6 +200,7 @@ def test_observability_rule_files():
 
 checks = [
     test_http_endpoint("app-public-url", APP_URL, required_content='<div id="app"></div>'),
+    test_http_endpoint("app-same-origin-api", join_url(APP_URL, "/api/projects"), required_content='"code":40101'),
     test_http_endpoint("api-health", join_url(API_BASE_URL, "/health"), required_content='"status":"ok"'),
     test_http_endpoint("api-metrics", join_url(API_BASE_URL, "/metrics"), required_content="weitesting_observability_ready"),
     test_http_endpoint("grafana-health", join_url(GRAFANA_URL, "/api/health"), required_content='"database"'),

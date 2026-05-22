@@ -1,7 +1,10 @@
 import os
 import shutil
 import subprocess
+import threading
+import urllib.request
 from pathlib import Path
+from urllib.parse import urlparse
 import pytest
 
 
@@ -50,6 +53,9 @@ def test_production_readiness_script_contains_required_contract():
         "/health",
         "/metrics",
         "api-metrics",
+        "app-same-origin-api",
+        "/api/projects",
+        '"code":40101',
         "weitesting_observability_ready",
         "/api/health",
         "/api/v1/targets?state=active",
@@ -66,6 +72,69 @@ def test_production_readiness_script_contains_required_contract():
 
     missing = [token for token in required_tokens if token not in content]
     assert not missing, f"Missing expected production readiness tokens: {missing}"
+
+
+def test_nginx_template_proxies_app_api_to_backend_before_spa_fallback():
+    repo_root = Path(__file__).resolve().parents[2]
+    template = (repo_root / "deploy" / "nginx" / "weitesting.conf.template").read_text(encoding="utf-8")
+
+    app_server_start = template.index("server_name ${APP_DOMAIN};")
+    api_proxy_start = template.index("location /api/", app_server_start)
+    spa_fallback_start = template.index("location / {", app_server_start)
+
+    assert api_proxy_start < spa_fallback_start
+    assert "proxy_pass http://127.0.0.1:8000" in template[api_proxy_start:spa_fallback_start]
+    assert "X-Forwarded-Proto $scheme" in template[api_proxy_start:spa_fallback_start]
+
+
+def test_python_spa_server_proxies_api_before_index_fallback(tmp_path):
+    import importlib.util
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    repo_root = Path(__file__).resolve().parents[2]
+    server_path = repo_root / "deploy" / "frontend" / "spa_server.py"
+    spec = importlib.util.spec_from_file_location("weitesting_spa_server", server_path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    class BackendHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"code":40101,"message":"Not authenticated"}')
+
+        def log_message(self, format, *args):
+            return
+
+    backend = ThreadingHTTPServer(("127.0.0.1", 0), BackendHandler)
+    backend_thread = threading.Thread(target=backend.serve_forever, daemon=True)
+    backend_thread.start()
+
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / "index.html").write_text('<div id="app"></div>', encoding="utf-8")
+    (dist / "asset.txt").write_text("asset", encoding="utf-8")
+
+    module.ROOT = dist.resolve()
+    module.API_UPSTREAM = f"http://127.0.0.1:{backend.server_port}"
+    module.API_UPSTREAM_PARSED = urlparse(module.API_UPSTREAM)
+    frontend = ThreadingHTTPServer(("127.0.0.1", 0), module.SpaHandler)
+    frontend_thread = threading.Thread(target=frontend.serve_forever, daemon=True)
+    frontend_thread.start()
+
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{frontend.server_port}/api/projects", timeout=5) as response:
+            assert response.status == 200
+            assert response.read().decode("utf-8") == '{"code":40101,"message":"Not authenticated"}'
+
+        with urllib.request.urlopen(f"http://127.0.0.1:{frontend.server_port}/projects/demo", timeout=5) as response:
+            assert response.status == 200
+            assert '<div id="app"></div>' in response.read().decode("utf-8")
+    finally:
+        frontend.shutdown()
+        backend.shutdown()
 
 
 def test_observability_alert_rules_and_slo_docs_are_committed():
@@ -157,6 +226,9 @@ def test_production_readiness_bash_script_contains_required_contract():
         "/health",
         "/metrics",
         "api-metrics",
+        "app-same-origin-api",
+        "/api/projects",
+        '"code":40101',
         "weitesting_observability_ready",
         "/api/health",
         "/api/v1/targets?state=active",

@@ -47,6 +47,8 @@ Render `deploy/nginx/weitesting.conf.template`, install it under `/etc/nginx/sit
 sudo certbot --nginx -d app.example.com -d api.example.com -d jenkins.example.com -d grafana.example.com
 ```
 
+The app domain must also serve same-origin API calls. `https://app.<domain>/api/projects` should return a backend JSON envelope such as `{"code":40101,...}` when unauthenticated, not the frontend `index.html`. The nginx template includes a `/api/` proxy before the SPA fallback for this reason. If production uses Cloudflare Tunnel plus the Python SPA server instead of nginx, keep the same rule in that server: proxy `/api/*` to `http://127.0.0.1:8000` before falling back to `index.html`.
+
 ## Observability
 
 The backend exposes repo-local observability without extra services:
