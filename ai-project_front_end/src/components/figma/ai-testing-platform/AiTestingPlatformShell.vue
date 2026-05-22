@@ -6,6 +6,7 @@ import AiTestingSidebar from '@/components/figma/ai-testing-platform/AiTestingSi
 import CasesPanel from '@/components/figma/ai-testing-platform/CasesPanel.vue'
 import chevronDownSmall from '@/assets/figma/ai-testing-platform/chevron-down-small.svg'
 import modalClose from '@/assets/figma/ai-testing-platform/modal-close.svg'
+import { handleAuthExpired, isAuthExpiredResponse } from '@/lib/api/client'
 
 const { activeAssetChild = '用例管理' } = defineProps<{
   activeAssetChild?: string
@@ -139,11 +140,15 @@ const loadProjectName = async () => {
       }
     })
     const payload = await response.json() as ApiResponse<ProjectDetailData>
+    if (isAuthExpiredResponse(response, payload)) {
+      throw handleAuthExpired()
+    }
     if (!response.ok || payload.code !== 0 || !payload.data?.name) {
       throw new Error(payload.message || '获取项目信息失败')
     }
     projectName.value = payload.data.name
-  } catch {
+  } catch (error) {
+    if ((error as { apiCode?: number } | null)?.apiCode === 40101) return
     projectName.value = projectId.value.slice(0, 8) || '项目'
   }
 }

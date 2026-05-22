@@ -23,6 +23,48 @@ const normalizeApiUrl = (path: string) => {
   return `${baseUrl}${pathWithPrefix}`
 }
 
+const buildCurrentRedirect = () => {
+  if (typeof window === 'undefined') return '/'
+  return `${window.location.pathname}${window.location.search}${window.location.hash}`
+}
+
+export function clearAuthState() {
+  localStorage.removeItem('accessToken')
+  localStorage.removeItem('accessTokenExpiresAt')
+  localStorage.removeItem('loginUsername')
+}
+
+export function redirectToLogin(redirect = buildCurrentRedirect()) {
+  if (typeof window === 'undefined') return
+  if (window.location.pathname === '/login') return
+  const query = new URLSearchParams({ redirect: redirect || '/' })
+  window.location.assign(`/login?${query.toString()}`)
+}
+
+export function isAuthExpiredResponse(res: Response, payload: ApiResponse<unknown>) {
+  return res.status === 401 || payload.code === 40101
+}
+
+export function createApiError<T>(res: Response, payload: ApiResponse<T>, fallback = '请求失败') {
+  const codeText = typeof payload.code === 'number' ? `（${payload.code}）` : ''
+  const err = new Error(payload.message ? `${payload.message}${codeText}` : `${fallback}${codeText}`)
+  ;(err as { apiCode?: number; requestId?: string; httpStatus?: number }).apiCode =
+    typeof payload.code === 'number' ? payload.code : undefined
+  ;(err as { apiCode?: number; requestId?: string; httpStatus?: number }).requestId =
+    typeof payload.requestId === 'string' ? payload.requestId : undefined
+  ;(err as { apiCode?: number; requestId?: string; httpStatus?: number }).httpStatus = res.status
+  return err
+}
+
+export function handleAuthExpired() {
+  clearAuthState()
+  redirectToLogin()
+  const err = new Error('登录已过期，请重新登录')
+  ;(err as { apiCode?: number; httpStatus?: number }).apiCode = 40101
+  ;(err as { apiCode?: number; httpStatus?: number }).httpStatus = 401
+  return err
+}
+
 const resolveAuthHeader = () => {
   const accessToken = localStorage.getItem('accessToken')
   if (!accessToken) {
@@ -40,14 +82,10 @@ export async function requestJson<T>(path: string, init: RequestInit) {
     payload = {}
   }
   if (!res.ok || payload.code !== 0) {
-    const codeText = typeof payload.code === 'number' ? `（${payload.code}）` : ''
-    const err = new Error(payload.message ? `${payload.message}${codeText}` : `请求失败${codeText}`)
-    ;(err as { apiCode?: number; requestId?: string; httpStatus?: number }).apiCode =
-      typeof payload.code === 'number' ? payload.code : undefined
-    ;(err as { apiCode?: number; requestId?: string; httpStatus?: number }).requestId =
-      typeof payload.requestId === 'string' ? payload.requestId : undefined
-    ;(err as { apiCode?: number; requestId?: string; httpStatus?: number }).httpStatus = res.status
-    throw err
+    if (isAuthExpiredResponse(res, payload)) {
+      throw handleAuthExpired()
+    }
+    throw createApiError(res, payload)
   }
   return payload.data as T
 }

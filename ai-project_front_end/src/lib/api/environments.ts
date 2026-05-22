@@ -5,6 +5,8 @@ type ApiResponse<T> = {
   requestId?: string
 }
 
+import { createApiError, handleAuthExpired, isAuthExpiredResponse } from '@/lib/api/client'
+
 export type HealthCheckConfig = {
   url: string
   timeoutMs: number
@@ -52,7 +54,10 @@ async function requestJson<T>(path: string, init: RequestInit) {
     payload = {}
   }
   if (!res.ok || payload.code !== 0) {
-    throw new Error(payload.message || '请求失败')
+    if (isAuthExpiredResponse(res, payload)) {
+      throw handleAuthExpired()
+    }
+    throw createApiError(res, payload)
   }
   return payload.data as T
 }

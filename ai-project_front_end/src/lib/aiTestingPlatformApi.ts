@@ -5,6 +5,8 @@ export type ApiResponse<T> = {
   requestId?: string
 }
 
+import { createApiError, handleAuthExpired, isAuthExpiredResponse } from '@/lib/api/client'
+
 export type TestCaseImportErrorItem = {
   rowNumber: number
   testCaseId?: string | null
@@ -358,14 +360,10 @@ async function requestJson<T>(path: string, init: RequestInit) {
     payload = {}
   }
   if (!res.ok || payload.code !== 0) {
-    const codeText = typeof payload.code === 'number' ? `（${payload.code}）` : ''
-    const err = new Error(payload.message ? `${payload.message}${codeText}` : `请求失败${codeText}`)
-    ;(err as { apiCode?: number; requestId?: string; httpStatus?: number }).apiCode =
-      typeof payload.code === 'number' ? payload.code : undefined
-    ;(err as { apiCode?: number; requestId?: string; httpStatus?: number }).requestId =
-      typeof payload.requestId === 'string' ? payload.requestId : undefined
-    ;(err as { apiCode?: number; requestId?: string; httpStatus?: number }).httpStatus = res.status
-    throw err
+    if (isAuthExpiredResponse(res, payload)) {
+      throw handleAuthExpired()
+    }
+    throw createApiError(res, payload)
   }
   return payload.data as T
 }
@@ -380,14 +378,10 @@ async function requestFormData<T>(path: string, init: RequestInit) {
     payload = {}
   }
   if (!res.ok || payload.code !== 0) {
-    const codeText = typeof payload.code === 'number' ? `（${payload.code}）` : ''
-    const err = new Error(payload.message ? `${payload.message}${codeText}` : `请求失败${codeText}`)
-    ;(err as { apiCode?: number; requestId?: string; httpStatus?: number }).apiCode =
-      typeof payload.code === 'number' ? payload.code : undefined
-    ;(err as { apiCode?: number; requestId?: string; httpStatus?: number }).requestId =
-      typeof payload.requestId === 'string' ? payload.requestId : undefined
-    ;(err as { apiCode?: number; requestId?: string; httpStatus?: number }).httpStatus = res.status
-    throw err
+    if (isAuthExpiredResponse(res, payload)) {
+      throw handleAuthExpired()
+    }
+    throw createApiError(res, payload)
   }
   return payload.data as T
 }
