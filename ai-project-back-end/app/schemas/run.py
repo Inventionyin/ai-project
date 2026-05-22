@@ -180,7 +180,7 @@ class RunDetailData(BaseSchema):
     triggerType: TriggerType | None = None
     executionSource: str | None = None
     metrics: RunMetrics | None = None
-    suiteId: IdStr
+    suiteId: IdStr | None = None
     envId: IdStr | None = None
     startAt: UnixTs
 

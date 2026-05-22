@@ -48,6 +48,7 @@ if (-not $SkipBackend) {
                     "pytest",
                     "tests/test_auth_header_impersonation.py",
                     "tests/test_trial_operation_dashboard_api.py",
+                    "tests/test_case_governance_api.py",
                     "tests/test_platform_records_api.py",
                     "-q"
                 )

@@ -75,8 +75,8 @@ type DashboardRunData = {
   id: string
   status: RunApiStatus
   progress?: number
-  suiteId: string
-  envId: string
+  suiteId?: string | null
+  envId?: string | null
   startAt?: number | null
 }
 
@@ -169,10 +169,10 @@ const formatStartTime = (startAt?: number | null) => {
   }).format(value)
 }
 
-const resolveDisplayName = (id: string, nameMap: Record<string, string>) => {
+const resolveDisplayName = (id: string | null | undefined, nameMap: Record<string, string>, fallback = '-') => {
+  if (!id) return fallback
   const name = nameMap[id]
   if (name) return name
-  if (!id) return '-'
   return id.slice(0, 8)
 }
 
@@ -340,8 +340,8 @@ const loadRecentRuns = async () => {
     recentRuns.value = payload.data.items.map((item) => {
       const status = recentRunStatusMap[item.status]
       const progressValue = typeof item.progress === 'number' ? Math.max(0, Math.min(100, item.progress)) : 0
-      const suiteName = resolveDisplayName(item.suiteId, suiteNameMap)
-      const envName = resolveDisplayName(item.envId, environmentNameMap)
+      const suiteName = resolveDisplayName(item.suiteId, suiteNameMap, '临时执行')
+      const envName = resolveDisplayName(item.envId, environmentNameMap, '默认环境')
       return {
         id: item.id,
         status,

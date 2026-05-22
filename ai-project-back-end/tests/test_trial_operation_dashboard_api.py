@@ -267,6 +267,7 @@ def test_build_trial_operation_acceptance_summary_pass() -> None:
             "defects": 8,
             "defectClusters": 2,
             "riskHints": 3,
+            "executedCaseRuns": 120,
         },
         defect_severity_distribution={"P0": 0, "P1": 3, "P2": 5},
     )
@@ -290,3 +291,22 @@ def test_build_trial_operation_acceptance_summary_insufficient() -> None:
 
     assert summary.level == "INSUFFICIENT"
     assert 0 <= summary.score <= 49
+
+
+def test_build_trial_operation_acceptance_summary_requires_execution_result() -> None:
+    summary = _build_trial_operation_acceptance_summary(
+        metrics={
+            "requirementDocs": 32,
+            "testcases": 5899,
+            "defects": 0,
+            "defectClusters": 0,
+            "riskHints": 0,
+            "executedCaseRuns": 0,
+        },
+        defect_severity_distribution={},
+    )
+
+    assert summary.level == "INSUFFICIENT"
+    assert summary.conclusion == "待执行验证"
+    assert summary.score < 80
+    assert any("执行" in item for item in summary.risks)

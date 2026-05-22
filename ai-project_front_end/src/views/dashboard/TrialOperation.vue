@@ -14,28 +14,38 @@ import {
   Save,
   Settings2,
   ShieldAlert,
+  Sparkles,
   TestTube2,
   UploadCloud
 } from 'lucide-vue-next'
 import {
+  applyTrialOperationGovernanceSuggestions,
+  generateTrialOperationGovernanceSuggestions,
+  getTrialOperationCaseGovernance,
   getTrialOperationDashboard,
+  getTrialOperationGovernanceHistory,
   getTrialOperationImportRecords,
   getTrialOperationReport,
   getTrialOperationReportSnapshot,
   getTrialOperationReportSnapshots,
   importTrialOperationDefects,
+  importTrialOperationExecutionResults,
   importTrialOperationRequirementDoc,
   importTrialOperationTestcases,
   previewTrialOperationImport,
   recordTrialOperationImport,
   saveTrialOperationReportSnapshot,
+  type TrialOperationCaseGovernanceData,
   type TrialOperationDashboardData,
   type TrialOperationAcceptanceSummary,
   type TrialOperationImportPreview,
   type TrialOperationImportRecord,
   type TrialOperationImportResult,
   type TrialOperationReportData,
-  type TrialOperationReportSnapshot
+  type TrialOperationReportSnapshot,
+  type TrialOperationGovernanceSuggestionBatch,
+  type TrialOperationGovernanceSuggestionItem,
+  type TrialOperationGovernanceHistoryData
 } from '@/lib/api/trialOperation'
 
 type ChartMode = 'bar' | 'list'
@@ -48,23 +58,38 @@ type DimensionKey =
   | 'defectStatusDistribution'
 
 type ImportType = 'requirements' | 'testcases' | 'defects'
+type ImportQueueStatus = 'queued' | 'previewing' | 'ready' | 'importing' | 'success' | 'failed'
+
+type ImportQueueItem = {
+  id: string
+  file: File
+  label: string
+  preview: TrialOperationImportPreview | null
+  mapping: Record<string, string>
+  status: ImportQueueStatus
+  result: TrialOperationImportResult | null
+  error: string
+}
 
 const route = useRoute()
 const isLoading = ref(false)
 const errorMessage = ref('')
 const dashboard = ref<TrialOperationDashboardData | null>(null)
+const caseGovernance = ref<TrialOperationCaseGovernanceData | null>(null)
 const chartMode = ref<ChartMode>('bar')
 const selectedDimension = ref<DimensionKey>('testcasePriorityDistribution')
 const topLimit = ref(10)
 const importType = ref<ImportType>('testcases')
-const importFile = ref<File | null>(null)
 const isImporting = ref(false)
 const importMessage = ref('')
 const importResult = ref<TrialOperationImportResult | null>(null)
-const fileInputKey = ref(0)
 const importPreview = ref<TrialOperationImportPreview | null>(null)
 const importMapping = ref<Record<string, string>>({})
 const isPreviewing = ref(false)
+const importQueue = ref<ImportQueueItem[]>([])
+const activeImportId = ref('')
+const fileInputRef = ref<HTMLInputElement | null>(null)
+const directoryInputRef = ref<HTMLInputElement | null>(null)
 const importHistory = ref<TrialOperationImportRecord[]>([])
 const isLoadingImportHistory = ref(false)
 const isGeneratingReport = ref(false)
@@ -78,10 +103,40 @@ const isSavingSnapshot = ref(false)
 const isLoadingSnapshots = ref(false)
 const activeSnapshotId = ref('')
 const deliveryNoteMessage = ref('')
+const governanceBatch = ref<TrialOperationGovernanceSuggestionBatch | null>(null)
+const governanceHistory = ref<TrialOperationGovernanceHistoryData | null>(null)
+const selectedGovernanceSuggestionIds = ref<string[]>([])
+const governanceMessage = ref('')
+const isGeneratingGovernanceSuggestions = ref(false)
+const isApplyingGovernanceSuggestions = ref(false)
+const executionImportLimit = ref(27)
+const executionImportMessage = ref('')
+const isImportingExecutionResults = ref(false)
+let previewChain = Promise.resolve()
+let previewBatchToken = 0
 
 const projectId = computed(() => String(route.params.projectId || '').trim())
 const storageKey = computed(() => `trial-operation-view:${projectId.value}`)
 const metrics = computed(() => dashboard.value?.metrics || {})
+const trialCompletion = computed(() => {
+  const checks = [
+    Number(metrics.value.requirementDocs || 0) > 0,
+    Number(metrics.value.testcases || 0) > 0,
+    Number(metrics.value.defects || 0) > 0,
+    Boolean(caseGovernance.value && (caseGovernance.value.totalCases || 0) > 0),
+    Boolean(governanceHistory.value && (governanceHistory.value.appliedSuggestions || 0) > 0),
+    Number(metrics.value.executedCaseRuns || 0) > 0,
+    reportSnapshots.value.length > 0
+  ]
+  const done = checks.filter(Boolean).length
+  const score = Math.round((done / checks.length) * 100)
+  return {
+    done,
+    total: checks.length,
+    score,
+    label: score >= 86 ? '演示闭环已完成' : score >= 60 ? '试运行基本闭环' : '试运行待补齐'
+  }
+})
 
 const scoreLevelTone: Record<TrialOperationAcceptanceSummary['level'], string> = {
   PASS: 'text-[#008236] bg-[#F0FDF4] border-[#BBF7D0]',
@@ -167,18 +222,47 @@ const dimensionOptions: Array<{ key: DimensionKey; label: string; accent: string
 const importOptions: Array<{ type: ImportType; title: string; accept: string; description: string }> = [
   { type: 'requirements', title: '需求文档', accept: '.md,.txt,.docx,.pdf', description: '支持 MD / TXT / DOCX / PDF，上传后自动创建文档版本并触发解析' },
   { type: 'testcases', title: '测试用例', accept: '.csv,.xlsx', description: '支持 CSV / XLSX，表头沿用平台用例导入模板' },
-  { type: 'defects', title: '缺陷数据', accept: '.json', description: '支持 JSON 数组或 { items: [] }，字段可用 title、description、severity' }
+  { type: 'defects', title: '缺陷数据', accept: '.json,.md', description: '支持 JSON 数组、{ items: [] } 或 Markdown 缺陷列表/表格，可直接导入 bug数量 目录里的 .md' }
 ]
 
 const currentDimension = computed(() => dimensionOptions.find((item) => item.key === selectedDimension.value) || dimensionOptions[0])
 const currentRows = computed(() => entries(dashboard.value?.[selectedDimension.value], topLimit.value))
 const chartTotal = computed(() => currentRows.value.reduce((sum, [, value]) => sum + value, 0))
 const maxRowValue = computed(() => Math.max(...currentRows.value.map(([, value]) => value), 1))
+const governanceModuleRows = computed(() => entries(caseGovernance.value?.moduleDistribution, 10))
+const governanceModuleTotal = computed(() => governanceModuleRows.value.reduce((sum, [, value]) => sum + value, 0))
+const governanceMaxModuleValue = computed(() => Math.max(...governanceModuleRows.value.map(([, value]) => value), 1))
 const selectedImportOption = computed(() => importOptions.find((item) => item.type === importType.value) || importOptions[0])
+const activeQueueItem = computed(() => importQueue.value.find((item) => item.id === activeImportId.value) || null)
+const currentImportPreview = computed(() => activeQueueItem.value ? activeQueueItem.value.preview : importPreview.value)
+const currentImportMapping = computed({
+  get: () => activeQueueItem.value ? activeQueueItem.value.mapping : importMapping.value,
+  set: (value: Record<string, string>) => {
+    if (activeQueueItem.value) {
+      activeQueueItem.value.mapping = { ...value }
+      return
+    }
+    importMapping.value = { ...value }
+  }
+})
+const queueSummary = computed(() => ({
+  total: importQueue.value.length,
+  ready: importQueue.value.filter((item) => item.status === 'ready' || item.status === 'success').length,
+  failed: importQueue.value.filter((item) => item.status === 'failed').length
+}))
+const governanceSuggestions = computed(() => governanceBatch.value?.items || [])
+const governanceGenerateLabel = computed(() => governanceBatch.value ? '重新生成建议' : '生成治理建议')
+const selectedGovernanceSuggestions = computed(() => {
+  const selected = new Set(selectedGovernanceSuggestionIds.value)
+  return governanceSuggestions.value.filter((item) => selected.has(item.id))
+})
+const canApplyGovernanceSuggestions = computed(() => selectedGovernanceSuggestions.value.some((item) => item.canApply))
+const hasPreviewingQueue = computed(() => importQueue.value.some((item) => item.status === 'previewing'))
+const importableQueue = computed(() => importQueue.value.filter((item) => item.preview && ['ready', 'success', 'failed'].includes(item.status)))
 const importFileLabel = computed(() => {
-  if (!importFile.value) return '未选择文件'
-  const kb = Math.max(1, Math.round(importFile.value.size / 1024))
-  return `${importFile.value.name}（${kb} KB）`
+  if (!activeQueueItem.value?.file) return '未选择文件'
+  const kb = Math.max(1, Math.round(activeQueueItem.value.file.size / 1024))
+  return `${activeQueueItem.value.file.name}（${kb} KB）`
 })
 const importErrors = computed(() => {
   if (!importResult.value) return []
@@ -227,12 +311,54 @@ const importHistoryStatusLabel = (status: string) => {
   return '失败'
 }
 
+const importQueueStatusLabel = (status: ImportQueueStatus) => {
+  if (status === 'queued') return '排队'
+  if (status === 'previewing') return '预览中'
+  if (status === 'ready') return '可导入'
+  if (status === 'importing') return '导入中'
+  if (status === 'success') return '成功'
+  return '失败'
+}
+
+const importQueueStatusClass = (status: ImportQueueStatus) => {
+  if (status === 'success') return 'bg-[#F0FDF4] text-[#008236]'
+  if (status === 'failed') return 'bg-[#FEF2F2] text-[#C10007]'
+  if (status === 'importing' || status === 'previewing') return 'bg-[#EFF6FF] text-[#155DFC]'
+  return 'bg-[#F6F7F9] text-[#717182]'
+}
+
+const governanceCategoryLabel = (category: TrialOperationGovernanceSuggestionItem['category']) => {
+  if (category === 'DUPLICATE_TITLE') return '重复标题'
+  if (category === 'LOW_VALUE') return '低价值'
+  if (category === 'PROMOTE_TEST_POINT') return '待转正式'
+  return 'P0 覆盖'
+}
+
+const governanceSeverityClass = (severity: TrialOperationGovernanceSuggestionItem['severity']) => {
+  if (severity === 'HIGH') return 'bg-[#FEF2F2] text-[#C10007]'
+  if (severity === 'MEDIUM') return 'bg-[#FFFBEB] text-[#B45309]'
+  return 'bg-[#F0FDF4] text-[#008236]'
+}
+
+const governanceHistoryStatusLabel = (status: string) => {
+  if (status === 'APPLIED') return '已应用'
+  if (status === 'PARTIAL_APPLIED') return '部分应用'
+  return '已生成'
+}
+
+const governanceHistoryStatusClass = (status: string) => {
+  if (status === 'APPLIED') return 'text-[#008236]'
+  if (status === 'PARTIAL_APPLIED') return 'text-[#B45309]'
+  return 'text-[#717182]'
+}
+
 const metricLabelMap: Record<string, string> = {
   requirementDocs: '需求文档',
-  testcases: '测试用例',
+  testcases: '测试资产',
   defects: '缺陷记录',
   defectClusters: '缺陷聚类',
-  riskHints: '风险提示'
+  riskHints: '风险提示',
+  executedCaseRuns: '已执行用例'
 }
 
 const topLimitOptions = [5, 10, 16, 24]
@@ -241,9 +367,18 @@ const percentWidth = (value: number) => {
   return `${Math.max(3, Math.round((value / maxRowValue.value) * 100))}%`
 }
 
+const percentWidthByMax = (value: number, max: number) => {
+  return `${Math.max(3, Math.round((value / Math.max(max, 1)) * 100))}%`
+}
+
 const percentText = (value: number) => {
   if (!chartTotal.value) return '0%'
   return `${Math.round((value / chartTotal.value) * 100)}%`
+}
+
+const percentTextByTotal = (value: number, total: number) => {
+  if (!total) return '0%'
+  return `${Math.round((value / total) * 100)}%`
 }
 
 const entries = (rows?: Record<string, number>, limit = 12) => {
@@ -308,6 +443,7 @@ const fallbackReportMarkdown = () => {
 
 const deliveryNoteMarkdown = computed(() => {
   const summary = acceptanceSummary.value
+  const completion = trialCompletion.value
   const metricLines = Object.entries(metrics.value || {}).map(([key, value]) => {
     return `- ${metricLabelMap[key] || key}：${value}`
   })
@@ -322,6 +458,7 @@ const deliveryNoteMarkdown = computed(() => {
     `- 验收建议：${summary.conclusion}`,
     `- 质量评分：${summary.score}`,
     `- 风险等级：${scoreLevelLabel[summary.level]}（${summary.level}）`,
+    `- 试运行完成度：${completion.score}%（${completion.done}/${completion.total}，${completion.label}）`,
     '',
     '## 已接入真实数据',
     ...(metricLines.length ? metricLines : ['- 暂无数据']),
@@ -331,6 +468,7 @@ const deliveryNoteMarkdown = computed(() => {
     '- 维度可切换的柱状图/列表看板',
     '- 验收结论自动汇总、报告生成、复制与下载',
     '- 验收报告快照归档、历史查看、复制与下载',
+    '- AI 治理建议生成、确认应用与审计留痕',
     '',
     '## 主要亮点',
     ...(summary.highlights.length ? summary.highlights.map((item) => `- ${item}`) : ['- 暂无']),
@@ -342,6 +480,9 @@ const deliveryNoteMarkdown = computed(() => {
     ...(summary.nextActions.length ? summary.nextActions.map((item) => `- ${item}`) : ['- 持续跟踪新增缺陷与回归结果']),
     '',
     '## 交付留痕',
+    governanceHistory.value
+      ? `- 治理建议：生成批次 ${governanceHistory.value.generatedBatches} 个，已应用建议 ${governanceHistory.value.appliedSuggestions} 条，更新用例 ${governanceHistory.value.updatedCases} 条`
+      : '- 治理建议：暂无历史',
     latestSnapshot
       ? `- 最新验收报告快照：${latestSnapshot.title || '试运行验收报告'}，${formatTime(latestSnapshot.createdAt || latestSnapshot.generatedAt)}`
       : '- 最新验收报告快照：暂无',
@@ -600,57 +741,236 @@ const loadImportHistory = async () => {
 }
 
 const resetImportState = () => {
-  importFile.value = null
+  previewBatchToken += 1
+  importQueue.value = []
+  activeImportId.value = ''
   importMessage.value = ''
   importResult.value = null
   importPreview.value = null
   importMapping.value = {}
-  fileInputKey.value += 1
+  isPreviewing.value = false
+  if (fileInputRef.value) fileInputRef.value.value = ''
+  if (directoryInputRef.value) directoryInputRef.value.value = ''
+}
+
+const loadCaseGovernance = async () => {
+  if (!projectId.value) return
+  try {
+    caseGovernance.value = await getTrialOperationCaseGovernance(projectId.value)
+  } catch {
+    caseGovernance.value = null
+  }
+}
+
+const loadGovernanceHistory = async () => {
+  if (!projectId.value) return
+  try {
+    governanceHistory.value = await getTrialOperationGovernanceHistory(projectId.value, 5)
+  } catch {
+    governanceHistory.value = null
+  }
+}
+
+const toggleGovernanceSuggestion = (id: string, checked: boolean) => {
+  const current = new Set(selectedGovernanceSuggestionIds.value)
+  if (checked) current.add(id)
+  else current.delete(id)
+  selectedGovernanceSuggestionIds.value = Array.from(current)
+}
+
+const generateGovernanceSuggestions = async () => {
+  if (!projectId.value) return
+  isGeneratingGovernanceSuggestions.value = true
+  governanceMessage.value = ''
+  try {
+    const batch = await generateTrialOperationGovernanceSuggestions(projectId.value)
+    governanceBatch.value = batch
+    selectedGovernanceSuggestionIds.value = batch.items.filter((item) => item.canApply).map((item) => item.id)
+    governanceMessage.value = batch.items.length
+      ? `已生成 ${batch.items.length} 条治理建议；已应用过的同类建议会自动过滤`
+      : '当前没有新的治理建议；已应用过的同类建议不会重复出现'
+  } catch (error) {
+    governanceMessage.value = error instanceof Error ? error.message : '生成治理建议失败'
+  } finally {
+    isGeneratingGovernanceSuggestions.value = false
+  }
+}
+
+const applyGovernanceSuggestions = async () => {
+  if (!projectId.value || !governanceBatch.value) return
+  if (!selectedGovernanceSuggestionIds.value.length) {
+    governanceMessage.value = '请先选择要应用的建议'
+    return
+  }
+  isApplyingGovernanceSuggestions.value = true
+  governanceMessage.value = ''
+  try {
+    const result = await applyTrialOperationGovernanceSuggestions(projectId.value, {
+      batchId: governanceBatch.value.batchId,
+      suggestionIds: selectedGovernanceSuggestionIds.value
+    })
+    governanceMessage.value = result.summary
+    selectedGovernanceSuggestionIds.value = []
+    await Promise.all([loadDashboard(), loadCaseGovernance(), loadGovernanceHistory()])
+  } catch (error) {
+    governanceMessage.value = error instanceof Error ? error.message : '应用治理建议失败'
+  } finally {
+    isApplyingGovernanceSuggestions.value = false
+  }
+}
+
+const importExecutionResults = async () => {
+  if (!projectId.value) return
+  isImportingExecutionResults.value = true
+  executionImportMessage.value = ''
+  try {
+    const result = await importTrialOperationExecutionResults(projectId.value, {
+      totalLimit: executionImportLimit.value,
+      note: '试运行看板一键写入核心用例执行结果'
+    })
+    executionImportMessage.value = `${result.summary}，Run ID：${result.runId}`
+    await loadDashboard()
+  } catch (error) {
+    executionImportMessage.value = error instanceof Error ? error.message : '写入执行结果失败'
+  } finally {
+    isImportingExecutionResults.value = false
+  }
+}
+
+const clearImportQueue = () => {
+  resetImportState()
+  importMessage.value = '已清空待导入文件'
+}
+
+const allowedExtensions = computed(() => selectedImportOption.value.accept.split(',').map((item) => item.trim().toLowerCase()))
+
+const canAcceptFile = (file: File) => {
+  const extension = `.${String(file.name || '').split('.').pop()?.toLowerCase() || ''}`
+  return allowedExtensions.value.includes(extension)
+}
+
+const buildQueueLabel = (file: File) => {
+  const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath
+  return relativePath || file.name
+}
+
+const queueFile = (file: File) => {
+  if (!canAcceptFile(file)) {
+    importMessage.value = `当前类型只支持 ${selectedImportOption.value.accept}`
+    return
+  }
+  const label = buildQueueLabel(file)
+  const duplicated = importQueue.value.some((item) => item.label === label && item.file.size === file.size && item.file.lastModified === file.lastModified)
+  if (duplicated) return
+  const id = `${file.name}-${file.size}-${file.lastModified}-${Math.random().toString(36).slice(2, 8)}`
+  importQueue.value = [
+    ...importQueue.value,
+    {
+      id,
+      file,
+      label,
+      preview: null,
+      mapping: {},
+      status: 'queued',
+      result: null,
+      error: ''
+    }
+  ]
+  activeImportId.value = id
+  const token = previewBatchToken
+  previewChain = previewChain.then(async () => {
+    if (token !== previewBatchToken) return
+    await buildImportPreview(id)
+  })
+  void previewChain
 }
 
 const onImportFileChange = (event: Event) => {
   const input = event.target as HTMLInputElement
-  const file = input.files?.[0] || null
+  const files = Array.from(input.files || [])
   importMessage.value = ''
   importResult.value = null
-  importPreview.value = null
-  importMapping.value = {}
-  if (!file) {
-    importFile.value = null
-    return
-  }
-  const extension = `.${String(file.name || '').split('.').pop()?.toLowerCase() || ''}`
-  const allowList = selectedImportOption.value.accept.split(',').map((item) => item.trim().toLowerCase())
-  if (!allowList.includes(extension)) {
-    importFile.value = null
-    input.value = ''
-    importMessage.value = `当前类型只支持 ${selectedImportOption.value.accept}`
-    return
-  }
-  importFile.value = file
-  void buildImportPreview(file)
+  if (!files.length) return
+  files.forEach((file) => queueFile(file))
 }
 
-const buildImportPreview = async (file: File) => {
+const onImportDirectoryChange = (event: Event) => {
+  const input = event.target as HTMLInputElement
+  const files = Array.from(input.files || [])
+  importMessage.value = ''
+  importResult.value = null
+  if (!files.length) return
+  files.forEach((file) => queueFile(file))
+}
+
+const onImportDrop = (event: DragEvent) => {
+  const files = Array.from(event.dataTransfer?.files || [])
+  if (!files.length) return
+  importMessage.value = ''
+  importResult.value = null
+  files.forEach((file) => queueFile(file))
+}
+
+const buildImportPreview = async (queueId: string) => {
+  const item = importQueue.value.find((entry) => entry.id === queueId)
+  if (!item) return
+  item.status = 'previewing'
   isPreviewing.value = true
   try {
-    const preview = await previewTrialOperationImport(file, importType.value)
-    importPreview.value = preview
-    importMapping.value = { ...preview.suggestedMapping }
-    if (preview.warnings.length) {
-      importMessage.value = preview.warnings[0]
+    const preview = await previewTrialOperationImport(item.file, importType.value)
+    item.preview = preview
+    item.mapping = { ...preview.suggestedMapping }
+    item.status = 'ready'
+    if (activeImportId.value === item.id) {
+      importPreview.value = preview
+      importMapping.value = { ...item.mapping }
+      if (preview.warnings.length) {
+        importMessage.value = preview.warnings[0]
+      }
     }
   } catch (error) {
-    importPreview.value = null
-    importMapping.value = {}
-    importMessage.value = error instanceof Error ? error.message : '预览失败'
+    item.preview = null
+    item.mapping = {}
+    item.status = 'failed'
+    item.error = error instanceof Error ? error.message : '预览失败'
+    if (activeImportId.value === item.id) {
+      importPreview.value = null
+      importMapping.value = {}
+      importMessage.value = item.error
+    }
   } finally {
     isPreviewing.value = false
   }
 }
 
+const selectQueueItem = async (queueId: string) => {
+  activeImportId.value = queueId
+  const item = importQueue.value.find((entry) => entry.id === queueId)
+  if (!item) return
+  importPreview.value = item.preview
+  importMapping.value = { ...item.mapping }
+  if (!item.preview && item.status !== 'failed') {
+    await buildImportPreview(queueId)
+  }
+}
+
+const removeQueueItem = (queueId: string) => {
+  const nextQueue = importQueue.value.filter((item) => item.id !== queueId)
+  importQueue.value = nextQueue
+  if (activeImportId.value === queueId) {
+    const nextActive = nextQueue[0] || null
+    activeImportId.value = nextActive?.id || ''
+    importPreview.value = nextActive?.preview || null
+    importMapping.value = nextActive?.mapping ? { ...nextActive.mapping } : {}
+  }
+}
+
+const updateCurrentMapping = (key: string, value: string) => {
+  currentImportMapping.value = { ...currentImportMapping.value, [key]: value }
+}
+
 const mappedCell = (row: Record<string, string>, key: string) => {
-  const header = importMapping.value[key]
+  const header = currentImportMapping.value[key]
   if (!header) return ''
   return row[header] || ''
 }
@@ -666,60 +986,125 @@ const importResultCounts = () => {
     }
   }
   return {
-    total: importPreview.value?.totalRows || importResult.value.data.importedCount + importResult.value.data.failedCount,
+    total: currentImportPreview.value?.totalRows || importResult.value.data.importedCount + importResult.value.data.failedCount,
     success: importResult.value.data.importedCount,
     failed: importResult.value.data.failedCount
   }
 }
 
+const countsForImportResult = (result: TrialOperationImportResult, preview?: TrialOperationImportPreview | null) => {
+  if (result.type === 'requirements') return { total: 1, success: 1, failed: 0 }
+  if (result.type === 'defects') {
+    return {
+      total: result.data.total,
+      success: result.data.success,
+      failed: result.data.failed
+    }
+  }
+  return {
+    total: preview?.totalRows || result.data.importedCount + result.data.failedCount,
+    success: result.data.importedCount,
+    failed: result.data.failedCount
+  }
+}
+
+const summaryForImportResult = (fileName: string, result: TrialOperationImportResult) => {
+  if (result.type === 'requirements') return `${fileName}：${result.data.parseStarted ? '解析已触发' : '导入完成'}`
+  const counts = countsForImportResult(result)
+  return `${fileName}：成功 ${counts.success} / 失败 ${counts.failed}`
+}
+
 const handleImport = async () => {
   if (!projectId.value) return
-  if (!importFile.value) {
+  const queue = importQueue.value.filter((item) => item.preview && item.status !== 'importing')
+  if (!queue.length) {
     importMessage.value = '请先选择要导入的文件'
     return
   }
   isImporting.value = true
   importMessage.value = ''
   importResult.value = null
-  const importingFile = importFile.value
   try {
-    if (importType.value === 'requirements') {
-      const data = await importTrialOperationRequirementDoc(projectId.value, importingFile)
-      importResult.value = { type: 'requirements', data }
-      importMessage.value = data.parseStarted ? '需求文档已导入，解析任务已触发' : '需求文档已导入，解析可在文档中心继续'
-    } else if (importType.value === 'defects') {
-      const data = await importTrialOperationDefects(projectId.value, importingFile)
-      importResult.value = { type: 'defects', data }
-      importMessage.value = `缺陷导入完成：成功 ${data.success} 条，失败 ${data.failed} 条`
-    } else {
-      const data = await importTrialOperationTestcases(projectId.value, importingFile)
-      importResult.value = { type: 'testcases', data }
-      importMessage.value = `用例导入完成：成功 ${data.importedCount} 条，失败 ${data.failedCount} 条`
-    }
-    const counts = importResultCounts()
-    const status = counts.failed === 0 ? 'SUCCESS' : counts.success > 0 ? 'PARTIAL_SUCCESS' : 'FAILED'
-    await recordTrialOperationImport(projectId.value, {
-      importType: importType.value,
-      fileName: importingFile.name,
-      status,
-      totalRows: counts.total || importPreview.value?.totalRows || 0,
-      successRows: counts.success,
-      failedRows: counts.failed,
-      summary: importMessage.value,
-      detail: {
-        previewRows: importPreview.value?.sampleRows.length || 0,
-        mapping: importMapping.value,
-        warnings: importPreview.value?.warnings || []
+    const importedSummaries: string[] = []
+    const failedSummaries: string[] = []
+    for (const item of queue) {
+      activeImportId.value = item.id
+      item.status = 'importing'
+      importPreview.value = item.preview
+      importMapping.value = { ...item.mapping }
+      if (item.preview) {
+        currentImportMapping.value = { ...item.mapping }
       }
-    })
-    importFile.value = null
-    importPreview.value = null
-    importMapping.value = {}
-    fileInputKey.value += 1
+      try {
+        if (importType.value === 'requirements') {
+          const data = await importTrialOperationRequirementDoc(projectId.value, item.file)
+          item.result = { type: 'requirements', data }
+        } else if (importType.value === 'defects') {
+          const data = await importTrialOperationDefects(projectId.value, item.file)
+          item.result = { type: 'defects', data }
+        } else {
+          const data = await importTrialOperationTestcases(projectId.value, item.file)
+          item.result = { type: 'testcases', data }
+        }
+        item.status = 'success'
+        item.error = ''
+        importResult.value = item.result
+        importedSummaries.push(summaryForImportResult(item.file.name, item.result))
+        const counts = countsForImportResult(item.result, item.preview)
+        const status = counts.failed === 0 ? 'SUCCESS' : counts.success > 0 ? 'PARTIAL_SUCCESS' : 'FAILED'
+        await recordTrialOperationImport(projectId.value, {
+          importType: importType.value,
+          fileName: item.file.name,
+          status,
+          totalRows: counts.total || item.preview?.totalRows || 0,
+          successRows: counts.success,
+          failedRows: counts.failed,
+          summary: item.result.type === 'requirements'
+            ? `需求文档导入完成：${item.file.name}`
+            : item.result.type === 'defects'
+              ? `缺陷导入完成：${item.file.name}`
+              : `用例导入完成：${item.file.name}`,
+          detail: {
+            previewRows: item.preview?.sampleRows.length || 0,
+            mapping: item.mapping,
+            warnings: item.preview?.warnings || []
+          }
+        })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '导入失败'
+        item.status = 'failed'
+        item.error = message
+        failedSummaries.push(`${item.file.name}：${message}`)
+        await recordTrialOperationImport(projectId.value, {
+          importType: importType.value,
+          fileName: item.file.name,
+          status: 'FAILED',
+          totalRows: item.preview?.totalRows || 0,
+          successRows: 0,
+          failedRows: item.preview?.totalRows || 0,
+          summary: `导入失败：${message}`,
+          detail: {
+            previewRows: item.preview?.sampleRows.length || 0,
+            mapping: item.mapping,
+            warnings: item.preview?.warnings || [],
+            error: message
+          }
+        })
+      }
+    }
+    importMessage.value = [...importedSummaries, ...failedSummaries].join('；')
+    if (queue.length === 1 && importResult.value) {
+      const counts = importResultCounts()
+      importMessage.value =
+        importResult.value.type === 'requirements'
+          ? importMessage.value || '需求文档已导入，解析任务已触发'
+          : importResult.value.type === 'defects'
+            ? `缺陷导入完成：成功 ${counts.success} 条，失败 ${counts.failed} 条`
+            : `用例导入完成：成功 ${counts.success} 条，失败 ${counts.failed} 条`
+    }
     await loadDashboard()
+    await loadCaseGovernance()
     await loadImportHistory()
-  } catch (error) {
-    importMessage.value = error instanceof Error ? error.message : '导入失败'
   } finally {
     isImporting.value = false
   }
@@ -763,22 +1148,18 @@ const downloadImportTemplate = () => {
 
   if (importType.value === 'defects') {
     downloadTextFile(
-      'defects-import-template.json',
-      JSON.stringify(
-        {
-          items: [
-            {
-              title: '登录失败时错误提示不清晰',
-              description: '输入错误密码后提示文案不明确，需要给出具体失败原因或操作建议。',
-              severity: 'P1',
-              source: 'manual-import'
-            }
-          ]
-        },
-        null,
-        2
-      ),
-      'application/json;charset=utf-8'
+      'defects-import-template.md',
+      [
+        '# 缺陷导入模板',
+        '',
+        '| 优先级 | 状态 | 负责人 | 缺陷标题 |',
+        '| --- | --- | --- | --- |',
+        '| P1 | 未完成 | 张三 | 登录失败时错误提示不清晰 |',
+        '| P2 | 已完成 | 李四 | 列表筛选条件刷新后丢失 |',
+        '',
+        '- 【活动页】按钮点击后没有 loading 反馈 (执行者: 王五, 状态: 未完成)'
+      ].join('\n'),
+      'text/markdown;charset=utf-8'
     )
     return
   }
@@ -831,6 +1212,8 @@ watch(importType, resetImportState)
 onMounted(() => {
   restoreViewConfig()
   void loadDashboard()
+  void loadCaseGovernance()
+  void loadGovernanceHistory()
   void loadImportHistory()
   void loadReportSnapshots()
 })
@@ -857,6 +1240,29 @@ onMounted(() => {
       <AlertTriangle class="mt-[2px] h-[16px] w-[16px] shrink-0" />
       <span>{{ errorMessage }}</span>
     </div>
+
+    <section class="mb-[16px] rounded-[8px] border border-black/10 bg-white p-[14px]">
+      <div class="flex flex-col gap-[12px] lg:flex-row lg:items-center lg:justify-between">
+        <div class="min-w-0">
+          <div class="flex flex-wrap items-center gap-[8px]">
+            <div class="text-[14px] font-semibold leading-[20px] text-[#0A0A0A]">试运行完成度</div>
+            <span class="rounded-[7px] bg-[#EFF6FF] px-[8px] py-[2px] text-[12px] font-medium text-[#155DFC]">{{ trialCompletion.label }}</span>
+          </div>
+          <div class="mt-[5px] text-[12px] leading-[18px] text-[#717182]">
+            已完成 {{ trialCompletion.done }} / {{ trialCompletion.total }} 项：数据导入、用例治理、执行接入、报告快照会共同影响演示闭环。
+          </div>
+        </div>
+        <div class="w-full shrink-0 lg:w-[340px]">
+          <div class="flex items-center justify-between text-[12px] text-[#717182]">
+            <span>完成度</span>
+            <span class="font-medium text-[#0A0A0A]">{{ trialCompletion.score }}%</span>
+          </div>
+          <div class="mt-[7px] h-[10px] overflow-hidden rounded-full bg-[#EEF1F5]">
+            <div class="h-full rounded-full bg-[#155DFC]" :style="{ width: `${Math.max(4, trialCompletion.score)}%` }" />
+          </div>
+        </div>
+      </div>
+    </section>
 
     <section class="mb-[16px] rounded-[8px] border border-black/10 bg-white p-[14px] md:p-[16px]">
       <div class="grid grid-cols-1 gap-[14px] xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.55fr)] xl:items-start">
@@ -1055,6 +1461,239 @@ onMounted(() => {
       </div>
     </section>
 
+    <section class="mt-[16px] rounded-[8px] border border-black/10 bg-white p-[18px]">
+      <div class="flex flex-col gap-[10px] lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h2 class="flex items-center gap-[8px] text-[15px] font-semibold leading-[22px] text-[#0A0A0A]">
+            <Sparkles class="h-[16px] w-[16px] text-[#7C3AED]" />
+            用例库治理
+          </h2>
+          <div class="mt-[4px] text-[12px] leading-[18px] text-[#717182]">按需求/模块/优先级/类型分层，辅助识别重复标题、低价值候选和 P0 覆盖密度</div>
+          <div class="mt-[3px] text-[12px] leading-[18px] text-[#B45309]">资产总量包含历史测试点；正式用例按源文件原始用例 ID 统计，平台补号项建议治理后再进入验收执行。</div>
+        </div>
+        <div class="grid grid-cols-2 gap-[8px] sm:grid-cols-4">
+          <div class="rounded-[8px] bg-[#F6F7F9] px-[12px] py-[9px]">
+            <div class="text-[11px] leading-[15px] text-[#717182]">资产总量</div>
+            <div class="mt-[3px] text-[18px] font-semibold leading-[24px] text-[#0A0A0A]">{{ caseGovernance?.totalCases || 0 }}</div>
+          </div>
+          <div class="rounded-[8px] bg-[#F0FDF4] px-[12px] py-[9px]">
+            <div class="text-[11px] leading-[15px] text-[#166534]">正式用例</div>
+            <div class="mt-[3px] text-[18px] font-semibold leading-[24px] text-[#008236]">{{ caseGovernance?.formalCases || 0 }}</div>
+          </div>
+          <div class="rounded-[8px] bg-[#FEF2F2] px-[12px] py-[9px]">
+            <div class="text-[11px] leading-[15px] text-[#991B1B]">测试点</div>
+            <div class="mt-[3px] text-[18px] font-semibold leading-[24px] text-[#C10007]">{{ caseGovernance?.testPointCases || 0 }}</div>
+          </div>
+          <div class="rounded-[8px] bg-[#EFF6FF] px-[12px] py-[9px]">
+            <div class="text-[11px] leading-[15px] text-[#155DFC]">平台补号</div>
+            <div class="mt-[3px] text-[18px] font-semibold leading-[24px] text-[#155DFC]">{{ caseGovernance?.generatedImportIds || 0 }}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-[16px] grid grid-cols-1 gap-[16px] xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
+        <div class="rounded-[8px] border border-black/10 p-[14px]">
+          <div class="flex items-center justify-between gap-[12px]">
+            <div class="text-[13px] font-medium text-[#0A0A0A]">模块用例分布 Top10</div>
+            <div class="text-[12px] text-[#717182]">当前合计 {{ governanceModuleTotal }} 条</div>
+          </div>
+          <div class="mt-[12px] space-y-[9px]">
+            <div v-for="[name, value] in governanceModuleRows" :key="name" class="grid grid-cols-[minmax(92px,240px)_1fr_78px] items-center gap-[10px]">
+              <div class="truncate text-[12px] text-[#374151]" :title="name">{{ name }}</div>
+              <div class="h-[12px] overflow-hidden rounded-full bg-[#EEF1F5]">
+                <div class="h-full rounded-full bg-[#7C3AED]" :style="{ width: percentWidthByMax(value, governanceMaxModuleValue) }" />
+              </div>
+              <div class="text-right text-[11px] text-[#717182]">{{ value }} · {{ percentTextByTotal(value, governanceModuleTotal) }}</div>
+            </div>
+            <div v-if="!governanceModuleRows.length" class="rounded-[8px] bg-[#F6F7F9] px-[10px] py-[8px] text-[12px] text-[#717182]">暂无模块分布数据</div>
+          </div>
+        </div>
+
+        <div class="rounded-[8px] border border-black/10 p-[14px]">
+          <div class="text-[13px] font-medium text-[#0A0A0A]">P0 覆盖密度 Top</div>
+          <div class="mt-[12px] space-y-[8px]">
+            <div v-for="item in caseGovernance?.moduleP0Density || []" :key="item.feature" class="rounded-[8px] bg-[#F6F7F9] px-[10px] py-[8px]">
+              <div class="flex items-center justify-between gap-[8px]">
+                <div class="min-w-0 truncate text-[12px] font-medium text-[#0A0A0A]" :title="item.feature">{{ item.feature }}</div>
+                <div class="shrink-0 text-[12px] text-[#C10007]">{{ item.p0Density }}%</div>
+              </div>
+              <div class="mt-[4px] text-[11px] text-[#717182]">P0 {{ item.p0 }} / 总量 {{ item.total }}</div>
+            </div>
+            <div v-if="!(caseGovernance?.moduleP0Density || []).length" class="rounded-[8px] bg-[#F6F7F9] px-[10px] py-[8px] text-[12px] text-[#717182]">暂无 P0 密度数据</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-[16px] grid grid-cols-1 gap-[16px] xl:grid-cols-2">
+        <div class="rounded-[8px] border border-black/10 p-[14px]">
+          <div class="flex items-center justify-between gap-[12px]">
+            <div class="text-[13px] font-medium text-[#0A0A0A]">重复标题候选</div>
+            <div class="text-[12px] text-[#717182]">{{ (caseGovernance?.duplicateTitleCandidates || []).length }} 组</div>
+          </div>
+          <div class="mt-[12px] max-h-[260px] overflow-auto">
+            <div v-for="item in caseGovernance?.duplicateTitleCandidates || []" :key="item.title" class="border-b border-black/5 py-[8px] last:border-b-0">
+              <div class="flex items-center justify-between gap-[10px]">
+                <div class="min-w-0 truncate text-[12px] font-medium text-[#0A0A0A]" :title="item.title">{{ item.title }}</div>
+                <div class="shrink-0 rounded-full bg-[#FFFBEB] px-[7px] py-[2px] text-[11px] text-[#B45309]">{{ item.count }} 条</div>
+              </div>
+              <div class="mt-[4px] truncate text-[11px] text-[#717182]" :title="(item.modules || []).join(' / ')">{{ (item.modules || []).join(' / ') || '未分组' }}</div>
+            </div>
+            <div v-if="!(caseGovernance?.duplicateTitleCandidates || []).length" class="rounded-[8px] bg-[#F6F7F9] px-[10px] py-[8px] text-[12px] text-[#717182]">暂无重复标题候选</div>
+          </div>
+        </div>
+
+        <div class="rounded-[8px] border border-black/10 p-[14px]">
+          <div class="flex items-center justify-between gap-[12px]">
+            <div class="text-[13px] font-medium text-[#0A0A0A]">低价值候选</div>
+            <div class="text-[12px] text-[#717182]">{{ (caseGovernance?.lowValueCandidates || []).length }} 条</div>
+          </div>
+          <div class="mt-[12px] max-h-[260px] overflow-auto">
+            <div v-for="item in caseGovernance?.lowValueCandidates || []" :key="item.id" class="border-b border-black/5 py-[8px] last:border-b-0">
+              <div class="flex items-center justify-between gap-[10px]">
+                <div class="min-w-0 truncate text-[12px] font-medium text-[#0A0A0A]" :title="item.title">{{ item.title }}</div>
+                <div class="shrink-0 text-[11px] text-[#717182]">{{ item.priority }} · {{ item.type }}</div>
+              </div>
+              <div class="mt-[3px] truncate text-[11px] text-[#717182]" :title="item.feature || ''">{{ item.testCaseId || '-' }} · {{ item.feature || '未分组' }}</div>
+              <div class="mt-[5px] flex flex-wrap gap-[5px]">
+                <span v-for="reason in item.reasons" :key="reason" class="rounded-full bg-[#FEF2F2] px-[7px] py-[2px] text-[11px] text-[#C10007]">{{ reason }}</span>
+              </div>
+            </div>
+            <div v-if="!(caseGovernance?.lowValueCandidates || []).length" class="rounded-[8px] bg-[#F6F7F9] px-[10px] py-[8px] text-[12px] text-[#717182]">暂无低价值候选</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-[16px] rounded-[8px] border border-black/10 bg-[#FAFBFC] p-[14px]">
+        <div class="flex flex-col gap-[10px] lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div class="flex items-center gap-[8px] text-[13px] font-medium text-[#0A0A0A]">
+              <Sparkles class="h-[15px] w-[15px] text-[#7C3AED]" />
+              AI 自动治理
+            </div>
+            <div class="mt-[4px] text-[12px] leading-[18px] text-[#717182]">生成建议后先预览勾选，确认后才会给用例打治理标签或转入评审状态。</div>
+            <div v-if="governanceBatch" class="mt-[3px] text-[12px] leading-[18px] text-[#B45309]">当前批次：{{ governanceBatch.batchId }}；重新生成会覆盖当前预览，不会重复展示已应用过的同类建议。</div>
+          </div>
+          <div class="flex shrink-0 flex-wrap items-center gap-[8px]">
+            <button
+              type="button"
+              class="inline-flex h-[32px] items-center justify-center gap-[6px] rounded-[8px] bg-[#7C3AED] px-[12px] text-[13px] font-medium text-white disabled:bg-black/20"
+              :disabled="isGeneratingGovernanceSuggestions"
+              @click="generateGovernanceSuggestions"
+            >
+              <RefreshCw v-if="isGeneratingGovernanceSuggestions" class="h-[14px] w-[14px] animate-spin" />
+              <Sparkles v-else class="h-[14px] w-[14px]" />
+              {{ isGeneratingGovernanceSuggestions ? '生成中' : governanceGenerateLabel }}
+            </button>
+            <button
+              type="button"
+              class="inline-flex h-[32px] items-center justify-center gap-[6px] rounded-[8px] bg-[#155DFC] px-[12px] text-[13px] font-medium text-white disabled:bg-black/20"
+              :disabled="isApplyingGovernanceSuggestions || !canApplyGovernanceSuggestions"
+              @click="applyGovernanceSuggestions"
+            >
+              <RefreshCw v-if="isApplyingGovernanceSuggestions" class="h-[14px] w-[14px] animate-spin" />
+              <CheckCircle2 v-else class="h-[14px] w-[14px]" />
+              {{ isApplyingGovernanceSuggestions ? '应用中' : `确认应用 ${selectedGovernanceSuggestionIds.length} 条` }}
+            </button>
+          </div>
+        </div>
+        <div v-if="governanceMessage" class="mt-[10px] rounded-[8px] border border-black/10 bg-white px-[10px] py-[8px] text-[12px] text-[#374151]">{{ governanceMessage }}</div>
+        <div v-if="governanceBatch" class="mt-[12px] grid grid-cols-2 gap-[8px] md:grid-cols-5">
+          <div class="rounded-[8px] bg-white px-[10px] py-[8px]">
+            <div class="text-[11px] text-[#717182]">总建议</div>
+            <div class="mt-[3px] text-[18px] font-semibold text-[#0A0A0A]">{{ governanceBatch.summary.total || governanceSuggestions.length }}</div>
+          </div>
+          <div class="rounded-[8px] bg-white px-[10px] py-[8px]">
+            <div class="text-[11px] text-[#717182]">重复</div>
+            <div class="mt-[3px] text-[18px] font-semibold text-[#B45309]">{{ governanceBatch.summary.duplicates || 0 }}</div>
+          </div>
+          <div class="rounded-[8px] bg-white px-[10px] py-[8px]">
+            <div class="text-[11px] text-[#717182]">低价值</div>
+            <div class="mt-[3px] text-[18px] font-semibold text-[#C10007]">{{ governanceBatch.summary.lowValue || 0 }}</div>
+          </div>
+          <div class="rounded-[8px] bg-white px-[10px] py-[8px]">
+            <div class="text-[11px] text-[#717182]">待转正式</div>
+            <div class="mt-[3px] text-[18px] font-semibold text-[#155DFC]">{{ governanceBatch.summary.promotableTestPoints || 0 }}</div>
+          </div>
+          <div class="rounded-[8px] bg-white px-[10px] py-[8px]">
+            <div class="text-[11px] text-[#717182]">P0 缺口</div>
+            <div class="mt-[3px] text-[18px] font-semibold text-[#7C3AED]">{{ governanceBatch.summary.p0CoverageGaps || 0 }}</div>
+          </div>
+        </div>
+        <div v-if="governanceSuggestions.length" class="mt-[12px] max-h-[360px] overflow-auto rounded-[8px] border border-black/10 bg-white">
+          <label
+            v-for="item in governanceSuggestions"
+            :key="item.id"
+            class="flex cursor-pointer items-start gap-[10px] border-b border-black/5 px-[10px] py-[9px] last:border-b-0 hover:bg-[#F9FAFB]"
+          >
+            <input
+              type="checkbox"
+              class="mt-[3px] h-4 w-4 accent-[#155DFC]"
+              :checked="selectedGovernanceSuggestionIds.includes(item.id)"
+              :disabled="!item.canApply"
+              @change="toggleGovernanceSuggestion(item.id, ($event.target as HTMLInputElement).checked)"
+            />
+            <span class="min-w-0 flex-1">
+              <span class="flex flex-wrap items-center gap-[6px]">
+                <span class="text-[12px] font-medium text-[#0A0A0A]">{{ item.title }}</span>
+                <span class="rounded-full px-[7px] py-[2px] text-[11px]" :class="governanceSeverityClass(item.severity)">{{ item.severity }}</span>
+                <span class="rounded-full bg-[#F6F7F9] px-[7px] py-[2px] text-[11px] text-[#717182]">{{ governanceCategoryLabel(item.category) }}</span>
+              </span>
+              <span class="mt-[4px] block text-[12px] leading-[17px] text-[#4B5563]">{{ item.reason }}</span>
+              <span class="mt-[3px] block text-[12px] leading-[17px] text-[#717182]">{{ item.recommendation }}</span>
+              <span class="mt-[5px] block text-[11px] text-[#9CA3AF]">影响 {{ item.targetCount }} 条 · 置信度 {{ Math.round(item.confidence * 100) }}%</span>
+            </span>
+          </label>
+        </div>
+        <div class="mt-[12px] rounded-[8px] border border-black/10 bg-white">
+          <div class="flex items-center justify-between gap-[10px] border-b border-black/10 px-[10px] py-[8px]">
+            <div>
+              <div class="text-[13px] font-medium text-[#0A0A0A]">治理历史</div>
+              <div class="mt-[2px] text-[12px] text-[#717182]">
+                已应用 {{ governanceHistory?.appliedSuggestions || 0 }} 条建议，更新 {{ governanceHistory?.updatedCases || 0 }} 条用例
+              </div>
+            </div>
+            <button type="button" class="shrink-0 text-[12px] text-[#155DFC]" @click="loadGovernanceHistory">刷新</button>
+          </div>
+          <div v-if="!(governanceHistory?.items || []).length" class="px-[10px] py-[10px] text-[12px] text-[#717182]">暂无治理历史</div>
+          <div v-else class="max-h-[190px] overflow-auto divide-y divide-black/5">
+            <div v-for="item in governanceHistory?.items || []" :key="item.batchId" class="px-[10px] py-[8px]">
+              <div class="flex items-center justify-between gap-[10px]">
+                <div class="min-w-0 truncate text-[12px] font-medium text-[#0A0A0A]" :title="item.batchId">{{ item.batchId }}</div>
+                <div class="shrink-0 text-[11px]" :class="governanceHistoryStatusClass(item.status)">{{ governanceHistoryStatusLabel(item.status) }}</div>
+              </div>
+              <div class="mt-[3px] text-[11px] leading-[15px] text-[#717182]">{{ item.summary }} · {{ formatTime(item.generatedAt) }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-[16px] rounded-[8px] border border-black/10 bg-white p-[14px]">
+        <div class="flex flex-col gap-[10px] md:flex-row md:items-center md:justify-between">
+          <div>
+            <div class="text-[13px] font-medium text-[#0A0A0A]">执行结果接入</div>
+            <div class="mt-[4px] text-[12px] leading-[18px] text-[#717182]">先写入一轮核心正式用例执行记录，让验收结论从“待执行验证”进入可评估状态。</div>
+          </div>
+          <div class="flex shrink-0 flex-wrap items-center gap-[8px]">
+            <label class="flex items-center gap-[6px] text-[12px] text-[#717182]">
+              核心用例数
+              <input v-model.number="executionImportLimit" type="number" min="1" max="500" class="h-[32px] w-[76px] rounded-[8px] border border-black/10 px-[8px] text-[12px] text-[#0A0A0A]" />
+            </label>
+            <button
+              type="button"
+              class="inline-flex h-[32px] items-center justify-center gap-[6px] rounded-[8px] bg-[#008236] px-[12px] text-[13px] font-medium text-white disabled:bg-black/20"
+              :disabled="isImportingExecutionResults"
+              @click="importExecutionResults"
+            >
+              <RefreshCw v-if="isImportingExecutionResults" class="h-[14px] w-[14px] animate-spin" />
+              <CheckCircle2 v-else class="h-[14px] w-[14px]" />
+              {{ isImportingExecutionResults ? '写入中' : '写入执行结果' }}
+            </button>
+          </div>
+        </div>
+        <div v-if="executionImportMessage" class="mt-[10px] rounded-[8px] bg-[#F0FDF4] px-[10px] py-[8px] text-[12px] leading-[18px] text-[#166534]">{{ executionImportMessage }}</div>
+      </div>
+    </section>
+
     <section class="mt-[16px] grid grid-cols-1 gap-[16px] 2xl:grid-cols-[minmax(0,1.55fr)_minmax(360px,0.8fr)]">
       <div class="rounded-[8px] border border-black/10 bg-white p-[18px]">
         <div class="flex flex-col gap-[14px] xl:flex-row xl:items-start xl:justify-between">
@@ -1135,7 +1774,11 @@ onMounted(() => {
           {{ selectedImportOption.description }}
         </div>
 
-        <div class="mt-[14px] flex flex-col gap-[10px]">
+        <div
+          class="mt-[14px] flex flex-col gap-[10px]"
+          @dragover.prevent
+          @drop.prevent="onImportDrop"
+        >
           <button
             type="button"
             class="inline-flex h-[34px] items-center justify-center gap-[6px] rounded-[8px] border border-black/10 bg-white px-[12px] text-[13px] font-medium text-[#0A0A0A] hover:bg-[#F9FAFB]"
@@ -1145,32 +1788,94 @@ onMounted(() => {
             下载当前模板
           </button>
 
-          <label class="flex min-h-[82px] cursor-pointer flex-col justify-center rounded-[8px] border border-dashed border-black/20 bg-white px-[12px] py-[12px]">
-            <input :key="fileInputKey" class="hidden" type="file" :accept="selectedImportOption.accept" @change="onImportFileChange" />
-            <span class="text-[13px] font-medium leading-[18px] text-[#0A0A0A]">选择文件</span>
-            <span class="mt-[4px] break-all text-[12px] leading-[18px] text-[#717182]">{{ importFileLabel }}</span>
-          </label>
+          <div class="rounded-[8px] border border-dashed border-black/20 bg-white px-[12px] py-[12px]">
+            <input ref="fileInputRef" class="hidden" type="file" multiple :accept="selectedImportOption.accept" @change="onImportFileChange" />
+            <input ref="directoryInputRef" class="hidden" type="file" multiple webkitdirectory :accept="selectedImportOption.accept" @change="onImportDirectoryChange" />
+            <div class="flex flex-wrap items-center gap-[8px]">
+              <button
+                type="button"
+                class="inline-flex h-[32px] items-center justify-center rounded-[8px] bg-[#155DFC] px-[12px] text-[13px] font-medium text-white"
+                @click="fileInputRef?.click()"
+              >
+                选择文件
+              </button>
+              <button
+                type="button"
+                class="inline-flex h-[32px] items-center justify-center rounded-[8px] border border-black/10 bg-white px-[12px] text-[13px] font-medium text-[#0A0A0A] hover:bg-[#F9FAFB]"
+                @click="directoryInputRef?.click()"
+              >
+                选择目录
+              </button>
+              <button
+                type="button"
+                class="inline-flex h-[32px] items-center justify-center rounded-[8px] border border-black/10 bg-white px-[12px] text-[13px] font-medium text-[#C10007] hover:bg-[#FEF2F2]"
+                :disabled="!importQueue.length || isImporting"
+                @click="clearImportQueue"
+              >
+                清空
+              </button>
+            </div>
+            <div class="mt-[8px] text-[12px] leading-[18px] text-[#717182]">
+              可一次选择多个文件，也可以把解压后的文件拖进来。当前支持：{{ selectedImportOption.accept }}
+            </div>
+            <div v-if="importQueue.length" class="mt-[8px] text-[12px] leading-[18px] text-[#717182]">
+              已选择 {{ queueSummary.total }} 个，{{ queueSummary.ready }} 个可导入，{{ queueSummary.failed }} 个失败；当前：{{ importFileLabel }}
+            </div>
+          </div>
 
-          <div v-if="isPreviewing" class="rounded-[8px] border border-black/10 bg-white px-[12px] py-[10px] text-[12px] text-[#717182]">正在解析预览...</div>
+          <div v-if="isPreviewing || hasPreviewingQueue" class="rounded-[8px] border border-black/10 bg-white px-[12px] py-[10px] text-[12px] text-[#717182]">正在解析预览...</div>
 
-          <div v-if="importPreview" class="rounded-[8px] border border-black/10 bg-white">
+          <div v-if="importQueue.length" class="max-h-[190px] overflow-auto rounded-[8px] border border-black/10 bg-white">
+            <button
+              v-for="item in importQueue"
+              :key="item.id"
+              type="button"
+              class="flex w-full items-start justify-between gap-[10px] border-b border-black/5 px-[10px] py-[8px] text-left last:border-b-0 hover:bg-[#F9FAFB]"
+              :class="activeImportId === item.id ? 'bg-[#EFF6FF]' : 'bg-white'"
+              @click="selectQueueItem(item.id)"
+            >
+              <span class="min-w-0">
+                <span class="block truncate text-[12px] font-medium text-[#0A0A0A]" :title="item.label">{{ item.label }}</span>
+                <span class="mt-[2px] block truncate text-[11px] text-[#717182]">
+                  {{ item.preview ? `识别 ${item.preview.totalRows} 行` : item.error || '等待解析' }}
+                </span>
+              </span>
+              <span class="flex shrink-0 items-center gap-[6px]">
+                <span class="rounded-full px-[7px] py-[2px] text-[11px]" :class="importQueueStatusClass(item.status)">
+                  {{ importQueueStatusLabel(item.status) }}
+                </span>
+                <span
+                  class="rounded-full px-[7px] py-[2px] text-[11px] text-[#717182] hover:bg-black/5"
+                  @click.stop="removeQueueItem(item.id)"
+                >
+                  移除
+                </span>
+              </span>
+            </button>
+          </div>
+
+          <div v-if="currentImportPreview" class="rounded-[8px] border border-black/10 bg-white">
             <div class="border-b border-black/10 px-[12px] py-[10px]">
               <div class="text-[13px] font-medium text-[#0A0A0A]">导入前预览</div>
-              <div class="mt-[2px] text-[12px] text-[#717182]">{{ importPreview.fileName }} · 识别 {{ importPreview.totalRows }} 行</div>
+              <div class="mt-[2px] text-[12px] text-[#717182]">{{ currentImportPreview.fileName }} · 识别 {{ currentImportPreview.totalRows }} 行</div>
             </div>
             <div class="grid grid-cols-1 gap-[8px] px-[12px] py-[10px] sm:grid-cols-2">
               <label v-for="field in mappingFields" :key="field.key" class="flex flex-col gap-[5px]">
                 <span class="text-[12px] text-[#717182]">{{ field.label }}{{ field.required ? ' *' : '' }}</span>
-                <select v-model="importMapping[field.key]" class="h-[32px] rounded-[8px] border border-black/10 bg-white px-[8px] text-[12px] text-[#0A0A0A]">
+                <select
+                  :value="currentImportMapping[field.key] || ''"
+                  class="h-[32px] rounded-[8px] border border-black/10 bg-white px-[8px] text-[12px] text-[#0A0A0A]"
+                  @change="updateCurrentMapping(field.key, ($event.target as HTMLSelectElement).value)"
+                >
                   <option value="">不映射</option>
-                  <option v-for="header in importPreview.headers" :key="header" :value="header">{{ header }}</option>
+                  <option v-for="header in currentImportPreview.headers" :key="header" :value="header">{{ header }}</option>
                 </select>
               </label>
             </div>
-            <div v-if="importPreview.warnings.length" class="mx-[12px] mb-[10px] rounded-[8px] bg-[#FFFBEB] px-[10px] py-[8px] text-[12px] leading-[16px] text-[#92400E]">
-              {{ importPreview.warnings.join('；') }}
+            <div v-if="currentImportPreview.warnings.length" class="mx-[12px] mb-[10px] rounded-[8px] bg-[#FFFBEB] px-[10px] py-[8px] text-[12px] leading-[16px] text-[#92400E]">
+              {{ currentImportPreview.warnings.join('；') }}
             </div>
-            <div v-if="importPreview.sampleRows.length" class="max-h-[180px] overflow-auto border-t border-black/10">
+            <div v-if="currentImportPreview.sampleRows.length" class="max-h-[180px] overflow-auto border-t border-black/10">
               <table class="w-full min-w-[520px] text-left text-[12px]">
                 <thead class="sticky top-0 bg-[#F6F7F9] text-[#717182]">
                   <tr>
@@ -1178,7 +1883,7 @@ onMounted(() => {
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="(row, index) in importPreview.sampleRows" :key="index" class="border-t border-black/5">
+                  <tr v-for="(row, index) in currentImportPreview.sampleRows" :key="index" class="border-t border-black/5">
                     <td v-for="field in mappingFields.slice(0, 4)" :key="field.key" class="max-w-[180px] truncate px-[10px] py-[8px] text-[#374151]" :title="mappedCell(row, field.key)">
                       {{ mappedCell(row, field.key) || '-' }}
                     </td>
@@ -1191,7 +1896,7 @@ onMounted(() => {
           <button
             type="button"
             class="inline-flex h-[36px] items-center justify-center gap-[6px] rounded-[8px] bg-[#155DFC] px-[14px] text-[14px] font-medium text-white disabled:cursor-not-allowed disabled:bg-black/20"
-            :disabled="isImporting || isPreviewing"
+            :disabled="isImporting || isPreviewing || hasPreviewingQueue || !importableQueue.length"
             @click="handleImport"
           >
             <RefreshCw v-if="isImporting" class="h-[14px] w-[14px] animate-spin" />

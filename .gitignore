@@ -1,5 +1,10 @@
 .worktrees/
 
+# Local secrets
+*.local
+*.local.*
+ai-project-back-end/.env.local
+
 # Local logs and runtime artifacts
 *.log
 backend-*.log

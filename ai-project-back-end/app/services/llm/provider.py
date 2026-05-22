@@ -232,7 +232,7 @@ class OpenAICompatibleProvider(LlmProvider):
 def get_provider() -> LlmProvider:
     settings = get_settings()
     provider = settings.llm_provider.strip().lower()
-    if provider in {"openai", "openai_compatible", "deepseek"}:
+    if provider in {"openai", "openai_compatible", "deepseek", "longcat"}:
         return OpenAICompatibleProvider()
     if provider:
         return LlmProvider()

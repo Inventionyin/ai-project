@@ -72,6 +72,165 @@ def _parse_tags(value: str) -> list[str]:
     return [s for s in items if s]
 
 
+def _first_value(row: dict[str, str], *keys: str) -> str:
+    for key in keys:
+        value = row.get(_normalize_header(key), "")
+        if value.strip():
+            return value.strip()
+    return ""
+
+
+def _truncate_text(value: str, max_length: int) -> str:
+    text = (value or "").strip()
+    if len(text) <= max_length:
+        return text
+    return text[: max_length - 1].rstrip() + "…"
+
+
+def _safe_test_case_id(value: str, *, row_number: int) -> str:
+    text = (value or "").strip()
+    if not text:
+        return f"TC_IMPORT_{row_number:05d}"
+    return _truncate_text(text, 64)
+
+
+def _looks_like_chinese_manual_case(row: dict[str, str]) -> bool:
+    keys = set(row.keys())
+    return bool({"用例标题", "测试步骤", "预期结果"} & keys) and bool({"模块", "需求名称", "场景类型"} & keys)
+
+
+def _map_case_type(value: str) -> str:
+    text = (value or "").strip().upper()
+    if text in {"API", "UI", "PERF", "MIX"}:
+        return text
+    if any(word in text for word in ["性能", "并发", "压测", "PERF"]):
+        return "PERF"
+    if any(word in text for word in ["接口", "API"]):
+        return "API"
+    return "UI"
+
+
+def _map_priority(value: str) -> str:
+    text = (value or "").strip().upper()
+    if text in {"P0", "P1", "P2", "P3"}:
+        return text
+    if text in {"高", "紧急", "最高", "CRITICAL"}:
+        return "P0"
+    if text in {"中", "重要", "HIGH"}:
+        return "P1"
+    if text in {"低", "一般", "MEDIUM"}:
+        return "P2"
+    return "P2"
+
+
+def _map_status(value: str) -> str:
+    text = (value or "").strip().upper()
+    if text in {"DRAFT", "REVIEWED", "DEPRECATED"}:
+        return text
+    if text in {"已评审", "已通过", "已完成", "完成", "通过"}:
+        return "REVIEWED"
+    if text in {"废弃", "失效", "停用"}:
+        return "DEPRECATED"
+    return "DRAFT"
+
+
+def _build_content_md_from_chinese_case(
+    *,
+    requirement_id: str,
+    requirement_name: str,
+    scenario_type: str,
+    preconditions: str,
+    steps: str,
+    test_data: str,
+    expected_result: str,
+    remark: str,
+) -> str:
+    sections: list[str] = []
+    if requirement_id or requirement_name:
+        req = " / ".join(v for v in [requirement_id, requirement_name] if v)
+        sections.append(f"### 关联需求\n{req}")
+    if scenario_type:
+        sections.append(f"### 场景类型\n{scenario_type}")
+    if preconditions:
+        sections.append(f"### 前置条件\n{preconditions}")
+    if steps:
+        sections.append(f"### 测试步骤\n{steps}")
+    if test_data:
+        sections.append(f"### 测试数据\n{test_data}")
+    if expected_result:
+        sections.append(f"### 预期结果\n{expected_result}")
+    if remark:
+        sections.append(f"### 备注\n{remark}")
+    return "\n\n".join(sections)
+
+
+def _build_chinese_manual_payload_dict(*, project_id: str, row: dict[str, str], row_number: int) -> dict:
+    requirement_id = _first_value(row, "需求ID", "需求编号", "req_id", "requirement_id")
+    requirement_name = _first_value(row, "需求名称", "需求标题", "requirement_name")
+    feature = _truncate_text(_first_value(row, "模块", "所属模块", "功能模块") or requirement_name or "未分组", 128)
+    scenario_type = _first_value(row, "场景类型", "用例类型", "测试类型", "类型")
+    priority = _map_priority(_first_value(row, "优先级", "priority"))
+    status = _map_status(_first_value(row, "状态", "status"))
+    raw_test_case_id = _first_value(row, "用例ID", "用例编号", "test_case_id", "testCaseId")
+    test_case_id = _safe_test_case_id(raw_test_case_id, row_number=row_number)
+    title = _first_value(row, "用例标题", "标题", "title")
+    preconditions = _first_value(row, "前置条件", "前置", "preconditions")
+    steps = _first_value(row, "测试步骤", "步骤", "操作步骤")
+    test_data = _first_value(row, "测试数据", "数据", "入参")
+    expected_result = _first_value(row, "预期结果", "期望结果", "expectedResult")
+    remark = _first_value(row, "备注", "说明", "remark")
+
+    if not title:
+        title_parts = [feature, steps or expected_result or requirement_name or f"第{row_number}行用例"]
+        title = "-".join(v for v in title_parts if v)
+    title = _truncate_text(title, 100)
+    expected_result = _truncate_text(expected_result or "按测试步骤执行并符合需求预期", 5000)
+    preconditions = _truncate_text(preconditions, 5000) or None
+
+    tags = ["真实导入"]
+    if scenario_type:
+        tags.append(_truncate_text(scenario_type, 64))
+    if requirement_name and requirement_name != feature:
+        tags.append(_truncate_text(requirement_name, 64))
+
+    return {
+        "projectId": project_id,
+        "testCaseId": test_case_id,
+        "feature": feature,
+        "title": title,
+        "type": _map_case_type(scenario_type),
+        "priority": priority,
+        "status": status,
+        "apiMethod": "MANUAL",
+        "apiUrl": f"/manual/{test_case_id}",
+        "apiHeaders": {},
+        "apiParams": {
+            "requirementId": requirement_id,
+            "requirementName": requirement_name,
+            "scenarioType": scenario_type,
+            "testData": test_data,
+            "sourceRow": row_number,
+            "sourceHadCaseId": bool(raw_test_case_id),
+            "sourceTestCaseId": raw_test_case_id,
+        },
+        "expectedStatusCode": None,
+        "expectedResult": expected_result,
+        "preconditions": preconditions,
+        "postconditions": None,
+        "contentMd": _build_content_md_from_chinese_case(
+            requirement_id=requirement_id,
+            requirement_name=requirement_name,
+            scenario_type=scenario_type,
+            preconditions=preconditions or "",
+            steps=steps,
+            test_data=test_data,
+            expected_result=expected_result,
+            remark=remark,
+        ),
+        "tags": list(dict.fromkeys(tags))[:50],
+    }
+
+
 def _parse_csv_rows(file_bytes: bytes) -> list[dict[str, str]]:
     text = file_bytes.decode("utf-8-sig", errors="replace")
     reader = csv.DictReader(io.StringIO(text))
@@ -134,61 +293,65 @@ def _build_row_payloads(
     payloads: list[_RowPayload] = []
 
     for idx, row in enumerate(rows, start=2):
-        test_case_id = row.get("test_case_id") or row.get("testcaseid") or row.get("test_caseid") or row.get("testcase_id")
-        test_case_id = (test_case_id or "").strip() or None
+        if _looks_like_chinese_manual_case(row):
+            payload_dict = _build_chinese_manual_payload_dict(project_id=project_id, row=row, row_number=idx)
+            test_case_id = payload_dict["testCaseId"]
+        else:
+            test_case_id = row.get("test_case_id") or row.get("testcaseid") or row.get("test_caseid") or row.get("testcase_id")
+            test_case_id = (test_case_id or "").strip() or None
 
-        api_headers_text = row.get("apiheaders", "")
-        api_params_text = row.get("apiparams", "")
-        pre_text = row.get("preconditions", "")
-        post_text = row.get("postconditions", "")
+            api_headers_text = row.get("apiheaders", "")
+            api_params_text = row.get("apiparams", "")
+            pre_text = row.get("preconditions", "")
+            post_text = row.get("postconditions", "")
 
-        api_headers = _parse_json_dict(api_headers_text, field="apiHeaders", row_number=idx, errors=errors)
-        if api_headers is None:
-            continue
-        api_params = _parse_json_dict(api_params_text, field="apiParams", row_number=idx, errors=errors)
-        if api_params is None:
-            continue
-        pre_obj = _parse_json_dict(pre_text, field="preconditions", row_number=idx, errors=errors)
-        if pre_obj is None:
-            continue
-        post_obj = _parse_json_dict(post_text, field="postconditions", row_number=idx, errors=errors)
-        if post_obj is None:
-            continue
-
-        expected_status_code: int | None = None
-        esc = row.get("expected_status_code") or row.get("expectedstatuscode") or row.get("expected_statuscode")
-        if esc is not None and str(esc).strip() != "":
-            try:
-                expected_status_code = int(str(esc).strip())
-            except Exception:
-                errors.append(
-                    TestCaseImportErrorItem(
-                        rowNumber=idx,
-                        testCaseId=test_case_id,
-                        field="expected_status_code",
-                        message="expected_status_code 必须是整数",
-                    )
-                )
+            api_headers = _parse_json_dict(api_headers_text, field="apiHeaders", row_number=idx, errors=errors)
+            if api_headers is None:
+                continue
+            api_params = _parse_json_dict(api_params_text, field="apiParams", row_number=idx, errors=errors)
+            if api_params is None:
+                continue
+            pre_obj = _parse_json_dict(pre_text, field="preconditions", row_number=idx, errors=errors)
+            if pre_obj is None:
+                continue
+            post_obj = _parse_json_dict(post_text, field="postconditions", row_number=idx, errors=errors)
+            if post_obj is None:
                 continue
 
-        payload_dict: dict = {
-            "projectId": project_id,
-            "testCaseId": test_case_id,
-            "feature": (row.get("feature") or "").strip(),
-            "title": (row.get("title") or "").strip(),
-            "type": (row.get("type") or "").strip().upper(),
-            "priority": (row.get("priority") or "").strip().upper(),
-            "status": (row.get("status") or "").strip().upper(),
-            "apiMethod": (row.get("apimethod") or "").strip().upper(),
-            "apiUrl": (row.get("apiurl") or "").strip(),
-            "apiHeaders": api_headers,
-            "apiParams": api_params,
-            "expectedStatusCode": expected_status_code,
-            "expectedResult": (row.get("expectedresult") or "").strip(),
-            "preconditions": json.dumps(pre_obj, ensure_ascii=False) if pre_text.strip() else None,
-            "postconditions": json.dumps(post_obj, ensure_ascii=False) if post_text.strip() else None,
-            "tags": _parse_tags(row.get("tags", "")),
-        }
+            expected_status_code: int | None = None
+            esc = row.get("expected_status_code") or row.get("expectedstatuscode") or row.get("expected_statuscode")
+            if esc is not None and str(esc).strip() != "":
+                try:
+                    expected_status_code = int(str(esc).strip())
+                except Exception:
+                    errors.append(
+                        TestCaseImportErrorItem(
+                            rowNumber=idx,
+                            testCaseId=test_case_id,
+                            field="expected_status_code",
+                            message="expected_status_code 必须是整数",
+                        )
+                    )
+                    continue
+
+            payload_dict = {
+                "projectId": project_id,
+                "testCaseId": test_case_id,
+                "feature": (row.get("feature") or "").strip(),
+                "title": (row.get("title") or "").strip(),
+                "type": (row.get("type") or "").strip().upper(),
+                "priority": (row.get("priority") or "").strip().upper(),
+                "status": (row.get("status") or "").strip().upper(),
+                "apiMethod": (row.get("apimethod") or "").strip().upper(),
+                "apiUrl": (row.get("apiurl") or "").strip(),
+                "apiHeaders": api_headers,
+                "apiParams": api_params,
+                "expectedStatusCode": expected_status_code,
+                "expectedResult": (row.get("expectedresult") or "").strip(),
+                "preconditions": json.dumps(pre_obj, ensure_ascii=False) if pre_text.strip() else None,
+                "postconditions": json.dumps(post_obj, ensure_ascii=False) if post_text.strip() else None,
+                "tags": _parse_tags(row.get("tags", "")),
+            }
 
         try:
             payload = TestCaseCreateRequest.model_validate(payload_dict)

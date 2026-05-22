@@ -140,8 +140,6 @@ def _resolve_token(access_token: str | None, referer: str | None) -> str:
 
 
 def _to_run_detail(run, done: int, total: int, passed: int, failed: int, skipped: int) -> RunDetailData:
-    if run.suite_id is None:
-        raise HTTPException(status_code=500, detail="Run data invalid")
     start_at = run.start_at or run.created_at
     execution_source = None
     try:
@@ -157,7 +155,7 @@ def _to_run_detail(run, done: int, total: int, passed: int, failed: int, skipped
         triggerType=run.trigger_type,
         executionSource=execution_source,
         metrics=RunMetrics(total=total, done=done, passed=passed, failed=failed, skipped=skipped),
-        suiteId=str(run.suite_id),
+        suiteId=str(run.suite_id) if run.suite_id else None,
         envId=str(run.env_id) if run.env_id else None,
         startAt=to_unix_ts(start_at),
     )

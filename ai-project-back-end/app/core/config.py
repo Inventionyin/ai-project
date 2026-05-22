@@ -7,10 +7,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 _ENV_FILE = str(Path(__file__).resolve().parents[2] / ".env")
+_ENV_LOCAL_FILE = str(Path(__file__).resolve().parents[2] / ".env.local")
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=_ENV_FILE, env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(env_file=(_ENV_FILE, _ENV_LOCAL_FILE), env_file_encoding="utf-8", extra="ignore")
 
     app_name: str = "ai-test-platform"
     env: str = "local"
