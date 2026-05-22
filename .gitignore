@@ -3,6 +3,10 @@
 # Local secrets
 *.local
 *.local.*
+.env
+.env.*
+!.env.example
+!*.env.example
 ai-project-back-end/.env.local
 
 # Local logs and runtime artifacts
@@ -31,5 +35,8 @@ ai-project_front_end/tmp-*.png
 scripts/*.local.ps1
 node_modules/
 dist/
+__pycache__/
+*.py[cod]
+*$py.class
 .DS_Store
 Thumbs.db
