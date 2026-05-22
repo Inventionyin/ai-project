@@ -7,12 +7,13 @@ from datetime import datetime, timezone
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy.sql import visitors
 
 from app.api.deps import CurrentUser, get_current_user
 from app.api.v1.endpoints import ops as ops_endpoint
 from app.core.database import get_db
 from app.schemas.ops import OpsHealthCheck, OpsHealthSummaryData
-from app.services.ops_health import build_ops_health_summary
+from app.services.ops_health import _ci_tokens_check, _workers_check, build_ops_health_summary
 
 
 @dataclass
@@ -111,8 +112,8 @@ async def _assert_build_ops_health_summary_warn_and_blocked() -> None:
     # 4 workers stale, 5 workers total
     # 6 devops pending
     # 7 plugins installed
-    # 8 ci active
-    db = _FakeDb(results=[1, 2, 5, 1, 3, 1, 0, 0], fail_on_calls={6})
+    # 8 legacy ci active, 9 named ci active projects
+    db = _FakeDb(results=[1, 2, 5, 1, 3, 1, 0, 0, 0], fail_on_calls={6})
     user = CurrentUser(
         id=uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
         tenant_id=uuid.UUID("11111111-1111-1111-1111-111111111111"),
@@ -130,3 +131,45 @@ async def _assert_build_ops_health_summary_warn_and_blocked() -> None:
     assert checks_by_key["devopsRuns"].status == "BLOCKED"
     assert checks_by_key["plugins"].status == "WARN"
     assert checks_by_key["ciTokens"].status == "WARN"
+
+
+def test_workers_check_uses_naive_utc_cutoff_for_naive_worker_column() -> None:
+    asyncio.run(_assert_workers_check_uses_naive_utc_cutoff_for_naive_worker_column())
+
+
+async def _assert_workers_check_uses_naive_utc_cutoff_for_naive_worker_column() -> None:
+    class _InspectingDb:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.cutoff: datetime | None = None
+
+        async def scalar(self, statement):
+            self.calls += 1
+            if self.calls == 1:
+                for node in visitors.iterate(statement):
+                    value = getattr(node, "value", None)
+                    if isinstance(value, datetime):
+                        self.cutoff = value
+                        break
+            return 0
+
+    db = _InspectingDb()
+
+    check = await _workers_check(db, uuid.UUID("11111111-1111-1111-1111-111111111111"))
+
+    assert check.status == "WARN"
+    assert db.cutoff is not None
+    assert db.cutoff.tzinfo is None
+
+
+def test_ci_tokens_check_counts_named_active_token_projects() -> None:
+    asyncio.run(_assert_ci_tokens_check_counts_named_active_token_projects())
+
+
+async def _assert_ci_tokens_check_counts_named_active_token_projects() -> None:
+    db = _FakeDb(results=[0, 2])
+
+    check = await _ci_tokens_check(db, uuid.UUID("11111111-1111-1111-1111-111111111111"))
+
+    assert check.status == "READY"
+    assert check.metric["activeProjectCount"] == 2

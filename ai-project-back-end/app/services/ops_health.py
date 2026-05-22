@@ -9,7 +9,7 @@ from app.api.deps import CurrentUser
 from app.models.devops_pipeline import DevOpsRun
 from app.models.integration import NotificationOutbox
 from app.models.plugin import PluginInstallation
-from app.models.project import Project
+from app.models.project import Project, ProjectCiToken
 from app.models.worker import Worker
 from app.schemas.ops import OpsHealthCheck, OpsHealthSummaryData
 
@@ -90,7 +90,7 @@ async def _notification_outbox_check(db: AsyncSession, tenant_id) -> OpsHealthCh
 
 async def _workers_check(db: AsyncSession, tenant_id) -> OpsHealthCheck:
     try:
-        stale_before = datetime.now(timezone.utc) - timedelta(minutes=5)
+        stale_before = datetime.utcnow() - timedelta(minutes=5)
         stale_count = int(
             (await db.scalar(select(func.count(Worker.id)).where(Worker.tenant_id == tenant_id, Worker.last_seen_at.is_not(None), Worker.last_seen_at < stale_before)))
             or 0
@@ -169,7 +169,7 @@ async def _plugins_check(db: AsyncSession, tenant_id) -> OpsHealthCheck:
 
 async def _ci_tokens_check(db: AsyncSession, tenant_id) -> OpsHealthCheck:
     try:
-        active_count = int(
+        legacy_active_count = int(
             (
                 await db.scalar(
                     select(func.count(Project.id)).where(
@@ -181,6 +181,18 @@ async def _ci_tokens_check(db: AsyncSession, tenant_id) -> OpsHealthCheck:
             )
             or 0
         )
+        named_active_count = int(
+            (
+                await db.scalar(
+                    select(func.count(func.distinct(ProjectCiToken.project_id))).where(
+                        ProjectCiToken.tenant_id == tenant_id,
+                        ProjectCiToken.revoked_at.is_(None),
+                    )
+                )
+            )
+            or 0
+        )
+        active_count = max(legacy_active_count, named_active_count)
     except Exception as exc:
         return _blocked_check(
             "ciTokens",
@@ -195,7 +207,11 @@ async def _ci_tokens_check(db: AsyncSession, tenant_id) -> OpsHealthCheck:
         label="CI Tokens",
         status=status,
         detail="Projects with active CI token.",
-        metric={"activeProjectCount": active_count},
+        metric={
+            "activeProjectCount": active_count,
+            "legacyActiveProjectCount": legacy_active_count,
+            "namedActiveProjectCount": named_active_count,
+        },
         recommendation="Rotate and enable CI tokens for active projects." if status == "WARN" else "No action required.",
     )
 
