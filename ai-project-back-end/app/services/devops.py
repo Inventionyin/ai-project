@@ -142,6 +142,28 @@ def _request_auth_from_config(config: dict) -> tuple[str, str] | None:
     return None
 
 
+def _fetch_jenkins_crumb(
+    base_url: str,
+    auth: tuple[str, str] | None,
+    session: http_requests.Session | None = None,
+) -> dict[str, str] | None:
+    if not auth:
+        return None
+    try:
+        client = session or http_requests
+        resp = client.get(f"{base_url}/crumbIssuer/api/json", auth=auth, timeout=8)
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        field = str(data.get("crumbRequestField") or "Jenkins-Crumb").strip()
+        crumb = str(data.get("crumb") or "").strip()
+        if not field or not crumb:
+            return None
+        return {field: crumb}
+    except Exception:
+        return None
+
+
 def _sanitize_error_message(message: str, pipeline: DevOpsPipeline) -> str:
     sanitized = message
     config = pipeline.config_json or {}
@@ -225,16 +247,26 @@ def _trigger_jenkins(
     if trigger_token:
         request_params.setdefault("token", trigger_token)
     crumb = str(config.get("crumb") or "").strip()
-    headers = {"Jenkins-Crumb": crumb} if crumb else None
     auth = _request_auth_from_config(config)
+    session = http_requests.Session() if not crumb and auth else None
+    headers = {"Jenkins-Crumb": crumb} if crumb else _fetch_jenkins_crumb(base_url, auth, session=session)
     endpoint = "buildWithParameters" if request_params else "build"
-    resp = http_requests.post(
-        f"{base_url}/{job_path}/{endpoint}",
+    url = f"{base_url}/{job_path}/{endpoint}"
+    client = session or http_requests
+    resp = client.post(
+        url,
         params=request_params,
         headers=headers,
         auth=auth,
         timeout=10,
     )
+    if resp.status_code == 400 and endpoint == "buildWithParameters" and "not parameterized" in resp.text.lower():
+        resp = client.post(
+            f"{base_url}/{job_path}/build",
+            headers=headers,
+            auth=auth,
+            timeout=10,
+        )
     if resp.status_code in (200, 201, 202, 204):
         return True, None, resp.headers.get("Location")
     return False, _sanitize_error_message(f"Jenkins API error: {resp.status_code} {resp.text}", pipeline), None
@@ -257,6 +289,7 @@ async def create_pipeline(
     await db.flush()
     await create_audit_log(
         db, user=user, project_id=project_id,
+        module="DEVOPS",
         action="CREATE_DEVOPS_PIPELINE", resource_type="devops_pipeline",
         resource_id=str(row.id), summary=f"创建 DevOps 流水线: {name}",
     )
@@ -402,6 +435,7 @@ async def trigger_pipeline(
     await db.flush()
     await create_audit_log(
         db, user=user, project_id=project_id,
+        module="DEVOPS",
         action="TRIGGER_DEVOPS_PIPELINE", resource_type="devops_run",
         resource_id=str(run.id), summary=f"触发 DevOps 流水线: {pipeline.name}",
     )

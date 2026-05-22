@@ -38,12 +38,17 @@ async def create_pipeline_endpoint(
     user: CurrentUser = Depends(get_current_user),
     request_id: str = Depends(get_request_id),
 ) -> ApiResponse[DevOpsPipelineDetail]:
-    result = await create_pipeline(
-        db, user=user, project_id=projectId,
-        name=body.name, provider=body.provider,
-        repo_full_name=body.repoFullName, workflow_file=body.workflowFile,
-        config=body.config, webhook_secret=body.webhookSecret,
-    )
+    try:
+        result = await create_pipeline(
+            db, user=user, project_id=projectId,
+            name=body.name, provider=body.provider,
+            repo_full_name=body.repoFullName, workflow_file=body.workflowFile,
+            config=body.config, webhook_secret=body.webhookSecret,
+        )
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
     return ApiResponse(data=result, requestId=request_id)
 
 
@@ -81,12 +86,17 @@ async def update_pipeline_endpoint(
     user: CurrentUser = Depends(get_current_user),
     request_id: str = Depends(get_request_id),
 ) -> ApiResponse[DevOpsPipelineDetail]:
-    result = await update_pipeline(
-        db, user=user, project_id=projectId, pipeline_id=pipelineId,
-        name=body.name, repo_full_name=body.repoFullName,
-        workflow_file=body.workflowFile, config=body.config,
-        webhook_secret=body.webhookSecret, enabled=body.enabled,
-    )
+    try:
+        result = await update_pipeline(
+            db, user=user, project_id=projectId, pipeline_id=pipelineId,
+            name=body.name, repo_full_name=body.repoFullName,
+            workflow_file=body.workflowFile, config=body.config,
+            webhook_secret=body.webhookSecret, enabled=body.enabled,
+        )
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
     return ApiResponse(data=result, requestId=request_id)
 
 
@@ -98,7 +108,12 @@ async def delete_pipeline_endpoint(
     user: CurrentUser = Depends(get_current_user),
     request_id: str = Depends(get_request_id),
 ) -> ApiResponse:
-    await delete_pipeline(db, user=user, project_id=projectId, pipeline_id=pipelineId)
+    try:
+        await delete_pipeline(db, user=user, project_id=projectId, pipeline_id=pipelineId)
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
     return ApiResponse(requestId=request_id)
 
 
@@ -111,10 +126,15 @@ async def trigger_pipeline_endpoint(
     user: CurrentUser = Depends(get_current_user),
     request_id: str = Depends(get_request_id),
 ) -> ApiResponse[DevOpsRunDetail]:
-    result = await trigger_pipeline(
-        db, user=user, project_id=projectId, pipeline_id=pipelineId,
-        branch=body.branch, commit_sha=body.commitSha, params=body.params,
-    )
+    try:
+        result = await trigger_pipeline(
+            db, user=user, project_id=projectId, pipeline_id=pipelineId,
+            branch=body.branch, commit_sha=body.commitSha, params=body.params,
+        )
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
     return ApiResponse(data=result, requestId=request_id)
 
 
@@ -144,14 +164,19 @@ async def callback_endpoint(
     db: AsyncSession = Depends(get_db),
     request_id: str = Depends(get_request_id),
 ) -> ApiResponse[DevOpsRunDetail]:
-    result = await handle_callback(
-        db,
-        project_id=projectId,
-        external_run_id=body.externalRunId, status=body.status,
-        webhook_secret=x_webhook_secret,
-        signature=x_hub_signature_256,
-        raw_body=await request.body(),
-        commit_sha=body.commitSha, branch=body.branch,
-        error_message=body.errorMessage, log_url=body.logUrl, meta=body.meta,
-    )
+    try:
+        result = await handle_callback(
+            db,
+            project_id=projectId,
+            external_run_id=body.externalRunId, status=body.status,
+            webhook_secret=x_webhook_secret,
+            signature=x_hub_signature_256,
+            raw_body=await request.body(),
+            commit_sha=body.commitSha, branch=body.branch,
+            error_message=body.errorMessage, log_url=body.logUrl, meta=body.meta,
+        )
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
     return ApiResponse(data=result, requestId=request_id)

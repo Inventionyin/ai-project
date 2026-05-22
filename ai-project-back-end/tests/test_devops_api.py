@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -10,23 +12,30 @@ from fastapi.testclient import TestClient
 from app.api.deps import CurrentUser, get_current_user
 from app.api.v1.endpoints import devops as devops_endpoint
 from app.core.database import get_db
+from app.services import devops as devops_service
 
 
 @dataclass
 class _DummySession:
+    committed: bool = False
+    rolled_back: bool = False
+
     async def commit(self) -> None:
+        self.committed = True
         return None
 
     async def rollback(self) -> None:
+        self.rolled_back = True
         return None
 
 
-def _build_app() -> FastAPI:
+def _build_app(db: _DummySession | None = None) -> FastAPI:
     app = FastAPI()
     app.include_router(devops_endpoint.router, prefix="/api")
+    session = db or _DummySession()
 
     async def _override_db():
-        yield _DummySession()
+        yield session
 
     async def _override_user() -> CurrentUser:
         return CurrentUser(
@@ -42,6 +51,7 @@ def _build_app() -> FastAPI:
 
 def test_create_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:
     project_id = uuid.UUID("22222222-2222-2222-2222-222222222222")
+    db = _DummySession()
 
     async def _fake_create(db, *, user, project_id, name, provider="github_actions", **kwargs):
         from app.schemas.devops import DevOpsPipelineDetail
@@ -57,7 +67,7 @@ def test_create_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:
         )
 
     monkeypatch.setattr(devops_endpoint, "create_pipeline", _fake_create)
-    app = _build_app()
+    app = _build_app(db)
     client = TestClient(app)
     resp = client.post(
         f"/api/projects/{project_id}/devops/pipelines",
@@ -67,6 +77,7 @@ def test_create_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:
     data = resp.json()
     assert data["code"] == 0
     assert data["data"]["name"] == "CI Pipeline"
+    assert db.committed is True
 
 
 def test_list_pipelines(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -183,6 +194,65 @@ def test_jenkins_job_path_escapes_nested_jobs() -> None:
     from app.services.devops import _jenkins_job_path
 
     assert _jenkins_job_path("folder/My Job") == "job/folder/job/My%20Job"
+
+
+@pytest.mark.anyio
+async def test_create_pipeline_writes_devops_audit_log(monkeypatch: pytest.MonkeyPatch) -> None:
+    tenant_id = uuid.UUID("11111111-1111-1111-1111-111111111111")
+    user_id = uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+    project_id = uuid.UUID("22222222-2222-2222-2222-222222222222")
+    user = CurrentUser(id=user_id, tenant_id=tenant_id, roles=frozenset({"ADMIN"}))
+    project = SimpleNamespace(id=project_id, tenant_id=tenant_id, owner_id=user_id)
+    calls: list[dict] = []
+
+    class _Db:
+        def __init__(self) -> None:
+            self.added = []
+            self.flushed = False
+
+        async def scalar(self, stmt):
+            return project
+
+        def add(self, row):
+            if row.id is None:
+                row.id = uuid.UUID("33333333-3333-3333-3333-333333333333")
+            if row.enabled is None:
+                row.enabled = True
+            if row.status is None:
+                row.status = "IDLE"
+            now = datetime.fromtimestamp(1700000000)
+            row.created_at = now
+            row.updated_at = now
+            self.added.append(row)
+
+        async def flush(self):
+            self.flushed = True
+
+    async def _fake_audit(_db, **kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(id=uuid.uuid4())
+
+    monkeypatch.setattr(devops_service, "create_audit_log", _fake_audit)
+    db = _Db()
+
+    detail = await devops_service.create_pipeline(
+        db,
+        user=user,
+        project_id=project_id,
+        name="WeiTesting Jenkins Smoke",
+        provider="jenkins",
+        workflow_file="weitesting-smoke",
+        config={"baseUrl": "https://jenkins.evanshine.me", "jobName": "weitesting-smoke"},
+    )
+
+    assert detail.name == "WeiTesting Jenkins Smoke"
+    assert db.flushed is True
+    assert calls
+    audit = calls[0]
+    assert audit["module"] == "DEVOPS"
+    assert audit["action"] == "CREATE_DEVOPS_PIPELINE"
+    assert audit["resource_type"] == "devops_pipeline"
+    assert audit["project_id"] == project_id
 
 
 def test_pipeline_detail_masks_sensitive_config() -> None:
@@ -381,6 +451,7 @@ def test_trigger_jenkins_accepts_frontend_camel_case_config(monkeypatch: pytest.
             "jobName": "folder/Frontend Job",
             "username": "ci-user",
             "apiToken": "frontend-api-token",
+            "crumb": "frontend-crumb",
             "triggerToken": "frontend-trigger-token",
         },
     )
@@ -400,6 +471,122 @@ def test_trigger_jenkins_accepts_frontend_camel_case_config(monkeypatch: pytest.
     assert captured["params"]["token"] == "frontend-trigger-token"
     assert captured["params"]["WEITESTING_EXTERNAL_RUN_ID"] == "ext-frontend-jenkins"
     assert captured["auth"] == ("ci-user", "frontend-api-token")
+
+
+def test_trigger_jenkins_fetches_crumb_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.models.devops_pipeline import DevOpsPipeline
+    from app.services.devops import _trigger_jenkins
+
+    captured: dict = {}
+
+    class _CrumbResp:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {"crumbRequestField": "Jenkins-Crumb", "crumb": "auto-crumb"}
+
+    class _BuildResp:
+        status_code = 201
+        text = ""
+        headers = {"Location": "https://jenkins.example/queue/item/3/"}
+
+    class _Session:
+        def get(self, url, auth=None, timeout=None):
+            captured["crumbUrl"] = url
+            captured["crumbAuth"] = auth
+            captured["crumbTimeout"] = timeout
+            return _CrumbResp()
+
+        def post(self, url, params=None, headers=None, auth=None, timeout=None):
+            captured["url"] = url
+            captured["headers"] = headers
+            captured["auth"] = auth
+            return _BuildResp()
+
+    monkeypatch.setattr("app.services.devops.http_requests.Session", lambda: _Session())
+    pipeline = DevOpsPipeline(
+        provider="jenkins",
+        config_json={
+            "baseUrl": "https://jenkins.example",
+            "jobName": "Smoke",
+            "username": "ci-user",
+            "apiToken": "frontend-api-token",
+        },
+    )
+
+    ok, error_message, log_url = _trigger_jenkins(
+        pipeline=pipeline,
+        params={},
+        external_run_id="ext-auto-crumb",
+    )
+
+    assert ok is True
+    assert error_message is None
+    assert log_url == "https://jenkins.example/queue/item/3/"
+    assert captured["crumbUrl"] == "https://jenkins.example/crumbIssuer/api/json"
+    assert captured["crumbAuth"] == ("ci-user", "frontend-api-token")
+    assert captured["headers"] == {"Jenkins-Crumb": "auto-crumb"}
+    assert captured["auth"] == ("ci-user", "frontend-api-token")
+
+
+def test_trigger_jenkins_falls_back_to_build_for_non_parameterized_job(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.models.devops_pipeline import DevOpsPipeline
+    from app.services.devops import _trigger_jenkins
+
+    calls: list[str] = []
+
+    class _CrumbResp:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {"crumbRequestField": "Jenkins-Crumb", "crumb": "auto-crumb"}
+
+    class _NotParameterizedResp:
+        status_code = 400
+        text = "weitesting-smoke is not parameterized"
+        headers = {}
+
+    class _BuildResp:
+        status_code = 201
+        text = ""
+        headers = {"Location": "https://jenkins.example/queue/item/4/"}
+
+    class _Session:
+        def get(self, url, auth=None, timeout=None):
+            return _CrumbResp()
+
+        def post(self, url, params=None, headers=None, auth=None, timeout=None):
+            calls.append(url)
+            if url.endswith("/buildWithParameters"):
+                return _NotParameterizedResp()
+            return _BuildResp()
+
+    monkeypatch.setattr("app.services.devops.http_requests.Session", lambda: _Session())
+    pipeline = DevOpsPipeline(
+        provider="jenkins",
+        config_json={
+            "baseUrl": "https://jenkins.example",
+            "jobName": "Smoke",
+            "username": "ci-user",
+            "apiToken": "frontend-api-token",
+        },
+    )
+
+    ok, error_message, log_url = _trigger_jenkins(
+        pipeline=pipeline,
+        params={"purpose": "acceptance-smoke"},
+        external_run_id="ext-non-parameterized",
+    )
+
+    assert ok is True
+    assert error_message is None
+    assert log_url == "https://jenkins.example/queue/item/4/"
+    assert calls == [
+        "https://jenkins.example/job/Smoke/buildWithParameters",
+        "https://jenkins.example/job/Smoke/build",
+    ]
 
 
 def test_trigger_error_message_is_sanitized(monkeypatch: pytest.MonkeyPatch) -> None:
