@@ -111,6 +111,8 @@ test.describe('acceptance-center 生产验收中心冒烟', () => {
       '/projects/22222222-2222-2222-2222-222222222222/trial-operation'
     )
     await expect(page.getByText('阻塞治理概览')).toBeVisible()
+    await expect(page.getByText('AI 验收委员会预审')).toBeVisible()
+    await expect(page.getByText('阶段验收通过，最终验收待缺陷确认')).toBeVisible()
     await expect(page.getByText('未关闭缺陷', { exact: true })).toBeVisible()
     await expect(page.getByText('460').first()).toBeVisible()
     await expect(page.getByRole('cell', { name: 'Jira' })).toBeVisible()

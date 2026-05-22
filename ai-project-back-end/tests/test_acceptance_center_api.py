@@ -456,6 +456,11 @@ def test_render_report_markdown_includes_blocking_defect_governance_context() ->
     assert "## 默认验收确认口径" in markdown
     assert "| 必须修复后再放行 | 22 | 默认不建议豁免。 |" in markdown
     assert "观众进房拉不到流" in markdown
+    assert "## AI 验收委员会预审结论" in markdown
+    assert "平台建设部分认可完成" in markdown
+    assert "产品负责人" in markdown
+    assert "测试负责人" in markdown
+    assert "运维负责人" in markdown
     assert "## 需需求方确认" in markdown
     assert "460 个未关闭缺陷是否都属于当前验收范围" in markdown
 

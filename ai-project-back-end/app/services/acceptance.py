@@ -434,6 +434,26 @@ def _render_report_markdown(
             )
         return lines
 
+    def _committee_lines() -> list[str]:
+        if summary.overallStatus == "READY":
+            conclusion = "建议进入最终验收通过流程。"
+            decision = "平台能力、真实数据、外部系统与运维健康均达到验收条件。"
+        elif real_data_blocked and platform_ready:
+            conclusion = "建议阶段验收通过，最终验收待缺陷确认。"
+            decision = "平台建设部分认可完成；允许进入验收汇报和试运行阶段，真实业务缺陷按确认口径继续闭环。"
+        else:
+            conclusion = "建议暂缓阶段验收。"
+            decision = "仍存在平台联调、运维健康或真实数据证据缺口，需补齐后复审。"
+        return [
+            f"- 预审结论：{conclusion}",
+            f"- 决策口径：{decision}",
+            "- 产品负责人视角：核心需求证据已进入平台化管理，需确认未关闭缺陷是否影响本轮主流程。",
+            "- 测试负责人视角：P0/高风险缺陷默认不建议豁免，重复、历史、体验类缺陷可进入确认清单。",
+            "- 技术负责人视角：外部系统联调、报告生成、缺陷治理入口已具备可复跑证据。",
+            "- 运维负责人视角：运维健康已就绪，后续保持生产 smoke、告警和备份恢复演练。",
+            "- 项目负责人视角：可对外表达为平台建设阶段完成，最终验收依赖缺陷确认和责任人签字。",
+        ]
+
     checks_by_key = {item.key: item for item in summary.checks}
     real_data = checks_by_key.get("realData")
     external_systems = checks_by_key.get("externalSystems")
@@ -498,6 +518,10 @@ def _render_report_markdown(
             f"- 决策：{stage_decision}",
             f"- 范围：{stage_scope}",
             f"- 说明：本报告不伪造通过结论，真实数据阻塞项需按退出条件闭环。",
+            "",
+            "## AI 验收委员会预审结论",
+            "- 说明：以下为系统按专业评审角色生成的预审意见，不代表真实负责人已批准。",
+            *_committee_lines(),
             "",
             "## 真实数据",
             *[f"- {key}: {value}" for key, value in summary.metrics.items()],

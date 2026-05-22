@@ -74,6 +74,13 @@
           </div>
         </div>
 
+        <div class="rounded border border-blue-200 bg-blue-50 px-3 py-3 text-[12px] leading-5 text-blue-900">
+          <div class="font-medium text-blue-950">AI 验收委员会预审</div>
+          <div class="mt-1 text-[15px] font-semibold leading-6 text-blue-950">{{ committeeDecisionTitle }}</div>
+          <div class="mt-1">{{ committeeDecisionDetail }}</div>
+          <div class="mt-2 text-[11px] text-blue-800">系统预审意见，不代表真实负责人已批准。</div>
+        </div>
+
         <div>
           <div class="mb-2 text-[13px] font-medium text-[#0A0A0A]">外部系统</div>
           <table v-if="summary.externalSystems.length" class="w-full table-fixed text-[12px]">
@@ -199,6 +206,18 @@ const blockingMetricCards = computed(() => [
   { label: '风险提示', value: metricValue('riskHints'), tone: 'text-amber-700' },
   { label: '已执行用例', value: metricValue('executedCaseRuns'), tone: 'text-blue-700' },
 ])
+const committeeDecisionTitle = computed(() => {
+  if (summary.overallStatus === 'ready') return '建议进入最终验收通过流程'
+  if (isRealDataBlocked.value && isPlatformReady.value) return '阶段验收通过，最终验收待缺陷确认'
+  return '建议暂缓阶段验收'
+})
+const committeeDecisionDetail = computed(() => {
+  if (summary.overallStatus === 'ready') return '平台能力、真实数据、外部系统与运维健康均达到验收条件。'
+  if (isRealDataBlocked.value && isPlatformReady.value) {
+    return '平台建设部分认可完成，可进入验收汇报和试运行阶段；真实业务缺陷按默认确认口径继续闭环。'
+  }
+  return '仍存在平台联调、运维健康或真实数据证据缺口，需补齐后复审。'
+})
 const deliveryNote = computed(() => {
   const defects = metricValue('defects')
   const riskHints = metricValue('riskHints')
