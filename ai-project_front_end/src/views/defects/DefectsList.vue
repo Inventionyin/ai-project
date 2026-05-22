@@ -38,6 +38,7 @@ const statusOptions: Array<{ label: string; value: DefectStatus | '' }> = [
   { label: 'RESOLVED', value: 'RESOLVED' },
   { label: 'CLOSED', value: 'CLOSED' }
 ]
+const validStatusValues = new Set<string>(statusOptions.map((item) => item.value).filter(Boolean))
 
 const pageStart = computed(() => (total.value === 0 ? 0 : (page.value - 1) * pageSize.value + 1))
 const pageEnd = computed(() => Math.min(total.value, page.value * pageSize.value))
@@ -90,6 +91,8 @@ async function loadDefects() {
 }
 
 function syncCreatePrefillFromQuery() {
+  const statusQuery = String(route.query.status || '').trim().toUpperCase()
+  status.value = validStatusValues.has(statusQuery) ? statusQuery : ''
   const runId = String(route.query.runId || '').trim()
   const caseRunId = String(route.query.caseRunId || '').trim()
   const testcaseId = String(route.query.testcaseId || '').trim()
@@ -142,7 +145,7 @@ function openDetail(item: DefectListItem) {
 }
 
 watch(
-  () => [projectId.value, route.query.runId, route.query.caseRunId, route.query.testcaseId, route.query.errorMessage],
+  () => [projectId.value, route.query.status, route.query.runId, route.query.caseRunId, route.query.testcaseId, route.query.errorMessage],
   () => {
     syncCreatePrefillFromQuery()
     page.value = 1

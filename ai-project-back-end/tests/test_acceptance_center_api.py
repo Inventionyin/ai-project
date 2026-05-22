@@ -350,3 +350,86 @@ def test_render_report_markdown_explains_blocked_real_data_as_phase_acceptance()
     assert "外部系统联调与运维健康已就绪" in markdown
     assert "有条件放行前置条件" in markdown
     assert "缺陷：460" in markdown
+
+
+def test_render_report_markdown_includes_blocking_defect_governance_context() -> None:
+    generated_at = datetime.now(timezone.utc)
+    summary = AcceptanceSummaryData(
+        overallStatus="BLOCKED",
+        generatedAt=generated_at,
+        projectId=str(_PROJECT_ID),
+        projectName="真实业务数据验收",
+        score=54,
+        checks=[
+            AcceptanceCheck(
+                key="realData",
+                label="真实数据基线",
+                status="BLOCKED",
+                detail="建议暂缓",
+                metric={"defects": 460, "riskHints": 460, "executedCaseRuns": 27},
+                recommendation="关闭阻塞缺陷后再进入生产验收。",
+            ),
+            AcceptanceCheck(
+                key="externalSystems",
+                label="外部系统联调",
+                status="READY",
+                detail="通知诊断：READY。",
+                metric={},
+                recommendation="保持外部系统回执的定期 smoke。",
+            ),
+            AcceptanceCheck(
+                key="opsHealth",
+                label="运维可观测性",
+                status="READY",
+                detail="运维健康聚合状态：READY",
+                metric={},
+                recommendation="保持健康检查和告警阈值巡检。",
+            ),
+        ],
+        externalSystems=[],
+        metrics={"defects": 460, "riskHints": 460, "executedCaseRuns": 27},
+        nextActions=[],
+    )
+    trial = DashboardTrialOperationData(
+        metrics={"defects": 460, "riskHints": 460, "executedCaseRuns": 27},
+        defectSeverityDistribution={"P0": 22, "P1": 180, "P2": 152, "P3": 106},
+        defectStatusDistribution={"OPEN": 460},
+        topDefectClusters=[
+            {
+                "clusterKey": "客户端mvp-双端-动态",
+                "count": 40,
+                "sampleTitles": ["动态详情断网展示代码错误", "发布仅自己可见动态状态异常"],
+                "rootCauseHint": "疑似同模块集中回归风险",
+                "confidence": 0.91,
+            }
+        ],
+        topRiskHints=[
+            {
+                "defectId": str(uuid.uuid4()),
+                "title": "直播间黑屏拉流失败",
+                "status": "OPEN",
+                "severity": "P0",
+                "updatedAt": 1710000000,
+                "riskScore": 9.0,
+                "hint": "P0 未关闭，需优先收敛",
+            }
+        ],
+        acceptanceSummary=DashboardTrialOperationAcceptanceSummary(
+            conclusion="建议暂缓",
+            score=62,
+            level="BLOCKED",
+            highlights=[],
+            risks=[],
+            nextActions=[],
+        ),
+    )
+
+    markdown = _render_report_markdown(summary, trial=trial)
+
+    assert "## 阻塞缺陷治理清单" in markdown
+    assert "P0: 22" in markdown
+    assert "OPEN: 460" in markdown
+    assert "客户端mvp-双端-动态" in markdown
+    assert "直播间黑屏拉流失败" in markdown
+    assert "## 需需求方确认" in markdown
+    assert "460 个未关闭缺陷是否都属于当前验收范围" in markdown

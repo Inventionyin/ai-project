@@ -31,10 +31,32 @@ test.describe('acceptance-center 生产验收中心冒烟', () => {
           body: JSON.stringify({
             code: 0,
             data: {
-              overallStatus: 'WARN',
+              overallStatus: 'BLOCKED',
               score: 82,
               generatedAt: 1710000000,
-              checks: [{ key: 'schema', label: 'Schema 校验', status: 'READY', detail: '全部通过' }],
+              checks: [
+                {
+                  key: 'realData',
+                  label: '真实数据基线',
+                  status: 'BLOCKED',
+                  detail: '22 个 P0 缺陷和 460 个 OPEN 缺陷未闭环',
+                  recommendation: '进入缺陷列表治理阻塞项',
+                },
+                {
+                  key: 'externalSystems',
+                  label: '外部系统联调',
+                  status: 'READY',
+                  detail: '钉钉和 Jenkins 已就绪',
+                  recommendation: '保持外部系统 smoke',
+                },
+                {
+                  key: 'opsHealth',
+                  label: '运维可观测性',
+                  status: 'READY',
+                  detail: '运维健康聚合状态：READY',
+                  recommendation: '保持健康检查巡检',
+                },
+              ],
               externalSystems: [
                 {
                   provider: 'Jira',
@@ -53,7 +75,7 @@ test.describe('acceptance-center 生产验收中心冒烟', () => {
                   recommendation: '补跑失败流水线',
                 },
               ],
-              metrics: { passedCases: 124, failedCases: 3, blockers: 1 },
+              metrics: { defects: 460, riskHints: 460, executedCaseRuns: 27 },
               nextActions: ['更新 Jira Token', '补跑失败流水线'],
             },
           }),
@@ -78,7 +100,18 @@ test.describe('acceptance-center 生产验收中心冒烟', () => {
     await expect(page).toHaveURL(/\/projects\/22222222-2222-2222-2222-222222222222\/settings\/acceptance/)
 
     await expect(page.getByText('生产验收中心')).toBeVisible()
-    await expect(page.locator('div').filter({ hasText: /^总体状态\s*预警\s*评分\s*82/ })).toBeVisible()
+    await expect(page.locator('div').filter({ hasText: /^总体状态\s*阻塞\s*有条件放行评审\s*评分\s*82/ })).toBeVisible()
+    await expect(page.getByRole('link', { name: '查看未关闭缺陷' })).toHaveAttribute(
+      'href',
+      '/projects/22222222-2222-2222-2222-222222222222/defects?status=OPEN'
+    )
+    await expect(page.getByRole('link', { name: '进入试运行治理' })).toHaveAttribute(
+      'href',
+      '/projects/22222222-2222-2222-2222-222222222222/trial-operation'
+    )
+    await expect(page.getByText('阻塞治理概览')).toBeVisible()
+    await expect(page.getByText('未关闭缺陷', { exact: true })).toBeVisible()
+    await expect(page.getByText('460').first()).toBeVisible()
     await expect(page.getByRole('cell', { name: 'Jira' })).toBeVisible()
     await expect(page.getByText('API Token 已过期')).toBeVisible()
     await expect(page.getByText('生产验收报告')).toBeVisible()

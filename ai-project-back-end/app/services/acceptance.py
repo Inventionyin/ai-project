@@ -283,9 +283,34 @@ async def get_acceptance_summary(
     )
 
 
-def _render_report_markdown(summary: AcceptanceSummaryData) -> str:
+def _render_report_markdown(summary: AcceptanceSummaryData, *, trial: DashboardTrialOperationData | None = None) -> str:
     def _lines(items: list[str]) -> list[str]:
         return [f"- {item}" for item in items] if items else ["- 暂无"]
+
+    def _distribution_lines(title: str, distribution: dict[str, int]) -> list[str]:
+        if not distribution:
+            return [f"- {title}: 暂无"]
+        ordered = sorted(distribution.items(), key=lambda item: (-int(item[1] or 0), str(item[0])))
+        return [f"- {title}: " + "，".join(f"{key}: {value}" for key, value in ordered)]
+
+    def _cluster_lines() -> list[str]:
+        if trial is None or not trial.topDefectClusters:
+            return ["- Top 聚类：暂无"]
+        lines: list[str] = []
+        for item in trial.topDefectClusters[:5]:
+            samples = "；".join(item.sampleTitles[:2]) if item.sampleTitles else "暂无样例"
+            lines.append(
+                f"- {item.clusterKey}: {item.count} 条，置信度 {item.confidence:.0%}，提示：{item.rootCauseHint}，样例：{samples}"
+            )
+        return lines
+
+    def _risk_hint_lines() -> list[str]:
+        if trial is None or not trial.topRiskHints:
+            return ["- Top 风险：暂无"]
+        return [
+            f"- [{item.severity}/{item.status}] {item.title}，风险分 {item.riskScore:g}，提示：{item.hint}"
+            for item in trial.topRiskHints[:5]
+        ]
 
     checks_by_key = {item.key: item for item in summary.checks}
     real_data = checks_by_key.get("realData")
@@ -318,6 +343,15 @@ def _render_report_markdown(summary: AcceptanceSummaryData) -> str:
         exit_criteria.insert(0, f"处理当前缺陷：{defects} 条，优先收敛阻塞和高风险项。")
     if risk_hints > 0:
         exit_criteria.insert(1, f"复核风险提示：{risk_hints} 条，标记重复、历史或可豁免项。")
+    defect_severity_distribution = dict(trial.defectSeverityDistribution or {}) if trial else {}
+    defect_status_distribution = dict(trial.defectStatusDistribution or {}) if trial else {}
+    blocking_questions = [
+        f"{defects} 个未关闭缺陷是否都属于当前验收范围？" if defects else "当前缺陷范围是否已由需求方确认？",
+        "P0 是否必须清零作为放行硬门槛？",
+        "哪些缺陷是历史遗留、重复或已修未关，可进入延期/豁免白名单？",
+        "P1/P2/P3 是否允许分批处理，审批人和截止日期分别是谁？",
+        "动态、直播间、媒体日志等高频聚类是否需要指定专项 owner？",
+    ]
 
     check_lines = [
         f"- [{item.status}] {item.label}: {item.detail}；建议：{item.recommendation}"
@@ -350,6 +384,19 @@ def _render_report_markdown(summary: AcceptanceSummaryData) -> str:
             f"- 已执行用例：{executed_case_runs}",
             *[f"- {item}" for item in exit_criteria[:6]],
             "",
+            "## 阻塞缺陷治理清单",
+            *_distribution_lines("严重级别分布", defect_severity_distribution),
+            *_distribution_lines("状态分布", defect_status_distribution),
+            f"- 未关闭缺陷：{defects}",
+            f"- 风险提示：{risk_hints}",
+            "### Top 缺陷聚类",
+            *_cluster_lines(),
+            "### Top 风险提示",
+            *_risk_hint_lines(),
+            "",
+            "## 需需求方确认",
+            *_lines(blocking_questions),
+            "",
             "## 验收检查",
             *check_lines,
             "",
@@ -369,9 +416,10 @@ async def get_acceptance_report(
     project_id: uuid.UUID,
 ) -> AcceptanceReportData:
     summary = await get_acceptance_summary(db, user=user, project_id=project_id)
+    trial = await get_dashboard_trial_operation(db, user=user, project_id=project_id)
     return AcceptanceReportData(
         title="生产验收中心报告",
         generatedAt=summary.generatedAt,
         summary=summary,
-        markdown=_render_report_markdown(summary),
+        markdown=_render_report_markdown(summary, trial=trial),
     )

@@ -48,6 +48,30 @@
         <div class="rounded border border-amber-200 bg-amber-50 px-3 py-3 text-[12px] leading-5 text-[#92400E]">
           <div class="font-medium text-[#78350F]">{{ stageDecisionLabel }}</div>
           <div class="mt-1">{{ stageDecisionDetail }}</div>
+          <div v-if="isRealDataBlocked" class="mt-3 flex flex-wrap items-center gap-2">
+            <RouterLink
+              class="rounded border border-red-200 bg-white px-3 py-1 text-[12px] font-medium text-red-700 hover:bg-red-50"
+              :to="defectsUrl"
+            >
+              查看未关闭缺陷
+            </RouterLink>
+            <RouterLink
+              class="rounded border border-blue-200 bg-white px-3 py-1 text-[12px] font-medium text-blue-700 hover:bg-blue-50"
+              :to="trialOperationUrl"
+            >
+              进入试运行治理
+            </RouterLink>
+          </div>
+        </div>
+
+        <div v-if="isRealDataBlocked" class="rounded border border-black/10 bg-[#FAFBFC] p-3">
+          <div class="mb-2 text-[13px] font-medium text-[#0A0A0A]">阻塞治理概览</div>
+          <div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <div v-for="item in blockingMetricCards" :key="item.label" class="rounded border border-black/5 bg-white px-3 py-2">
+              <div class="text-[11px] text-[#717182]">{{ item.label }}</div>
+              <div class="mt-1 text-[18px] font-semibold leading-6" :class="item.tone">{{ item.value }}</div>
+            </div>
+          </div>
         </div>
 
         <div>
@@ -113,11 +137,13 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { RouterLink } from 'vue-router'
 import { getAcceptanceReport, getAcceptanceSummary, type AcceptanceStatus, type AcceptanceSummary } from '@/lib/api/acceptance'
 
 const loading = ref(false)
 const error = ref('')
 const reportMarkdown = ref('')
+const projectId = ref('')
 const summary = reactive<AcceptanceSummary>({
   overallStatus: 'ready',
   score: null,
@@ -162,6 +188,13 @@ const decisionClass = computed(() => {
   if (summary.overallStatus === 'blocked') return 'bg-red-100 text-red-700'
   return 'bg-amber-100 text-amber-700'
 })
+const defectsUrl = computed(() => `/projects/${encodeURIComponent(projectId.value)}/defects?status=OPEN`)
+const trialOperationUrl = computed(() => `/projects/${encodeURIComponent(projectId.value)}/trial-operation`)
+const blockingMetricCards = computed(() => [
+  { label: '未关闭缺陷', value: metricValue('defects'), tone: 'text-red-700' },
+  { label: '风险提示', value: metricValue('riskHints'), tone: 'text-amber-700' },
+  { label: '已执行用例', value: metricValue('executedCaseRuns'), tone: 'text-blue-700' },
+])
 
 function formatTime(ts: number | null) {
   return ts ? new Date(ts * 1000).toLocaleString('zh-CN') : '-'
@@ -170,6 +203,10 @@ function formatTime(ts: number | null) {
 function projectIdFromPath() {
   const match = window.location.pathname.match(/\/projects\/([^/]+)\/settings\/acceptance/)
   return match?.[1] || ''
+}
+
+function metricValue(key: string) {
+  return summary.metrics.find((item) => item.key === key)?.value || '0'
 }
 
 function fallbackCopyText(text: string) {
@@ -198,15 +235,16 @@ async function copyReport() {
 }
 
 async function load() {
-  const projectId = projectIdFromPath()
-  if (!projectId) {
+  const pid = projectIdFromPath()
+  projectId.value = pid
+  if (!pid) {
     error.value = '项目 ID 缺失'
     return
   }
   loading.value = true
   error.value = ''
   try {
-    const [summaryData, reportData] = await Promise.all([getAcceptanceSummary(projectId), getAcceptanceReport(projectId)])
+    const [summaryData, reportData] = await Promise.all([getAcceptanceSummary(pid), getAcceptanceReport(pid)])
     summary.overallStatus = summaryData.overallStatus
     summary.score = summaryData.score
     summary.generatedAt = summaryData.generatedAt
