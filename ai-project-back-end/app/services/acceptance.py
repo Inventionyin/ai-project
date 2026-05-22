@@ -287,6 +287,38 @@ def _render_report_markdown(summary: AcceptanceSummaryData) -> str:
     def _lines(items: list[str]) -> list[str]:
         return [f"- {item}" for item in items] if items else ["- 暂无"]
 
+    checks_by_key = {item.key: item for item in summary.checks}
+    real_data = checks_by_key.get("realData")
+    external_systems = checks_by_key.get("externalSystems")
+    ops_health = checks_by_key.get("opsHealth")
+    real_data_blocked = real_data is not None and real_data.status == "BLOCKED"
+    platform_ready = all(
+        item is not None and item.status == "READY"
+        for item in (external_systems, ops_health)
+    )
+    if summary.overallStatus == "READY":
+        stage_decision = "可进入正式验收"
+        stage_scope = "全量验收域已就绪。"
+    elif real_data_blocked and platform_ready:
+        stage_decision = "阶段验收暂缓，可做有条件放行评审"
+        stage_scope = "外部系统联调与运维健康已就绪；真实数据生产验收仍暂缓。"
+    else:
+        stage_decision = "阶段验收暂缓"
+        stage_scope = "仍存在平台联调、运维健康或真实数据阻塞项。"
+
+    defects = int(summary.metrics.get("defects", 0) or 0)
+    risk_hints = int(summary.metrics.get("riskHints", 0) or 0)
+    executed_case_runs = int(summary.metrics.get("executedCaseRuns", 0) or 0)
+    exit_criteria = [
+        "完成 P0/阻塞缺陷清单确认，并关闭或形成带审批的豁免记录。",
+        "补齐核心链路真实执行结果，确保关键用例有可追溯回执。",
+        "复跑生产验收中心，确认 realData 不再阻塞或完成有条件放行签署。",
+    ]
+    if defects > 0:
+        exit_criteria.insert(0, f"处理当前缺陷：{defects} 条，优先收敛阻塞和高风险项。")
+    if risk_hints > 0:
+        exit_criteria.insert(1, f"复核风险提示：{risk_hints} 条，标记重复、历史或可豁免项。")
+
     check_lines = [
         f"- [{item.status}] {item.label}: {item.detail}；建议：{item.recommendation}"
         for item in summary.checks
@@ -306,8 +338,17 @@ def _render_report_markdown(summary: AcceptanceSummaryData) -> str:
             f"- 评分：{summary.score}",
             f"- 生成时间：{summary.generatedAt.isoformat()}",
             "",
+            "## 阶段验收结论",
+            f"- 决策：{stage_decision}",
+            f"- 范围：{stage_scope}",
+            f"- 说明：本报告不伪造通过结论，真实数据阻塞项需按退出条件闭环。",
+            "",
             "## 真实数据",
             *[f"- {key}: {value}" for key, value in summary.metrics.items()],
+            "",
+            "## 有条件放行前置条件",
+            f"- 已执行用例：{executed_case_runs}",
+            *[f"- {item}" for item in exit_criteria[:6]],
             "",
             "## 验收检查",
             *check_lines,

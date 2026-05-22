@@ -12,6 +12,7 @@
       <div class="mb-4 flex flex-wrap items-center gap-2 text-[12px]">
         <span class="text-[#717182]">总体状态</span>
         <span class="rounded px-2 py-0.5 font-medium" :class="tagClass(summary.overallStatus)">{{ statusLabel(summary.overallStatus) }}</span>
+        <span class="rounded px-2 py-0.5 font-medium" :class="decisionClass">{{ stageDecisionLabel }}</span>
         <span class="text-[#717182]">评分</span>
         <span class="text-[#0A0A0A]">{{ summary.score ?? '-' }}</span>
         <span class="text-[#717182]">生成时间</span>
@@ -42,6 +43,11 @@
             </tbody>
           </table>
           <div v-else class="rounded bg-[#F7F8FA] px-3 py-3 text-[12px] text-[#717182]">暂无检查项</div>
+        </div>
+
+        <div class="rounded border border-amber-200 bg-amber-50 px-3 py-3 text-[12px] leading-5 text-[#92400E]">
+          <div class="font-medium text-[#78350F]">{{ stageDecisionLabel }}</div>
+          <div class="mt-1">{{ stageDecisionDetail }}</div>
         </div>
 
         <div>
@@ -106,7 +112,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { getAcceptanceReport, getAcceptanceSummary, type AcceptanceStatus, type AcceptanceSummary } from '@/lib/api/acceptance'
 
 const loading = ref(false)
@@ -133,6 +139,29 @@ function statusLabel(status: AcceptanceStatus) {
   if (status === 'warn') return '预警'
   return '就绪'
 }
+
+const checksByKey = computed(() => Object.fromEntries(summary.checks.map((item) => [item.key, item])))
+const isRealDataBlocked = computed(() => checksByKey.value.realData?.status === 'blocked')
+const isPlatformReady = computed(() =>
+  checksByKey.value.externalSystems?.status === 'ready' && checksByKey.value.opsHealth?.status === 'ready'
+)
+const stageDecisionLabel = computed(() => {
+  if (summary.overallStatus === 'ready') return '可进入正式验收'
+  if (isRealDataBlocked.value && isPlatformReady.value) return '有条件放行评审'
+  if (summary.overallStatus === 'blocked') return '阶段验收暂缓'
+  return '谨慎通过评审'
+})
+const stageDecisionDetail = computed(() => {
+  if (summary.overallStatus === 'ready') return '真实数据、外部系统和运维健康均已就绪。'
+  if (isRealDataBlocked.value && isPlatformReady.value) return '外部系统联调与运维健康已就绪，当前仅真实数据缺陷/风险未闭环，适合输出阶段验收报告或有条件放行清单。'
+  return '仍存在阻塞或预警项，请按下一步清单补齐证据后复跑验收。'
+})
+const decisionClass = computed(() => {
+  if (summary.overallStatus === 'ready') return 'bg-emerald-100 text-emerald-700'
+  if (isRealDataBlocked.value && isPlatformReady.value) return 'bg-blue-100 text-blue-700'
+  if (summary.overallStatus === 'blocked') return 'bg-red-100 text-red-700'
+  return 'bg-amber-100 text-amber-700'
+})
 
 function formatTime(ts: number | null) {
   return ts ? new Date(ts * 1000).toLocaleString('zh-CN') : '-'

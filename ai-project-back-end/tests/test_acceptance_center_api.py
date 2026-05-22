@@ -24,7 +24,7 @@ from app.schemas.integration import (
     NotificationDiagnosticsSummary,
 )
 from app.schemas.ops import OpsHealthCheck, OpsHealthSummaryData
-from app.services.acceptance import _build_checks, _load_devops_external_systems
+from app.services.acceptance import _build_checks, _load_devops_external_systems, _render_report_markdown
 
 
 @dataclass
@@ -290,3 +290,63 @@ def test_build_checks_maps_real_contract_status_and_metrics() -> None:
     assert by_key["externalSystems"].metric["readyProviders"] == 1
     assert by_key["externalSystems"].metric["warnings"] == 1
     assert by_key["opsHealth"].status == "WARN"
+
+
+def test_render_report_markdown_explains_blocked_real_data_as_phase_acceptance() -> None:
+    generated_at = datetime.now(timezone.utc)
+    summary = AcceptanceSummaryData(
+        overallStatus="BLOCKED",
+        generatedAt=generated_at,
+        projectId=str(_PROJECT_ID),
+        projectName="真实业务数据验收",
+        score=54,
+        checks=[
+            AcceptanceCheck(
+                key="realData",
+                label="真实数据基线",
+                status="BLOCKED",
+                detail="建议暂缓",
+                metric={
+                    "requirementDocs": 31,
+                    "testcases": 5899,
+                    "defects": 460,
+                    "riskHints": 460,
+                    "executedCaseRuns": 27,
+                },
+                recommendation="补齐需求文档、测试用例或关闭阻塞缺陷后再进入生产验收。",
+            ),
+            AcceptanceCheck(
+                key="externalSystems",
+                label="外部系统联调",
+                status="READY",
+                detail="通知诊断：READY，外部系统 2 项。",
+                metric={"readyProviders": 2},
+                recommendation="保持外部系统回执的定期 smoke。",
+            ),
+            AcceptanceCheck(
+                key="opsHealth",
+                label="运维可观测性",
+                status="READY",
+                detail="运维健康聚合状态：READY",
+                metric={"workers": {"totalCount": 1}},
+                recommendation="保持健康检查和告警阈值巡检。",
+            ),
+        ],
+        externalSystems=[],
+        metrics={
+            "requirementDocs": 31,
+            "testcases": 5899,
+            "defects": 460,
+            "riskHints": 460,
+            "executedCaseRuns": 27,
+        },
+        nextActions=["导出本页 Markdown 作为阶段验收附件。"],
+    )
+
+    markdown = _render_report_markdown(summary)
+
+    assert "## 阶段验收结论" in markdown
+    assert "阶段验收暂缓" in markdown
+    assert "外部系统联调与运维健康已就绪" in markdown
+    assert "有条件放行前置条件" in markdown
+    assert "缺陷：460" in markdown

@@ -7,6 +7,7 @@ export type AcceptanceCheck = {
   name: string
   status: AcceptanceStatus
   detail: string
+  recommendation: string
 }
 
 export type AcceptanceExternalSystem = {
@@ -77,6 +78,7 @@ function normalizeCheck(input: unknown, index: number): AcceptanceCheck {
     name: normalizeText(row.name ?? row.label, key),
     status: normalizeStatus(row.status ?? row.level),
     detail: normalizeText(row.detail ?? row.message ?? row.description),
+    recommendation: normalizeText(row.recommendation, ''),
   }
 }
 
