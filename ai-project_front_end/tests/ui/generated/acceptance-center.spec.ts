@@ -88,7 +88,8 @@ test.describe('acceptance-center 生产验收中心冒烟', () => {
           body: JSON.stringify({
             code: 0,
             data: {
-              markdown: '# 生产验收报告\n\n- 当前状态：WARN\n- 建议：处理 Jira 令牌后复验',
+              markdown:
+                '# 生产验收报告\n\n## 默认验收确认口径\n| 分类 | 数量 | 默认确认口径 | 样例 |\n| --- | ---: | --- | --- |\n| 必须修复后再放行 | 28 | 默认不建议豁免 | 黑屏 |\n\n- 当前状态：WARN\n- 建议：处理 Jira 令牌后复验',
             },
           }),
         })
@@ -116,5 +117,12 @@ test.describe('acceptance-center 生产验收中心冒烟', () => {
     await expect(page.getByText('API Token 已过期')).toBeVisible()
     await expect(page.getByText('生产验收报告')).toBeVisible()
     await expect(page.getByRole('button', { name: '复制报告' })).toBeVisible()
+    await expect(page.getByRole('button', { name: '复制汇报口径' })).toBeVisible()
+    await expect(page.getByRole('button', { name: '下载报告' })).toBeVisible()
+
+    const downloadPromise = page.waitForEvent('download')
+    await page.getByRole('button', { name: '下载报告' }).click()
+    const download = await downloadPromise
+    expect(download.suggestedFilename()).toMatch(/^production-acceptance-report-.*\.md$/)
   })
 })

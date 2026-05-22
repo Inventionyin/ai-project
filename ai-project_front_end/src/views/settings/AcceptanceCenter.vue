@@ -126,7 +126,11 @@
         <div class="rounded border border-black/10 bg-[#FAFBFC]">
           <div class="flex items-center justify-between border-b border-black/10 px-3 py-2">
             <div class="text-[13px] font-medium text-[#0A0A0A]">报告预览</div>
-            <button class="rounded border border-black/10 bg-white px-2 py-1 text-[12px] text-[#0A0A0A]" @click="copyReport">复制报告</button>
+            <div class="flex flex-wrap items-center gap-2">
+              <button class="rounded border border-black/10 bg-white px-2 py-1 text-[12px] text-[#0A0A0A]" @click="copyDeliveryNote">复制汇报口径</button>
+              <button class="rounded border border-black/10 bg-white px-2 py-1 text-[12px] text-[#0A0A0A]" @click="downloadReport">下载报告</button>
+              <button class="rounded border border-black/10 bg-white px-2 py-1 text-[12px] text-[#0A0A0A]" @click="copyReport">复制报告</button>
+            </div>
           </div>
           <pre class="max-h-[280px] overflow-auto whitespace-pre-wrap break-words px-3 py-3 text-[12px] leading-5 text-[#334155]">{{ reportMarkdown || '暂无报告内容' }}</pre>
         </div>
@@ -195,6 +199,18 @@ const blockingMetricCards = computed(() => [
   { label: '风险提示', value: metricValue('riskHints'), tone: 'text-amber-700' },
   { label: '已执行用例', value: metricValue('executedCaseRuns'), tone: 'text-blue-700' },
 ])
+const deliveryNote = computed(() => {
+  const defects = metricValue('defects')
+  const riskHints = metricValue('riskHints')
+  const executed = metricValue('executedCaseRuns')
+  return [
+    `项目当前生产验收状态为${statusLabel(summary.overallStatus)}，评分 ${summary.score ?? '-'}。`,
+    `平台能力侧已完成真实数据导入、外部系统联调、运维健康检查和验收报告输出；当前阻塞集中在真实业务数据闭环。`,
+    `当前数据：未关闭缺陷 ${defects} 个，风险提示 ${riskHints} 条，已执行用例 ${executed} 条。`,
+    `系统已在验收报告中自动生成默认确认口径：必须修复、疑似重复/同模块合并、历史遗留、体验优化、可延期低风险候选。`,
+    `建议需求方确认哪些缺陷纳入本轮验收阻塞，哪些允许延期/豁免；确认后复跑验收中心即可生成最终验收报告。`,
+  ].join('\n')
+})
 
 function formatTime(ts: number | null) {
   return ts ? new Date(ts * 1000).toLocaleString('zh-CN') : '-'
@@ -232,6 +248,44 @@ async function copyReport() {
       fallbackCopyText(text)
     } catch {}
   }
+}
+
+async function copyDeliveryNote() {
+  const text = deliveryNote.value.trim()
+  if (!text) return
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch {
+    try {
+      fallbackCopyText(text)
+    } catch {}
+  }
+}
+
+function downloadTextFile(fileName: string, content: string, mimeType: string) {
+  const blob = new Blob([content], { type: mimeType })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = fileName
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  URL.revokeObjectURL(url)
+}
+
+function reportFileName() {
+  const date = new Date()
+  const part = `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}${String(date.getDate()).padStart(2, '0')}-${String(
+    date.getHours()
+  ).padStart(2, '0')}${String(date.getMinutes()).padStart(2, '0')}`
+  return `production-acceptance-report-${part}.md`
+}
+
+function downloadReport() {
+  const text = reportMarkdown.value.trim()
+  if (!text) return
+  downloadTextFile(reportFileName(), text, 'text/markdown;charset=utf-8')
 }
 
 async function load() {
