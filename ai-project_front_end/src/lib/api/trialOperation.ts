@@ -338,6 +338,25 @@ const parseMarkdownTableLine = (line: string) => {
     .map((cell) => cell.trim())
 }
 
+const isMarkdownMetadataLine = (line: string) => {
+  const trimmed = line.trim()
+  if (!trimmed) return true
+  if (/^-{3,}$/.test(trimmed)) return true
+  if (/^\*\*[^*]+?\*\*\s*[:：]/.test(trimmed)) return true
+  if (/^_{2}[^_]+?_{2}\s*[:：]/.test(trimmed)) return true
+  return false
+}
+
+const isValidMarkdownDefectTitle = (value: string) => {
+  const title = String(value || '').trim()
+  if (!title) return false
+  if (/^-{2,}$/.test(title)) return false
+  if (/^\*{1,2}[^*]+?\*{1,2}\s*[:：]/.test(title)) return false
+  if (/^_+[^_]+?_+\s*[:：]/.test(title)) return false
+  if (/^(优先级|状态|缺陷标题|标题|测试id)$/i.test(title)) return false
+  return true
+}
+
 const parseMarkdownDefectRows = async (file: File) => {
   const text = await decodeText(file)
   const rows: Array<Record<string, string>> = []
@@ -347,6 +366,7 @@ const parseMarkdownDefectRows = async (file: File) => {
   for (const rawLine of text.split(/\r?\n/)) {
     const line = rawLine.trim()
     if (!line) continue
+    if (isMarkdownMetadataLine(line)) continue
 
     const sectionMatch = line.match(/^#{1,6}\s+(.+)$/)
     if (sectionMatch) {
@@ -365,7 +385,7 @@ const parseMarkdownDefectRows = async (file: File) => {
       if (tableHeaders.length && cells.length >= tableHeaders.length) {
         const row = Object.fromEntries(tableHeaders.map((header, index) => [header, cells[index] || '']))
         const title = row['缺陷标题'] || row['标题'] || row.title || row.summary || ''
-        if (title) {
+        if (isValidMarkdownDefectTitle(title)) {
           rows.push({
             title,
             description: [currentSection, row['负责人'] ? `负责人：${row['负责人']}` : '', row['状态'] ? `状态：${row['状态']}` : ''].filter(Boolean).join('；'),
@@ -382,7 +402,7 @@ const parseMarkdownDefectRows = async (file: File) => {
     const bulletMatch = line.match(/^[-*]\s*(.+?)(?:\s*[（(]\s*执行者\s*[:：]\s*([^,，)）]+)\s*[,，]\s*状态\s*[:：]\s*([^)）]+)\s*[)）])?\s*$/)
     if (bulletMatch) {
       const title = bulletMatch[1].trim()
-      if (title) {
+      if (isValidMarkdownDefectTitle(title)) {
         rows.push({
           title,
           description: [currentSection, bulletMatch[2] ? `执行者：${bulletMatch[2].trim()}` : '', bulletMatch[3] ? `状态：${bulletMatch[3].trim()}` : ''].filter(Boolean).join('；'),
