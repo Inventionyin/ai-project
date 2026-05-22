@@ -1,0 +1,228 @@
+name: real-e2e
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      includeFrontendRealE2E:
+        description: "Run frontend real E2E against live backend/frontend processes"
+        required: false
+        default: false
+        type: boolean
+      includeExternalSmoke:
+        description: "Run live external integration smoke checks with repository secrets/variables"
+        required: false
+        default: false
+        type: boolean
+      includeExternalBusinessClosure:
+        description: "Run reversible Jira/Zentao create-cleanup and Jenkins trigger checks"
+        required: false
+        default: false
+        type: boolean
+      externalSmokeTargets:
+        description: "Comma-separated external smoke targets"
+        required: false
+        default: "Jira"
+        type: string
+  pull_request:
+  push:
+    branches:
+      - dev
+      - main
+      - master
+  schedule:
+    # Run the full real E2E path nightly on the default branch.
+    - cron: "30 18 * * *"
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    concurrency:
+      group: real-e2e-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ai_test_platform_e2e
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d ai_test_platform_e2e"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      TEST_DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/ai_test_platform_e2e
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/ai_test_platform_e2e
+      PYTHONPATH: .
+      WEITESTING_GITHUB_TOKEN: ${{ github.token }}
+      WEITESTING_GITHUB_REPOSITORY: ${{ github.repository }}
+      WEITESTING_GITHUB_WORKFLOW_FILE: .github/workflows/real-e2e.yml
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: ai-project_front_end/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: ai-project-back-end
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install frontend dependencies
+        working-directory: ai-project_front_end
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        working-directory: ai-project_front_end
+        run: npx playwright install --with-deps chromium
+
+      - name: Run backend pytest + frontend build + generated E2E
+        shell: pwsh
+        run: |
+          ./scripts/verify_real_e2e.ps1
+
+      - name: Run performance baseline dry-run
+        shell: pwsh
+        run: |
+          ./scripts/run_performance_baseline.ps1 -DryRun
+          bash ./scripts/run_performance_baseline.sh --dry-run
+
+      - name: Run production readiness dry-run
+        shell: pwsh
+        run: |
+          ./scripts/verify_production_readiness.ps1 -DryRun
+          bash ./scripts/verify_production_readiness.sh --dry-run
+
+      - name: Run external integrations diagnostics dry-run (if script exists)
+        if: ${{ hashFiles('scripts/verify_external_integrations.ps1') != '' }}
+        shell: pwsh
+        run: |
+          ./scripts/verify_external_integrations.ps1 -DryRun
+
+      - name: Run external integrations smoke (manual only)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.includeExternalSmoke }}
+        shell: pwsh
+        env:
+          DINGTALK_WEBHOOK_URL: ${{ secrets.DINGTALK_WEBHOOK_URL }}
+          DINGTALK_WEBHOOK_SECRET: ${{ secrets.DINGTALK_WEBHOOK_SECRET }}
+          JENKINS_BASE_URL: ${{ vars.JENKINS_BASE_URL }}
+          JENKINS_JOB_NAME: ${{ vars.JENKINS_JOB_NAME }}
+          JENKINS_USERNAME: ${{ vars.JENKINS_USERNAME }}
+          JENKINS_API_TOKEN: ${{ secrets.JENKINS_API_TOKEN }}
+          JIRA_BASE_URL: ${{ vars.JIRA_BASE_URL }}
+          JIRA_PROJECT_KEY: ${{ vars.JIRA_PROJECT_KEY }}
+          JIRA_ISSUE_TYPE: ${{ vars.JIRA_ISSUE_TYPE }}
+          JIRA_EMAIL: ${{ vars.JIRA_EMAIL }}
+          JIRA_TOKEN: ${{ secrets.JIRA_TOKEN }}
+          EXTERNAL_SMOKE_TARGETS: ${{ inputs.externalSmokeTargets }}
+          ENABLE_EXTERNAL_BUSINESS_CLOSURE: ${{ inputs.includeExternalBusinessClosure }}
+          WEITESTING_BUSINESS_CLOSURE_PREFIX: ${{ vars.WEITESTING_BUSINESS_CLOSURE_PREFIX }}
+          ZENTAO_BASE_URL: ${{ vars.ZENTAO_BASE_URL }}
+          ZENTAO_PRODUCT: ${{ vars.ZENTAO_PRODUCT }}
+          ZENTAO_MODULE: ${{ vars.ZENTAO_MODULE }}
+          ZENTAO_TOKEN: ${{ secrets.ZENTAO_TOKEN }}
+          ZENTAO_ACCOUNT: ${{ secrets.ZENTAO_ACCOUNT }}
+          ZENTAO_PASSWORD: ${{ secrets.ZENTAO_PASSWORD }}
+        run: |
+          if ($env:ENABLE_EXTERNAL_BUSINESS_CLOSURE -eq "true") {
+            ./scripts/verify_external_integrations.ps1 -Targets $env:EXTERNAL_SMOKE_TARGETS -EnableSmoke -EnableBusinessClosure -FailOnSmokeError
+          }
+          else {
+            ./scripts/verify_external_integrations.ps1 -Targets $env:EXTERNAL_SMOKE_TARGETS -EnableSmoke -FailOnSmokeError
+          }
+
+      - name: External integrations diagnostics script missing notice
+        if: ${{ hashFiles('scripts/verify_external_integrations.ps1') == '' }}
+        shell: pwsh
+        run: |
+          Write-Host "scripts/verify_external_integrations.ps1 not found; skipped external integration diagnostics dry-run."
+
+      - name: Run frontend real E2E (workflow_dispatch or nightly)
+        if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.includeFrontendRealE2E) }}
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          $root = Get-Location
+          $backendDir = Join-Path $root "ai-project-back-end"
+          $frontendDir = Join-Path $root "ai-project_front_end"
+
+          $backendJob = Start-Job -ScriptBlock {
+            param($dir, $dbUrl)
+            Set-Location $dir
+            $env:PYTHONPATH = "."
+            $env:TEST_DATABASE_URL = $dbUrl
+            $env:DATABASE_URL = $dbUrl
+            python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+          } -ArgumentList $backendDir, $env:TEST_DATABASE_URL
+
+          $frontendJob = Start-Job -ScriptBlock {
+            param($dir)
+            Set-Location $dir
+            npm run preview -- --host 127.0.0.1 --port 4173
+          } -ArgumentList $frontendDir
+
+          try {
+          $backendReady = $false
+          for ($i = 0; $i -lt 60; $i++) {
+            try {
+              Invoke-WebRequest -Uri "http://127.0.0.1:8000/health" -UseBasicParsing -TimeoutSec 2 | Out-Null
+              $backendReady = $true
+              break
+            }
+            catch {
+              Start-Sleep -Seconds 2
+            }
+          }
+
+            if (-not $backendReady) {
+              throw "Backend health endpoint did not become ready at http://127.0.0.1:8000/health"
+            }
+
+            $frontendReady = $false
+            for ($i = 0; $i -lt 60; $i++) {
+              try {
+                Invoke-WebRequest -Uri "http://127.0.0.1:4173" -UseBasicParsing -TimeoutSec 2 | Out-Null
+                $frontendReady = $true
+                break
+              }
+              catch {
+                Start-Sleep -Seconds 2
+              }
+            }
+
+            if (-not $frontendReady) {
+              throw "Frontend preview did not become ready at http://127.0.0.1:4173"
+            }
+
+            ./scripts/verify_real_e2e.ps1 -SkipBackend -SkipFrontendBuild -SkipGeneratedE2E -WithFrontendRealE2E -ApiBaseUrl "http://127.0.0.1:8000" -FrontendUrl "http://127.0.0.1:4173"
+          }
+          finally {
+            foreach ($job in @($backendJob, $frontendJob)) {
+              if ($null -ne $job) {
+                Stop-Job -Job $job -ErrorAction SilentlyContinue
+                Receive-Job -Job $job -Keep -ErrorAction SilentlyContinue | Out-Host
+                Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
+              }
+            }
+          }

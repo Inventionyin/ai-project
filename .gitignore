@@ -1,0 +1,42 @@
+.worktrees/
+
+# Local secrets
+*.local
+*.local.*
+.env
+.env.*
+!.env.example
+!*.env.example
+ai-project-back-end/.env.local
+
+# Local logs and runtime artifacts
+*.log
+backend-*.log
+*.out.log
+*.err.log
+*.tar
+*.tar.gz
+*.zip
+artifacts/
+var/
+ai-project-back-end/var/
+
+# Test/build reports
+test-results/
+playwright-report/
+ai-project_front_end/test-results/
+ai-project_front_end/tests/ui/reports/
+ai-project_front_end/dist/
+
+# Temporary debug captures
+*.tmp.png
+tmp-*.png
+ai-project_front_end/tmp-*.png
+scripts/*.local.ps1
+node_modules/
+dist/
+__pycache__/
+*.py[cod]
+*$py.class
+.DS_Store
+Thumbs.db

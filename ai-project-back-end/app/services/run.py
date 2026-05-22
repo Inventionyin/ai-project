@@ -1,0 +1,2563 @@
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import json
+import secrets
+import shutil
+import uuid
+from datetime import datetime
+from pathlib import Path
+
+from fastapi import HTTPException
+from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.deps import CurrentUser
+from app.models.environment import Environment
+from app.models.enums import ArtifactType, CaseRunStatus, JobStatus, ProjectRole, RunStatus, TriggerType
+from app.models.project import Project, ProjectCiToken, ProjectMember
+from app.models.run import Artifact, CaseRun, Job, Run
+from app.models.suite import Suite, SuiteItem
+from app.models.testcase import TestCase
+from app.models.testcase_binding import TestcaseBinding
+from app.schemas.worker import JobArtifactSpec, JobEnv, JobExecution, JobItem, JobPayload, JobSuiteConfig
+from app.services.environment import get_secret_keys
+from app.services.integration_delivery import dispatch_run_terminal_notification
+from app.services.security_policy import create_audit_log
+from app.services.runner_dispatch import dispatch_job_runner
+from app.services.runner_pytest_allure import resolve_run_allure_paths
+
+
+def _is_admin(user: CurrentUser) -> bool:
+    return "Admin" in user.roles or "ADMIN" in user.roles
+
+
+async def _get_project(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+) -> Project:
+    project = await db.scalar(select(Project).where(Project.id == project_id, Project.tenant_id == user.tenant_id))
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return project
+
+
+async def _get_member_role(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+) -> ProjectRole | None:
+    return (
+        await db.execute(
+            select(ProjectMember.role).where(
+                ProjectMember.project_id == project_id,
+                ProjectMember.user_id == user.id,
+                ProjectMember.tenant_id == user.tenant_id,
+            )
+        )
+    ).scalar_one_or_none()
+
+
+async def _require_project_read(db: AsyncSession, *, user: CurrentUser, project: Project) -> None:
+    if _is_admin(user) or project.owner_id == user.id:
+        return
+    role = await _get_member_role(db, user=user, project_id=project.id)
+    if role in (ProjectRole.ADMIN, ProjectRole.OWNER, ProjectRole.EDITOR, ProjectRole.VIEWER):
+        return
+    raise HTTPException(status_code=403, detail="No access to this project")
+
+
+async def _require_project_write(db: AsyncSession, *, user: CurrentUser, project: Project) -> None:
+    if _is_admin(user) or project.owner_id == user.id:
+        return
+    role = await _get_member_role(db, user=user, project_id=project.id)
+    if role in (ProjectRole.ADMIN, ProjectRole.OWNER, ProjectRole.EDITOR):
+        return
+    raise HTTPException(status_code=403, detail="Only Owner/Editor can run this project")
+
+
+def _stable_payload_sig(payload: dict[str, object]) -> str:
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _hash_ci_token(raw_token: str) -> str:
+    return hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+
+
+def _build_ci_token_hint(raw_token: str) -> str:
+    prefix = raw_token[:4]
+    suffix = raw_token[-4:]
+    return f"{prefix}...{suffix}"
+
+
+def _normalize_ci_token_reason(reason: str | None) -> str | None:
+    normalized = str(reason or "").strip()
+    return normalized[:255] or None
+
+
+def _normalize_ci_token_name(name: str | None) -> str:
+    normalized = str(name or "primary").strip().lower()
+    if not normalized:
+        normalized = "primary"
+    if len(normalized) > 64:
+        normalized = normalized[:64]
+    allowed = set("abcdefghijklmnopqrstuvwxyz0123456789._-")
+    if any(ch not in allowed for ch in normalized):
+        raise HTTPException(status_code=400, detail="CI token name may only contain letters, numbers, dot, dash, or underscore")
+    return normalized
+
+
+_RUNNER_TYPE_DEFAULT = "DEFAULT"
+_RUNNER_TYPE_PYTEST_ALLURE = "PYTEST_ALLURE"
+_SUPPORTED_RUNNER_TYPES = {_RUNNER_TYPE_DEFAULT, _RUNNER_TYPE_PYTEST_ALLURE}
+
+
+class CiTokenPolicyDenied(HTTPException):
+    def __init__(self, *, detail: str) -> None:
+        super().__init__(status_code=403, detail=detail)
+
+
+def resolve_ci_token_state(project: Project, *, now: datetime | None = None) -> str:
+    if not getattr(project, "ci_token_hash", None):
+        return "disabled"
+    if getattr(project, "ci_token_leak_reported_at", None) is not None:
+        return "leaked"
+    if getattr(project, "ci_token_revoked_at", None) is not None:
+        return "revoked"
+    expires_at = getattr(project, "ci_token_expires_at", None)
+    if expires_at is not None and expires_at <= (now or datetime.utcnow()):
+        return "expired"
+    return "active"
+
+
+def resolve_project_ci_token_record_state(token: ProjectCiToken, *, now: datetime | None = None) -> str:
+    if getattr(token, "leak_reported_at", None) is not None:
+        return "leaked"
+    if getattr(token, "revoked_at", None) is not None:
+        return "revoked"
+    expires_at = getattr(token, "expires_at", None)
+    if expires_at is not None and expires_at <= (now or datetime.utcnow()):
+        return "expired"
+    return "active"
+
+
+def _resolve_runner_type(meta: dict[str, object] | None) -> str:
+    if not isinstance(meta, dict):
+        return _RUNNER_TYPE_DEFAULT
+    raw = str(meta.get("runnerType") or "").strip().upper()
+    if raw in _SUPPORTED_RUNNER_TYPES:
+        return raw
+    return _RUNNER_TYPE_DEFAULT
+
+
+def _resolve_ci_runner_type(meta: dict[str, object] | None) -> tuple[str, bool]:
+    if not isinstance(meta, dict):
+        return _RUNNER_TYPE_DEFAULT, True
+    raw = str(meta.get("runnerType") or "").strip().upper()
+    if not raw:
+        return _RUNNER_TYPE_DEFAULT, True
+    if raw in _SUPPORTED_RUNNER_TYPES:
+        return raw, True
+    return raw, False
+
+
+def _normalize_ci_runner_types(values: object) -> list[str]:
+    if not isinstance(values, (list, tuple, set)):
+        return []
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        runner_type = str(value or "").strip().upper()
+        if runner_type in _SUPPORTED_RUNNER_TYPES and runner_type not in seen:
+            normalized.append(runner_type)
+            seen.add(runner_type)
+    return normalized
+
+
+def _normalize_ci_testcase_ids(values: object) -> list[str]:
+    if not isinstance(values, (list, tuple, set)):
+        return []
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        raw = str(value or "").strip()
+        if not raw:
+            continue
+        try:
+            item = str(uuid.UUID(raw))
+        except ValueError:
+            continue
+        if item not in seen:
+            normalized.append(item)
+            seen.add(item)
+    return normalized
+
+
+def _normalize_ci_max_testcase_count(value: object) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed <= 0:
+        return None
+    return min(parsed, 10_000)
+
+
+def normalize_ci_token_policy(policy: dict[str, object] | None) -> dict[str, object]:
+    raw = dict(policy or {})
+    return {
+        "allowedRunnerTypes": _normalize_ci_runner_types(raw.get("allowedRunnerTypes")),
+        "allowedTestCaseIds": _normalize_ci_testcase_ids(raw.get("allowedTestCaseIds")),
+        "maxTestCaseCount": _normalize_ci_max_testcase_count(raw.get("maxTestCaseCount")),
+    }
+
+
+def get_project_ci_token_policy(project: Project) -> dict[str, object]:
+    return normalize_ci_token_policy(
+        {
+            "allowedRunnerTypes": getattr(project, "ci_token_allowed_runner_types", None),
+            "allowedTestCaseIds": getattr(project, "ci_token_allowed_testcase_ids", None),
+            "maxTestCaseCount": getattr(project, "ci_token_max_testcase_count", None),
+        }
+    )
+
+
+def get_project_ci_token_record_policy(token: ProjectCiToken) -> dict[str, object]:
+    return normalize_ci_token_policy(
+        {
+            "allowedRunnerTypes": getattr(token, "allowed_runner_types", None),
+            "allowedTestCaseIds": getattr(token, "allowed_testcase_ids", None),
+            "maxTestCaseCount": getattr(token, "max_testcase_count", None),
+        }
+    )
+
+
+async def _audit_ci_trigger_denied(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project: Project,
+    reason: str,
+    runner_type: str,
+    case_count: int,
+    meta: dict[str, object],
+) -> None:
+    await create_audit_log(
+        db,
+        user=user,
+        project_id=project.id,
+        module="RUN",
+        action="CI_TRIGGER_DENIED",
+        resource_type="project_ci_token",
+        resource_id=str(project.id),
+        summary="Deny CI run by token policy",
+        detail={
+            "reason": reason,
+            "triggerType": TriggerType.CI.value,
+            "ciTokenHint": project.ci_token_hint,
+            "projectId": str(project.id),
+            "runnerType": runner_type,
+            "caseCount": case_count,
+            "meta": dict(meta or {}),
+        },
+    )
+    await db.flush()
+
+
+async def _enforce_ci_token_policy(
+    db: AsyncSession,
+    *,
+    project: Project,
+    user: CurrentUser,
+    meta: dict[str, object],
+    items: list[dict[str, object]],
+) -> None:
+    lifecycle_state = resolve_ci_token_state(project)
+    if lifecycle_state != "active":
+        reason = f"ci_token_{lifecycle_state}"
+        runner_type, _ = _resolve_ci_runner_type(meta)
+        await _audit_ci_trigger_denied(
+            db,
+            user=user,
+            project=project,
+            reason=reason,
+            runner_type=runner_type,
+            case_count=len(items),
+            meta=meta,
+        )
+        raise CiTokenPolicyDenied(detail=reason)
+
+    policy = get_project_ci_token_policy(project)
+    runner_type, runner_type_supported = _resolve_ci_runner_type(meta)
+    allowed_runner_types = list(policy["allowedRunnerTypes"])
+    case_count = len(items)
+    max_testcase_count = policy["maxTestCaseCount"]
+
+    if not runner_type_supported or (allowed_runner_types and runner_type not in allowed_runner_types):
+        reason = "ci_runner_type_not_allowed"
+        await _audit_ci_trigger_denied(
+            db, user=user, project=project, reason=reason, runner_type=runner_type, case_count=case_count, meta=meta
+        )
+        raise CiTokenPolicyDenied(detail=reason)
+
+    if isinstance(max_testcase_count, int) and case_count > max_testcase_count:
+        reason = "ci_testcase_count_exceeded"
+        await _audit_ci_trigger_denied(
+            db, user=user, project=project, reason=reason, runner_type=runner_type, case_count=case_count, meta=meta
+        )
+        raise CiTokenPolicyDenied(detail=reason)
+
+    allowed_testcase_ids = set(policy["allowedTestCaseIds"])
+    if allowed_testcase_ids:
+        for item in items:
+            try:
+                testcase_id = str(uuid.UUID(str(item.get("testcaseId") or "").strip()))
+            except ValueError:
+                testcase_id = ""
+            if testcase_id not in allowed_testcase_ids:
+                reason = "ci_testcase_not_allowed"
+                await _audit_ci_trigger_denied(
+                    db, user=user, project=project, reason=reason, runner_type=runner_type, case_count=case_count, meta=meta
+                )
+                raise CiTokenPolicyDenied(detail=reason)
+
+
+async def _audit_ci_token_record_trigger_denied(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project: Project,
+    token: ProjectCiToken,
+    reason: str,
+    runner_type: str,
+    case_count: int,
+    meta: dict[str, object],
+) -> None:
+    await create_audit_log(
+        db,
+        user=user,
+        project_id=project.id,
+        module="RUN",
+        action="CI_TRIGGER_DENIED",
+        resource_type="project_ci_token",
+        resource_id=str(token.id),
+        summary="Deny CI run by named token policy",
+        detail={
+            "reason": reason,
+            "triggerType": TriggerType.CI.value,
+            "ciTokenId": str(token.id),
+            "ciTokenName": token.name,
+            "ciTokenHint": token.token_hint,
+            "projectId": str(project.id),
+            "runnerType": runner_type,
+            "caseCount": case_count,
+            "meta": dict(meta or {}),
+        },
+    )
+    await db.flush()
+
+
+async def _enforce_ci_token_record_policy(
+    db: AsyncSession,
+    *,
+    project: Project,
+    token: ProjectCiToken,
+    user: CurrentUser,
+    meta: dict[str, object],
+    items: list[dict[str, object]],
+) -> None:
+    lifecycle_state = resolve_project_ci_token_record_state(token)
+    if lifecycle_state != "active":
+        reason = f"ci_token_{lifecycle_state}"
+        runner_type, _ = _resolve_ci_runner_type(meta)
+        await _audit_ci_token_record_trigger_denied(
+            db,
+            user=user,
+            project=project,
+            token=token,
+            reason=reason,
+            runner_type=runner_type,
+            case_count=len(items),
+            meta=meta,
+        )
+        raise CiTokenPolicyDenied(detail=reason)
+
+    policy = get_project_ci_token_record_policy(token)
+    runner_type, runner_type_supported = _resolve_ci_runner_type(meta)
+    allowed_runner_types = list(policy["allowedRunnerTypes"])
+    case_count = len(items)
+    max_testcase_count = policy["maxTestCaseCount"]
+
+    if not runner_type_supported or (allowed_runner_types and runner_type not in allowed_runner_types):
+        reason = "ci_runner_type_not_allowed"
+        await _audit_ci_token_record_trigger_denied(
+            db, user=user, project=project, token=token, reason=reason, runner_type=runner_type, case_count=case_count, meta=meta
+        )
+        raise CiTokenPolicyDenied(detail=reason)
+
+    if isinstance(max_testcase_count, int) and case_count > max_testcase_count:
+        reason = "ci_testcase_count_exceeded"
+        await _audit_ci_token_record_trigger_denied(
+            db, user=user, project=project, token=token, reason=reason, runner_type=runner_type, case_count=case_count, meta=meta
+        )
+        raise CiTokenPolicyDenied(detail=reason)
+
+    allowed_testcase_ids = set(policy["allowedTestCaseIds"])
+    if allowed_testcase_ids:
+        for item in items:
+            try:
+                testcase_id = str(uuid.UUID(str(item.get("testcaseId") or "").strip()))
+            except ValueError:
+                testcase_id = ""
+            if testcase_id not in allowed_testcase_ids:
+                reason = "ci_testcase_not_allowed"
+                await _audit_ci_token_record_trigger_denied(
+                    db,
+                    user=user,
+                    project=project,
+                    token=token,
+                    reason=reason,
+                    runner_type=runner_type,
+                    case_count=case_count,
+                    meta=meta,
+                )
+                raise CiTokenPolicyDenied(detail=reason)
+
+
+def _extract_testcase_api_params(ai_meta_json: object) -> dict[str, object]:
+    if not isinstance(ai_meta_json, dict):
+        return {}
+    raw = ai_meta_json.get("apiParams")
+    if not isinstance(raw, dict):
+        return {}
+    return dict(raw)
+
+
+def _extract_testcase_api_headers(ai_meta_json: object) -> dict[str, str]:
+    if not isinstance(ai_meta_json, dict):
+        return {}
+    raw = ai_meta_json.get("apiHeaders")
+    if not isinstance(raw, dict):
+        return {}
+    normalized: dict[str, str] = {}
+    for key, value in raw.items():
+        normalized[str(key)] = str(value)
+    return normalized
+
+
+def _extract_testcase_expected_result(ai_meta_json: object) -> str | None:
+    if not isinstance(ai_meta_json, dict):
+        return None
+    value = ai_meta_json.get("expectedResult")
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    return normalized or None
+
+
+def _extract_testcase_expected_status_code(ai_meta_json: object) -> int | None:
+    if not isinstance(ai_meta_json, dict):
+        return None
+    value = ai_meta_json.get("expectedStatusCode")
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    try:
+        parsed = int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    return parsed
+
+
+def _extract_testcase_preconditions(ai_meta_json: object) -> str | None:
+    if not isinstance(ai_meta_json, dict):
+        return None
+    value = ai_meta_json.get("preconditions")
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    return normalized or None
+
+
+def _extract_testcase_postconditions(ai_meta_json: object) -> str | None:
+    if not isinstance(ai_meta_json, dict):
+        return None
+    value = ai_meta_json.get("postconditions")
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    return normalized or None
+
+
+def _build_execution_spec(runner_type: str) -> JobExecution:
+    if runner_type != _RUNNER_TYPE_PYTEST_ALLURE:
+        return JobExecution(runnerType=_RUNNER_TYPE_DEFAULT, artifactSpec=[])
+    return JobExecution(
+        runnerType=_RUNNER_TYPE_PYTEST_ALLURE,
+        artifactSpec=[
+            JobArtifactSpec(key="allureResults", fileName="allure-results.zip", required=True),
+            JobArtifactSpec(key="allureReport", fileName="allure-report.zip", required=False, optional=True),
+            JobArtifactSpec(key="executionLog", fileName="execution.log", required=True),
+            JobArtifactSpec(key="failureScreenshot", fileName="failure-screenshot.png", required=False, optional=True),
+            JobArtifactSpec(key="requestResponseSnapshot", fileName="request-response.json", required=False, optional=True),
+        ],
+    )
+
+
+def _update_run_execution_summary(run: Run, *, case_runs: list[CaseRun], workspace: str | None = None) -> None:
+    passed = sum(1 for row in case_runs if row.status == CaseRunStatus.PASSED)
+    failed = sum(1 for row in case_runs if row.status == CaseRunStatus.FAILED)
+    skipped = sum(1 for row in case_runs if row.status == CaseRunStatus.SKIPPED)
+    total = len(case_runs)
+    run_summary = dict(run.summary_json or {})
+    execution_result: dict[str, object] = {
+        "total": total,
+        "passed": passed,
+        "failed": failed,
+        "skipped": skipped,
+    }
+    if workspace:
+        execution_result["workspace"] = workspace
+    run_summary["executionResult"] = execution_result
+    run.summary_json = run_summary
+
+
+async def _execute_inline_pytest_allure_job(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    run: Run,
+    job: Job,
+    env: Environment | None,
+    case_runs: list[CaseRun],
+    testcase_map: dict[uuid.UUID, dict[str, object]],
+    items_for_job: list[dict[str, object]],
+    runner_type: str,
+) -> None:
+    now = datetime.utcnow()
+    run.status = RunStatus.RUNNING
+    run.start_at = run.start_at or now
+    job.status = JobStatus.RUNNING
+    job.start_at = job.start_at or now
+    for case_run in case_runs:
+        if case_run.status == CaseRunStatus.QUEUED:
+            case_run.status = CaseRunStatus.RUNNING
+            case_run.start_at = case_run.start_at or now
+    await db.flush()
+
+    env_secrets = {k: "" for k in get_secret_keys(env)} if env is not None else {}
+    payload_items: list[JobItem] = []
+    for item in items_for_job:
+        testcase_id = uuid.UUID(str(item["testcaseId"]))
+        testcase_item = testcase_map[testcase_id]
+        testcase_type = testcase_item.get("type")
+        if testcase_type is None:
+            raise HTTPException(status_code=400, detail=f"testcase_type_missing:{testcase_id}")
+        test_case_id = str(item.get("testCaseId") or "").strip() or None
+        payload_items.append(
+            JobItem(
+                caseRunId=str(item["caseRunId"]),
+                testcaseId=str(item["testcaseId"]),
+                testCaseId=test_case_id,
+                type=testcase_type,
+                contentMd=str(testcase_item.get("content_md") or " "),
+                apiMethod=str(item.get("apiMethod") or "").strip().upper() or None,
+                apiUrl=str(item.get("apiUrl") or "").strip() or None,
+                params=dict(item.get("params") or {}),
+                headers={str(k): str(v) for k, v in dict(item.get("headers") or {}).items()},
+                expectedResult=str(item.get("expectedResult") or "").strip() or None,
+                expectedStatusCode=item.get("expectedStatusCode") if isinstance(item.get("expectedStatusCode"), int) else None,
+                preconditions=str(item.get("preconditions") or "").strip() or None,
+                postconditions=str(item.get("postconditions") or "").strip() or None,
+            )
+        )
+
+    suite_cfg = dict((job.meta_json or {}).get("suiteConfig") or {})
+    payload = JobPayload(
+        jobId=str(job.id),
+        runId=str(run.id),
+        env=JobEnv(
+            baseUrl=env.base_url if env is not None else "http://localhost",
+            variables={str(k): str(v) for k, v in dict(env.variables_json or {}).items()} if env is not None else {},
+            secrets=env_secrets,
+        ),
+        suiteConfig=JobSuiteConfig(
+            timeoutSec=int(suite_cfg.get("timeoutSec") or 600),
+            retryCount=int(suite_cfg.get("retryCount") or 1),
+            failFast=bool(suite_cfg.get("failFast") or False),
+        ),
+        execution=_build_execution_spec(runner_type),
+        items=payload_items,
+    )
+
+    case_run_map = {str(case_run.id): case_run for case_run in case_runs}
+    meta_json = dict(job.meta_json or {})
+    try:
+        dispatch_result = await asyncio.to_thread(dispatch_job_runner, payload)
+        if not dispatch_result.handled or dispatch_result.output is None:
+            raise RuntimeError(f"runner_not_supported:{runner_type}")
+        output = dispatch_result.output
+        existed_artifact_keys: dict[str, set[tuple[str, str]]] = {}
+        for result in output.results:
+            case_run = case_run_map.get(result.caseRunId)
+            if case_run is None:
+                continue
+            case_run.status = result.status
+            case_run.start_at = datetime.utcfromtimestamp(result.startAt)
+            case_run.end_at = datetime.utcfromtimestamp(result.endAt) if result.endAt else None
+            case_run.error_type = result.errorType
+            case_run.error_message = result.errorMessage
+            metrics_json = dict(result.metrics.model_dump() if result.metrics else {})
+            if result.logs:
+                metrics_json["logs"] = list(result.logs)
+            case_run.metrics_json = metrics_json
+            key_set = existed_artifact_keys.setdefault(result.caseRunId, set())
+            for artifact in result.artifacts:
+                artifact_key = (artifact.type.value, artifact.storageKey)
+                if artifact_key in key_set:
+                    continue
+                key_set.add(artifact_key)
+                artifact_size = artifact.meta.get("size")
+                size = int(artifact_size) if isinstance(artifact_size, int | float) else None
+                db.add(
+                    Artifact(
+                        tenant_id=user.tenant_id,
+                        run_id=run.id,
+                        case_run_id=case_run.id,
+                        type=artifact.type,
+                        storage_url=artifact.storageKey,
+                        size=size,
+                        meta_json=dict(artifact.meta or {}),
+                    )
+                )
+        job.status = output.job_status
+        job.end_at = datetime.utcnow()
+        meta_json["executor"] = "INLINE_PYTEST_ALLURE"
+        meta_json["workspace"] = str(output.workspace)
+        job.meta_json = meta_json
+        failed_count = sum(1 for item in case_runs if item.status == CaseRunStatus.FAILED)
+        if job.status == JobStatus.DONE:
+            run.status = RunStatus.FAILED if failed_count > 0 else RunStatus.PASSED
+        elif job.status == JobStatus.FAILED:
+            run.status = RunStatus.FAILED
+        elif job.status == JobStatus.CANCELED:
+            run.status = RunStatus.CANCELED
+        else:
+            run.status = RunStatus.RUNNING
+        if run.status in (RunStatus.PASSED, RunStatus.FAILED, RunStatus.CANCELED):
+            run.end_at = datetime.utcnow()
+        _update_run_execution_summary(run, case_runs=case_runs, workspace=str(output.workspace))
+        if run.status in (RunStatus.PASSED, RunStatus.FAILED, RunStatus.CANCELED):
+            try:
+                await dispatch_run_terminal_notification(db, run=run)
+            except Exception:
+                pass
+    except Exception as exc:
+        now = datetime.utcnow()
+        error_message = str(exc).strip()[:2000] or "inline_execution_failed"
+        for case_run in case_runs:
+            if case_run.status in (CaseRunStatus.QUEUED, CaseRunStatus.RUNNING):
+                case_run.status = CaseRunStatus.FAILED
+                case_run.end_at = now
+                case_run.error_type = "RUNNER_ERROR"
+                case_run.error_message = error_message
+        job.status = JobStatus.FAILED
+        job.end_at = now
+        meta_json["executor"] = "INLINE_PYTEST_ALLURE"
+        meta_json["inlineError"] = error_message
+        job.meta_json = meta_json
+        run.status = RunStatus.FAILED
+        run.end_at = now
+        _update_run_execution_summary(run, case_runs=case_runs)
+        try:
+            await dispatch_run_terminal_notification(db, run=run)
+        except Exception:
+            pass
+    await db.flush()
+
+
+async def _resolve_http_run_env(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project: Project,
+    env_id: uuid.UUID | None,
+) -> Environment | None:
+    if env_id is not None:
+        env = await db.scalar(select(Environment).where(Environment.id == env_id, Environment.tenant_id == user.tenant_id))
+        if env is None:
+            raise HTTPException(status_code=404, detail="Environment not found")
+        if env.project_id != project.id:
+            raise HTTPException(status_code=400, detail="Environment not in this project")
+        return env
+    return await db.scalar(
+        select(Environment)
+        .where(Environment.tenant_id == user.tenant_id, Environment.project_id == project.id)
+        .order_by(Environment.created_at.asc())
+        .limit(1)
+    )
+
+
+async def _get_or_create_direct_suite(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project: Project,
+) -> Suite:
+    suite_source = "TESTCASE_DIRECT"
+    suite_name = "批量运行"
+    legacy_suite_name = "__TESTCASE_DIRECT__"
+
+    suite = await db.scalar(
+        select(Suite)
+        .where(
+            Suite.tenant_id == user.tenant_id,
+            Suite.project_id == project.id,
+            Suite.name == suite_name,
+            Suite.config_json["source"].astext == suite_source,
+        )
+        .order_by(Suite.created_at.asc())
+    )
+    if suite is not None:
+        return suite
+
+    legacy_suites = (
+        await db.execute(
+            select(Suite)
+            .where(
+                Suite.tenant_id == user.tenant_id,
+                Suite.project_id == project.id,
+                Suite.name == legacy_suite_name,
+                Suite.config_json["source"].astext == suite_source,
+            )
+            .order_by(Suite.created_at.asc())
+        )
+    ).scalars().all()
+    if legacy_suites:
+        for s in legacy_suites:
+            s.name = suite_name
+            cfg = dict(s.config_json or {})
+            if cfg.get("source") != suite_source:
+                cfg["source"] = suite_source
+                s.config_json = cfg
+        await db.flush()
+        return legacy_suites[0]
+
+    suite = Suite(
+        tenant_id=user.tenant_id,
+        project_id=project.id,
+        name=suite_name,
+        config_json={"source": suite_source},
+        created_by=user.id,
+    )
+    db.add(suite)
+    await db.flush()
+    return suite
+
+
+async def _get_existing_idempotent_run(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+    idempotency_key: str,
+    payload_sig: str,
+) -> Run | None:
+    run = await db.scalar(
+        select(Run).where(
+            Run.tenant_id == user.tenant_id,
+            Run.project_id == project_id,
+            Run.idempotency_key == idempotency_key,
+        )
+    )
+    if run is None:
+        return None
+    existing_sig = ((run.summary_json or {}).get("idempotency") or {}).get("sig")
+    if existing_sig and existing_sig != payload_sig:
+        raise HTTPException(status_code=409, detail="Idempotency-Key reused with different payload")
+    return run
+
+
+async def create_run(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+    suite_id: uuid.UUID,
+    env_id: uuid.UUID,
+    trigger_type: TriggerType,
+    meta: dict[str, object],
+    notify_rule_id: str | None,
+    idempotency_key: str | None,
+) -> Run:
+    runner_type = _resolve_runner_type(meta)
+    project = await _get_project(db, user=user, project_id=project_id)
+    await _require_project_write(db, user=user, project=project)
+
+    suite = await db.scalar(select(Suite).where(Suite.id == suite_id, Suite.tenant_id == user.tenant_id))
+    if suite is None:
+        raise HTTPException(status_code=404, detail="Suite not found")
+    if suite.project_id != project.id:
+        raise HTTPException(status_code=400, detail="Suite not in this project")
+
+    env = await db.scalar(select(Environment).where(Environment.id == env_id, Environment.tenant_id == user.tenant_id))
+    if env is None:
+        raise HTTPException(status_code=404, detail="Environment not found")
+    if env.project_id != project.id:
+        raise HTTPException(status_code=400, detail="Environment not in this project")
+
+    suite_items = (
+        await db.execute(
+            select(SuiteItem).where(SuiteItem.tenant_id == user.tenant_id, SuiteItem.suite_id == suite.id).order_by(
+                SuiteItem.order_no.asc()
+            )
+        )
+    ).scalars()
+    suite_items_list = list(suite_items.all())
+    if not suite_items_list:
+        raise HTTPException(status_code=400, detail="Suite has no items")
+
+    payload_for_sig: dict[str, object] = {
+        "projectId": str(project_id),
+        "suiteId": str(suite_id),
+        "envId": str(env_id),
+        "triggerType": trigger_type.value,
+        "meta": meta or {},
+        "notifyRuleId": notify_rule_id,
+    }
+    payload_sig = _stable_payload_sig(payload_for_sig)
+    if idempotency_key:
+        existing = await _get_existing_idempotent_run(
+            db,
+            user=user,
+            project_id=project_id,
+            idempotency_key=idempotency_key,
+            payload_sig=payload_sig,
+        )
+        if existing is not None:
+            return existing
+
+    suite_snapshot_items = [
+        {"orderNo": int(i.order_no), "testcaseId": str(i.testcase_id), "params": dict(i.params_json or {})}
+        for i in suite_items_list
+    ]
+
+    run_summary = {
+        "meta": dict(meta or {}),
+        "runnerType": runner_type,
+        "notifyRuleId": notify_rule_id,
+        "suiteSnapshot": {
+            "suiteId": str(suite.id),
+            "name": suite.name,
+            "config": dict(suite.config_json or {}),
+            "items": suite_snapshot_items,
+        },
+    }
+    if idempotency_key:
+        run_summary["idempotency"] = {"key": idempotency_key, "sig": payload_sig}
+
+    run = Run(
+        tenant_id=user.tenant_id,
+        project_id=project.id,
+        suite_id=suite.id,
+        env_id=env.id,
+        trigger_type=trigger_type,
+        status=RunStatus.QUEUED,
+        start_at=datetime.utcnow(),
+        summary_json=run_summary,
+        idempotency_key=idempotency_key,
+        created_by=user.id,
+    )
+    db.add(run)
+    try:
+        await db.flush()
+    except IntegrityError:
+        if not idempotency_key:
+            raise
+        await db.rollback()
+        existing = await _get_existing_idempotent_run(
+            db,
+            user=user,
+            project_id=project_id,
+            idempotency_key=idempotency_key,
+            payload_sig=payload_sig,
+        )
+        if existing is None:
+            raise
+        return existing
+
+    case_runs: list[CaseRun] = []
+    for item in suite_items_list:
+        case_run = CaseRun(
+            tenant_id=user.tenant_id,
+            run_id=run.id,
+            testcase_id=item.testcase_id,
+            status=CaseRunStatus.QUEUED,
+        )
+        db.add(case_run)
+        case_runs.append(case_run)
+
+    await db.flush()
+
+    testcase_ids = [cr.testcase_id for cr in case_runs]
+    testcase_types = {
+        r[0]: r[1]
+        for r in (
+            await db.execute(
+                select(TestCase.id, TestCase.type).where(TestCase.tenant_id == user.tenant_id, TestCase.id.in_(testcase_ids))
+            )
+        ).all()
+    }
+
+    items_for_job = []
+    for suite_item, case_run in zip(suite_items_list, case_runs, strict=True):
+        items_for_job.append(
+            {
+                "caseRunId": str(case_run.id),
+                "testcaseId": str(case_run.testcase_id),
+                "type": testcase_types.get(case_run.testcase_id).value if testcase_types.get(case_run.testcase_id) else None,
+                "params": dict(suite_item.params_json or {}),
+                "orderNo": int(suite_item.order_no),
+            }
+        )
+
+    job = Job(
+        tenant_id=user.tenant_id,
+        run_id=run.id,
+        status=JobStatus.QUEUED,
+        meta_json={
+            "projectId": str(project.id),
+            "suiteId": str(suite.id),
+            "envId": str(env.id),
+            "triggerType": trigger_type.value,
+            "meta": dict(meta or {}),
+            "runnerType": runner_type,
+            "notifyRuleId": notify_rule_id,
+            "suiteConfig": dict(suite.config_json or {}),
+            "items": items_for_job,
+        },
+    )
+    db.add(job)
+    await db.flush()
+    await create_audit_log(
+        db,
+        user=user,
+        project_id=project.id,
+        module="RUN",
+        action="CREATE_RUN",
+        resource_type="run",
+        resource_id=str(run.id),
+        summary="Create run from suite",
+        detail={
+            "triggerType": trigger_type.value,
+            "suiteId": str(suite.id),
+            "envId": str(env.id),
+            "runnerType": runner_type,
+            "caseCount": len(case_runs),
+            "notifyRuleId": notify_rule_id,
+            "meta": dict(meta or {}),
+        },
+    )
+    return run
+
+
+async def create_run_from_testcases(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+    env_id: uuid.UUID,
+    trigger_type: TriggerType,
+    meta: dict[str, object],
+    concurrency: int,
+    stop_on_failure: bool,
+    items: list[dict[str, object]],
+    notify_rule_id: str | None,
+    idempotency_key: str | None,
+) -> Run:
+    runner_type = _resolve_runner_type(meta)
+    project = await _get_project(db, user=user, project_id=project_id)
+    await _require_project_write(db, user=user, project=project)
+    env = await db.scalar(select(Environment).where(Environment.id == env_id, Environment.tenant_id == user.tenant_id))
+    if env is None:
+        raise HTTPException(status_code=404, detail="Environment not found")
+    if env.project_id != project.id:
+        raise HTTPException(status_code=400, detail="Environment not in this project")
+    if not items:
+        raise HTTPException(status_code=400, detail="items_required")
+
+    dedupe_pairs: set[tuple[str, str]] = set()
+    testcase_ids: list[uuid.UUID] = []
+    binding_ids: list[uuid.UUID] = []
+    normalized_items: list[dict[str, object]] = []
+    for row in items:
+        testcase_id = uuid.UUID(str(row["testcaseId"]))
+        binding_id = uuid.UUID(str(row["bindingId"]))
+        pair = (str(testcase_id), str(binding_id))
+        if pair in dedupe_pairs:
+            raise HTTPException(status_code=400, detail="duplicate_items_in_request")
+        dedupe_pairs.add(pair)
+        testcase_ids.append(testcase_id)
+        binding_ids.append(binding_id)
+        normalized_items.append(
+            {
+                "testcaseId": testcase_id,
+                "bindingId": binding_id,
+                "overrideParams": dict(row.get("overrideParams") or {}),
+            }
+        )
+
+    testcase_rows = (
+        await db.execute(
+            select(TestCase.id, TestCase.project_id, TestCase.type).where(
+                TestCase.tenant_id == user.tenant_id, TestCase.id.in_(set(testcase_ids))
+            )
+        )
+    ).all()
+    testcase_map = {r[0]: {"project_id": r[1], "type": r[2]} for r in testcase_rows}
+    if len(testcase_map) != len(set(testcase_ids)):
+        raise HTTPException(status_code=404, detail="TestCase not found")
+    if any(v["project_id"] != project.id for v in testcase_map.values()):
+        raise HTTPException(status_code=400, detail="testcase_not_in_project")
+
+    binding_rows = (
+        await db.execute(
+            select(TestcaseBinding).where(
+                TestcaseBinding.tenant_id == user.tenant_id,
+                TestcaseBinding.id.in_(set(binding_ids)),
+            )
+        )
+    ).scalars()
+    binding_map = {b.id: b for b in binding_rows.all()}
+    if len(binding_map) != len(set(binding_ids)):
+        raise HTTPException(status_code=404, detail="binding_not_found")
+
+    for row in normalized_items:
+        testcase_id = row["testcaseId"]
+        binding = binding_map[row["bindingId"]]
+        if binding.project_id != project.id:
+            raise HTTPException(status_code=400, detail="binding_not_in_project")
+        if binding.testcase_id != testcase_id:
+            raise HTTPException(status_code=400, detail="binding_testcase_mismatch")
+        if not binding.enabled:
+            raise HTTPException(status_code=400, detail="binding_disabled")
+
+    payload_for_sig: dict[str, object] = {
+        "projectId": str(project_id),
+        "envId": str(env_id),
+        "triggerType": trigger_type.value,
+        "meta": meta or {},
+        "concurrency": concurrency,
+        "stopOnFailure": stop_on_failure,
+        "items": [
+            {
+                "testcaseId": str(item["testcaseId"]),
+                "bindingId": str(item["bindingId"]),
+                "overrideParams": dict(item["overrideParams"] or {}),
+            }
+            for item in normalized_items
+        ],
+        "notifyRuleId": notify_rule_id,
+    }
+    payload_sig = _stable_payload_sig(payload_for_sig)
+    if idempotency_key:
+        existing = await _get_existing_idempotent_run(
+            db,
+            user=user,
+            project_id=project.id,
+            idempotency_key=idempotency_key,
+            payload_sig=payload_sig,
+        )
+        if existing is not None:
+            return existing
+
+    suite = await _get_or_create_direct_suite(db, user=user, project=project)
+    suite_snapshot_items: list[dict[str, object]] = []
+    for order_no, row in enumerate(normalized_items, start=1):
+        binding = binding_map[row["bindingId"]]
+        override_params = dict(row["overrideParams"] or {})
+        merged_params = dict(binding.params_json or {})
+        merged_params.update(override_params)
+        suite_snapshot_items.append(
+            {
+                "orderNo": order_no,
+                "testcaseId": str(row["testcaseId"]),
+                "bindingId": str(binding.id),
+                "params": merged_params,
+            }
+        )
+
+    run_summary = {
+        "meta": dict(meta or {}),
+        "runnerType": runner_type,
+        "notifyRuleId": notify_rule_id,
+        "executionSource": "TESTCASE_DIRECT",
+        "stopOnFailure": stop_on_failure,
+        "concurrency": concurrency,
+        "suiteSnapshot": {
+            "suiteId": str(suite.id),
+            "name": suite.name,
+            "config": dict(suite.config_json or {}),
+            "items": suite_snapshot_items,
+        },
+    }
+    if idempotency_key:
+        run_summary["idempotency"] = {"key": idempotency_key, "sig": payload_sig}
+
+    run = Run(
+        tenant_id=user.tenant_id,
+        project_id=project.id,
+        suite_id=suite.id,
+        env_id=env.id,
+        trigger_type=trigger_type,
+        status=RunStatus.QUEUED,
+        start_at=datetime.utcnow(),
+        summary_json=run_summary,
+        idempotency_key=idempotency_key,
+        created_by=user.id,
+    )
+    db.add(run)
+    try:
+        await db.flush()
+    except IntegrityError:
+        if not idempotency_key:
+            raise
+        await db.rollback()
+        existing = await _get_existing_idempotent_run(
+            db,
+            user=user,
+            project_id=project.id,
+            idempotency_key=idempotency_key,
+            payload_sig=payload_sig,
+        )
+        if existing is None:
+            raise
+        return existing
+
+    case_runs: list[CaseRun] = []
+    for row in normalized_items:
+        case_run = CaseRun(
+            tenant_id=user.tenant_id,
+            run_id=run.id,
+            testcase_id=row["testcaseId"],
+            status=CaseRunStatus.QUEUED,
+        )
+        db.add(case_run)
+        case_runs.append(case_run)
+    await db.flush()
+
+    binding_snapshot_map: dict[str, dict[str, object]] = {}
+    items_for_job: list[dict[str, object]] = []
+    for order_no, row in enumerate(normalized_items, start=1):
+        testcase_id = row["testcaseId"]
+        binding = binding_map[row["bindingId"]]
+        override_params = dict(row["overrideParams"] or {})
+        merged_params = dict(binding.params_json or {})
+        merged_params.update(override_params)
+        case_run = case_runs[order_no - 1]
+        binding_snapshot = {
+            "bindingId": str(binding.id),
+            "name": binding.name,
+            "datasetId": str(binding.dataset_id) if binding.dataset_id else None,
+            "apiTargetId": str(binding.api_target_id) if binding.api_target_id else None,
+            "params": dict(binding.params_json or {}),
+            "priority": binding.priority,
+            "enabled": binding.enabled,
+            "version": binding.version,
+        }
+        binding_snapshot_map[str(case_run.id)] = binding_snapshot
+        items_for_job.append(
+            {
+                "caseRunId": str(case_run.id),
+                "testcaseId": str(testcase_id),
+                "bindingId": str(binding.id),
+                "type": testcase_map[testcase_id]["type"].value if testcase_map[testcase_id]["type"] else None,
+                "params": merged_params,
+                "orderNo": order_no,
+            }
+        )
+
+    run.summary_json = {**dict(run.summary_json or {}), "bindingSnapshots": binding_snapshot_map}
+
+    job = Job(
+        tenant_id=user.tenant_id,
+        run_id=run.id,
+        status=JobStatus.QUEUED,
+        meta_json={
+            "projectId": str(project.id),
+            "suiteId": str(suite.id),
+            "envId": str(env.id),
+            "triggerType": trigger_type.value,
+            "meta": dict(meta or {}),
+            "runnerType": runner_type,
+            "notifyRuleId": notify_rule_id,
+            "executionSource": "TESTCASE_DIRECT",
+            "stopOnFailure": stop_on_failure,
+            "concurrency": concurrency,
+            "suiteConfig": dict(suite.config_json or {}),
+            "items": items_for_job,
+        },
+    )
+    db.add(job)
+    await db.flush()
+    await create_audit_log(
+        db,
+        user=user,
+        project_id=project.id,
+        module="RUN",
+        action="CREATE_RUN_FROM_TESTCASES",
+        resource_type="run",
+        resource_id=str(run.id),
+        summary="Create run from testcase bindings",
+        detail={
+            "triggerType": trigger_type.value,
+            "suiteId": str(suite.id),
+            "envId": str(env.id),
+            "runnerType": runner_type,
+            "caseCount": len(case_runs),
+            "concurrency": concurrency,
+            "stopOnFailure": stop_on_failure,
+            "notifyRuleId": notify_rule_id,
+            "meta": dict(meta or {}),
+        },
+    )
+    return run
+
+
+async def create_run_from_testcases_http(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+    env_id: uuid.UUID | None,
+    trigger_type: TriggerType,
+    meta: dict[str, object],
+    concurrency: int,
+    stop_on_failure: bool,
+    items: list[dict[str, object]],
+    notify_rule_id: str | None,
+    idempotency_key: str | None,
+) -> Run:
+    runner_type = _resolve_runner_type(meta)
+    project = await _get_project(db, user=user, project_id=project_id)
+    await _require_project_write(db, user=user, project=project)
+    env = await _resolve_http_run_env(db, user=user, project=project, env_id=env_id)
+    if not items:
+        raise HTTPException(status_code=400, detail="items_required")
+
+    dedupe_ids: set[str] = set()
+    testcase_ids: list[uuid.UUID] = []
+    normalized_items: list[dict[str, object]] = []
+    for row in items:
+        testcase_id = uuid.UUID(str(row["testcaseId"]))
+        testcase_key = str(testcase_id)
+        if testcase_key in dedupe_ids:
+            raise HTTPException(status_code=400, detail="duplicate_testcase_in_request")
+        dedupe_ids.add(testcase_key)
+        testcase_ids.append(testcase_id)
+        normalized_items.append(
+            {
+                "testcaseId": testcase_id,
+                "overrideParams": dict(row.get("overrideParams") or {}),
+            }
+        )
+
+    testcase_rows = (
+        await db.execute(
+            select(
+                TestCase.id,
+                TestCase.project_id,
+                TestCase.test_case_id,
+                TestCase.type,
+                TestCase.api_method,
+                TestCase.api_url,
+                TestCase.ai_meta_json,
+                TestCase.content_md,
+            ).where(TestCase.tenant_id == user.tenant_id, TestCase.id.in_(set(testcase_ids)))
+        )
+    ).all()
+    testcase_map = {
+        r[0]: {
+            "project_id": r[1],
+            "test_case_id": r[2],
+            "type": r[3],
+            "api_method": r[4],
+            "api_url": r[5],
+            "api_params": _extract_testcase_api_params(r[6]),
+            "api_headers": _extract_testcase_api_headers(r[6]),
+            "expected_result": _extract_testcase_expected_result(r[6]),
+            "expected_status_code": _extract_testcase_expected_status_code(r[6]),
+            "preconditions": _extract_testcase_preconditions(r[6]),
+            "postconditions": _extract_testcase_postconditions(r[6]),
+            "content_md": r[7],
+        }
+        for r in testcase_rows
+    }
+    if len(testcase_map) != len(set(testcase_ids)):
+        raise HTTPException(status_code=404, detail="TestCase not found")
+    if any(v["project_id"] != project.id for v in testcase_map.values()):
+        raise HTTPException(status_code=400, detail="testcase_not_in_project")
+
+    suite = await _get_or_create_direct_suite(db, user=user, project=project)
+    suite_snapshot_items: list[dict[str, object]] = []
+    for order_no, row in enumerate(normalized_items, start=1):
+        testcase_id = row["testcaseId"]
+        testcase_item = testcase_map[testcase_id]
+        api_method = str(testcase_item["api_method"] or "").strip().upper()
+        api_url = str(testcase_item["api_url"] or "").strip()
+        if not api_method or not api_url:
+            raise HTTPException(status_code=400, detail=f"testcase_api_missing:{testcase_id}")
+        merged_params = dict(testcase_item["api_params"] or {})
+        merged_params.update(dict(row["overrideParams"] or {}))
+        merged_headers = dict(testcase_item["api_headers"] or {})
+        suite_snapshot_items.append(
+            {
+                "orderNo": order_no,
+                "testcaseId": str(testcase_id),
+                "testCaseId": testcase_item["test_case_id"],
+                "apiMethod": api_method,
+                "apiUrl": api_url,
+                "params": merged_params,
+                "headers": merged_headers,
+                "expectedResult": testcase_item["expected_result"],
+                "expectedStatusCode": testcase_item["expected_status_code"],
+                "preconditions": testcase_item["preconditions"],
+                "postconditions": testcase_item["postconditions"],
+            }
+        )
+
+    payload_for_sig: dict[str, object] = {
+        "projectId": str(project_id),
+        "envId": str(env.id) if env else None,
+        "triggerType": trigger_type.value,
+        "meta": meta or {},
+        "concurrency": concurrency,
+        "stopOnFailure": stop_on_failure,
+        "items": [
+            {
+                "testcaseId": str(item["testcaseId"]),
+                "overrideParams": dict(item["overrideParams"] or {}),
+            }
+            for item in normalized_items
+        ],
+        "notifyRuleId": notify_rule_id,
+    }
+    payload_sig = _stable_payload_sig(payload_for_sig)
+    if idempotency_key:
+        existing = await _get_existing_idempotent_run(
+            db,
+            user=user,
+            project_id=project.id,
+            idempotency_key=idempotency_key,
+            payload_sig=payload_sig,
+        )
+        if existing is not None:
+            return existing
+
+    run_summary = {
+        "meta": dict(meta or {}),
+        "runnerType": runner_type,
+        "notifyRuleId": notify_rule_id,
+        "executionSource": "TESTCASE_HTTP_DIRECT",
+        "stopOnFailure": stop_on_failure,
+        "concurrency": concurrency,
+        "suiteSnapshot": {
+            "suiteId": str(suite.id),
+            "name": suite.name,
+            "config": dict(suite.config_json or {}),
+            "items": suite_snapshot_items,
+        },
+    }
+    if env is not None:
+        run_summary["envId"] = str(env.id)
+    if idempotency_key:
+        run_summary["idempotency"] = {"key": idempotency_key, "sig": payload_sig}
+
+    run = Run(
+        tenant_id=user.tenant_id,
+        project_id=project.id,
+        suite_id=suite.id,
+        env_id=env.id if env else None,
+        trigger_type=trigger_type,
+        status=RunStatus.QUEUED,
+        start_at=datetime.utcnow(),
+        summary_json=run_summary,
+        idempotency_key=idempotency_key,
+        created_by=user.id,
+    )
+    db.add(run)
+    try:
+        await db.flush()
+    except IntegrityError:
+        if not idempotency_key:
+            raise
+        await db.rollback()
+        existing = await _get_existing_idempotent_run(
+            db,
+            user=user,
+            project_id=project.id,
+            idempotency_key=idempotency_key,
+            payload_sig=payload_sig,
+        )
+        if existing is None:
+            raise
+        return existing
+
+    case_runs: list[CaseRun] = []
+    for row in normalized_items:
+        case_run = CaseRun(
+            tenant_id=user.tenant_id,
+            run_id=run.id,
+            testcase_id=row["testcaseId"],
+            status=CaseRunStatus.QUEUED,
+        )
+        db.add(case_run)
+        case_runs.append(case_run)
+    await db.flush()
+
+    items_for_job: list[dict[str, object]] = []
+    for order_no, row in enumerate(normalized_items, start=1):
+        testcase_id = row["testcaseId"]
+        testcase_item = testcase_map[testcase_id]
+        api_method = str(testcase_item["api_method"] or "").strip().upper()
+        api_url = str(testcase_item["api_url"] or "").strip()
+        merged_params = dict(testcase_item["api_params"] or {})
+        merged_params.update(dict(row["overrideParams"] or {}))
+        merged_headers = dict(testcase_item["api_headers"] or {})
+        case_run = case_runs[order_no - 1]
+        items_for_job.append(
+            {
+                "caseRunId": str(case_run.id),
+                "testcaseId": str(testcase_id),
+                "testCaseId": testcase_item["test_case_id"],
+                "type": testcase_item["type"].value if testcase_item["type"] else None,
+                "apiMethod": api_method,
+                "apiUrl": api_url,
+                "params": merged_params,
+                "headers": merged_headers,
+                "expectedResult": testcase_item["expected_result"],
+                "expectedStatusCode": testcase_item["expected_status_code"],
+                "preconditions": testcase_item["preconditions"],
+                "postconditions": testcase_item["postconditions"],
+                "orderNo": order_no,
+            }
+        )
+
+    job = Job(
+        tenant_id=user.tenant_id,
+        run_id=run.id,
+        status=JobStatus.QUEUED,
+        meta_json={
+            "projectId": str(project.id),
+            "suiteId": str(suite.id),
+            "envId": str(env.id) if env else None,
+            "triggerType": trigger_type.value,
+            "meta": dict(meta or {}),
+            "runnerType": runner_type,
+            "notifyRuleId": notify_rule_id,
+            "executionSource": "TESTCASE_HTTP_DIRECT",
+            "stopOnFailure": stop_on_failure,
+            "concurrency": concurrency,
+            "suiteConfig": dict(suite.config_json or {}),
+            "items": items_for_job,
+        },
+    )
+    db.add(job)
+    await db.flush()
+    if runner_type == _RUNNER_TYPE_PYTEST_ALLURE:
+        await _execute_inline_pytest_allure_job(
+            db,
+            user=user,
+            run=run,
+            job=job,
+            env=env,
+            case_runs=case_runs,
+            testcase_map=testcase_map,
+            items_for_job=items_for_job,
+            runner_type=runner_type,
+        )
+    await create_audit_log(
+        db,
+        user=user,
+        project_id=project.id,
+        module="RUN",
+        action="CREATE_RUN_FROM_TESTCASES_HTTP",
+        resource_type="run",
+        resource_id=str(run.id),
+        summary="Create HTTP run from testcases",
+        detail={
+            "triggerType": trigger_type.value,
+            "suiteId": str(suite.id),
+            "envId": str(env.id) if env else None,
+            "runnerType": runner_type,
+            "caseCount": len(case_runs),
+            "concurrency": concurrency,
+            "stopOnFailure": stop_on_failure,
+            "notifyRuleId": notify_rule_id,
+            "meta": dict(meta or {}),
+        },
+    )
+    return run
+
+
+async def create_run_via_ci_token(
+    db: AsyncSession,
+    *,
+    project_id: uuid.UUID,
+    ci_token: str,
+    env_id: uuid.UUID | None,
+    meta: dict[str, object],
+    concurrency: int,
+    stop_on_failure: bool,
+    items: list[dict[str, object]],
+    notify_rule_id: str | None,
+    idempotency_key: str | None,
+) -> Run:
+    raw_token = str(ci_token or "").strip()
+    if not raw_token:
+        raise HTTPException(status_code=401, detail="Invalid CI token")
+    hashed = _hash_ci_token(raw_token)
+    token_record = await db.scalar(select(ProjectCiToken).where(ProjectCiToken.token_hash == hashed))
+    if token_record is not None:
+        project = await db.scalar(
+            select(Project).where(
+                Project.id == project_id,
+                Project.id == token_record.project_id,
+                Project.tenant_id == token_record.tenant_id,
+            )
+        )
+        if project is None:
+            raise HTTPException(status_code=401, detail="Invalid CI token")
+        ci_user = CurrentUser(
+            id=project.owner_id,
+            tenant_id=project.tenant_id,
+            roles=frozenset(),
+        )
+        await _enforce_ci_token_record_policy(db, project=project, token=token_record, user=ci_user, meta=meta, items=items)
+        run = await create_run_from_testcases_http(
+            db,
+            user=ci_user,
+            project_id=project_id,
+            env_id=env_id,
+            trigger_type=TriggerType.CI,
+            meta=meta,
+            concurrency=concurrency,
+            stop_on_failure=stop_on_failure,
+            items=items,
+            notify_rule_id=notify_rule_id,
+            idempotency_key=idempotency_key,
+        )
+        now = datetime.utcnow()
+        token_record.last_used_at = now
+        if token_record.is_primary:
+            project.ci_token_last_used_at = now
+        await db.flush()
+        await create_audit_log(
+            db,
+            user=ci_user,
+            project_id=project.id,
+            module="RUN",
+            action="CI_TRIGGER_RUN",
+            resource_type="run",
+            resource_id=str(run.id),
+            summary="Create run via named CI token",
+            detail={
+                "triggerType": TriggerType.CI.value,
+                "ciTokenId": str(token_record.id),
+                "ciTokenName": token_record.name,
+                "ciTokenHint": token_record.token_hint,
+                "projectId": str(project.id),
+                "meta": dict(meta or {}),
+            },
+        )
+        return run
+
+    project = await db.scalar(
+        select(Project).where(
+            Project.id == project_id,
+            Project.ci_token_hash.is_not(None),
+            Project.ci_token_hash == hashed,
+        )
+    )
+    if project is None:
+        raise HTTPException(status_code=401, detail="Invalid CI token")
+
+    ci_user = CurrentUser(
+        id=project.owner_id,
+        tenant_id=project.tenant_id,
+        roles=frozenset(),
+    )
+    await _enforce_ci_token_policy(db, project=project, user=ci_user, meta=meta, items=items)
+    run = await create_run_from_testcases_http(
+        db,
+        user=ci_user,
+        project_id=project_id,
+        env_id=env_id,
+        trigger_type=TriggerType.CI,
+        meta=meta,
+        concurrency=concurrency,
+        stop_on_failure=stop_on_failure,
+        items=items,
+        notify_rule_id=notify_rule_id,
+        idempotency_key=idempotency_key,
+    )
+    project.ci_token_last_used_at = datetime.utcnow()
+    await db.flush()
+    await create_audit_log(
+        db,
+        user=ci_user,
+        project_id=project.id,
+        module="RUN",
+        action="CI_TRIGGER_RUN",
+        resource_type="run",
+        resource_id=str(run.id),
+        summary="Create run via CI token",
+        detail={
+            "triggerType": TriggerType.CI.value,
+            "ciTokenHint": project.ci_token_hint,
+            "projectId": str(project.id),
+            "meta": dict(meta or {}),
+        },
+    )
+    return run
+
+
+async def list_runs(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID | None,
+    status: RunStatus | None,
+    from_ts: int | None,
+    to_ts: int | None,
+    page: int,
+    page_size: int,
+) -> tuple[int, list[tuple[Run, int, int, int, int, int]]]:
+    if project_id is not None:
+        project = await _get_project(db, user=user, project_id=project_id)
+        await _require_project_read(db, user=user, project=project)
+
+    done_subq = (
+        select(func.count(CaseRun.id))
+        .where(
+            CaseRun.run_id == Run.id,
+            CaseRun.status.in_((CaseRunStatus.PASSED, CaseRunStatus.FAILED, CaseRunStatus.SKIPPED)),
+        )
+        .correlate(Run)
+        .scalar_subquery()
+    )
+    passed_subq = (
+        select(func.count(CaseRun.id))
+        .where(CaseRun.run_id == Run.id, CaseRun.status == CaseRunStatus.PASSED)
+        .correlate(Run)
+        .scalar_subquery()
+    )
+    failed_subq = (
+        select(func.count(CaseRun.id))
+        .where(CaseRun.run_id == Run.id, CaseRun.status == CaseRunStatus.FAILED)
+        .correlate(Run)
+        .scalar_subquery()
+    )
+    skipped_subq = (
+        select(func.count(CaseRun.id))
+        .where(CaseRun.run_id == Run.id, CaseRun.status == CaseRunStatus.SKIPPED)
+        .correlate(Run)
+        .scalar_subquery()
+    )
+    total_subq = (
+        select(func.count(CaseRun.id))
+        .where(CaseRun.run_id == Run.id)
+        .correlate(Run)
+        .scalar_subquery()
+    )
+
+    stmt = (
+        select(
+            Run,
+            done_subq.label("done"),
+            total_subq.label("total"),
+            passed_subq.label("passed"),
+            failed_subq.label("failed"),
+            skipped_subq.label("skipped"),
+        )
+        .join(Project, Run.project_id == Project.id)
+        .outerjoin(
+            ProjectMember,
+            and_(
+                ProjectMember.project_id == Project.id,
+                ProjectMember.user_id == user.id,
+                ProjectMember.tenant_id == user.tenant_id,
+            ),
+        )
+        .where(Run.tenant_id == user.tenant_id)
+    )
+    if not _is_admin(user):
+        stmt = stmt.where(
+            or_(
+                Project.owner_id == user.id,
+                ProjectMember.role.in_((ProjectRole.ADMIN, ProjectRole.OWNER, ProjectRole.EDITOR, ProjectRole.VIEWER)),
+            )
+        )
+    if project_id is not None:
+        stmt = stmt.where(Run.project_id == project_id)
+    if status is not None:
+        stmt = stmt.where(Run.status == status)
+    if from_ts is not None:
+        stmt = stmt.where(Run.start_at >= datetime.utcfromtimestamp(from_ts))
+    if to_ts is not None:
+        stmt = stmt.where(Run.start_at <= datetime.utcfromtimestamp(to_ts))
+
+    total = int((await db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one() or 0)
+
+    rows = (
+        await db.execute(
+            stmt.order_by(Run.start_at.desc().nullslast(), Run.created_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+    ).all()
+    items: list[tuple[Run, int, int, int, int, int]] = [
+        (r[0], int(r[1] or 0), int(r[2] or 0), int(r[3] or 0), int(r[4] or 0), int(r[5] or 0)) for r in rows
+    ]
+    return total, items
+
+
+async def get_run(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    run_id: uuid.UUID,
+) -> tuple[Run, int, int, int, int, int]:
+    run = await db.scalar(select(Run).where(Run.id == run_id, Run.tenant_id == user.tenant_id))
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    project = await _get_project(db, user=user, project_id=run.project_id)
+    await _require_project_read(db, user=user, project=project)
+
+    total = int(
+        (await db.execute(select(func.count(CaseRun.id)).where(CaseRun.run_id == run.id, CaseRun.tenant_id == user.tenant_id))).scalar_one()
+        or 0
+    )
+    grouped = (
+        await db.execute(
+            select(CaseRun.status, func.count(CaseRun.id))
+            .where(CaseRun.run_id == run.id, CaseRun.tenant_id == user.tenant_id)
+            .group_by(CaseRun.status)
+        )
+    ).all()
+    counts = {status: int(cnt or 0) for status, cnt in grouped}
+    passed = int(counts.get(CaseRunStatus.PASSED, 0))
+    failed = int(counts.get(CaseRunStatus.FAILED, 0))
+    skipped = int(counts.get(CaseRunStatus.SKIPPED, 0))
+    done = passed + failed + skipped
+    return run, done, total, passed, failed, skipped
+
+
+async def list_case_runs(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    run_id: uuid.UUID,
+    status: CaseRunStatus | None,
+    page: int,
+    page_size: int,
+) -> tuple[Run, int, list[CaseRun]]:
+    run = await db.scalar(select(Run).where(Run.id == run_id, Run.tenant_id == user.tenant_id))
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    project = await _get_project(db, user=user, project_id=run.project_id)
+    await _require_project_read(db, user=user, project=project)
+
+    stmt = select(CaseRun).where(CaseRun.tenant_id == user.tenant_id, CaseRun.run_id == run.id)
+    if status is not None:
+        stmt = stmt.where(CaseRun.status == status)
+
+    total = int((await db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one() or 0)
+    rows = (
+        await db.execute(
+            stmt.order_by(CaseRun.created_at.asc()).offset((page - 1) * page_size).limit(page_size)
+        )
+    ).scalars()
+    return run, total, list(rows.all())
+
+
+async def cancel_run(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    run_id: uuid.UUID,
+) -> Run:
+    run = await db.scalar(select(Run).where(Run.id == run_id, Run.tenant_id == user.tenant_id))
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    project = await _get_project(db, user=user, project_id=run.project_id)
+    await _require_project_write(db, user=user, project=project)
+
+    if run.status not in (RunStatus.QUEUED, RunStatus.RUNNING):
+        raise HTTPException(status_code=400, detail="Run cannot be canceled")
+
+    run.status = RunStatus.CANCELED
+    run.end_at = datetime.utcnow()
+
+    await db.execute(
+        update(Job)
+        .where(Job.tenant_id == user.tenant_id, Job.run_id == run.id, Job.status.in_((JobStatus.QUEUED, JobStatus.RUNNING)))
+        .values(status=JobStatus.CANCELED, end_at=datetime.utcnow())
+    )
+    await db.execute(
+        update(CaseRun)
+        .where(
+            CaseRun.tenant_id == user.tenant_id,
+            CaseRun.run_id == run.id,
+            CaseRun.status.in_((CaseRunStatus.QUEUED, CaseRunStatus.RUNNING)),
+        )
+        .values(status=CaseRunStatus.SKIPPED, end_at=datetime.utcnow())
+    )
+    try:
+        await dispatch_run_terminal_notification(db, run=run)
+    except Exception:
+        pass
+    await create_audit_log(
+        db,
+        user=user,
+        project_id=project.id,
+        module="RUN",
+        action="CANCEL_RUN",
+        resource_type="run",
+        resource_id=str(run.id),
+        summary="Cancel run",
+        detail={"status": run.status.value},
+    )
+    await db.flush()
+    return run
+
+
+async def rotate_project_ci_token(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+    policy: dict[str, object] | None = None,
+    expires_at: datetime | None = None,
+) -> tuple[Project, str]:
+    project = await _get_project(db, user=user, project_id=project_id)
+    await _require_project_write(db, user=user, project=project)
+
+    now = datetime.utcnow()
+    token = f"ci_{secrets.token_urlsafe(24)}"
+    project.ci_token_hash = _hash_ci_token(token)
+    project.ci_token_hint = _build_ci_token_hint(token)
+    project.ci_token_rotated_at = now
+    project.ci_token_last_used_at = None
+    project.ci_token_rotated_by = user.id
+    project.ci_token_expires_at = expires_at
+    project.ci_token_revoked_at = None
+    project.ci_token_revoked_by = None
+    project.ci_token_revoked_reason = None
+    project.ci_token_leak_reported_at = None
+    project.ci_token_leak_reported_by = None
+    project.ci_token_leak_report_reason = None
+    policy_data = normalize_ci_token_policy(policy)
+    project.ci_token_allowed_runner_types = policy_data["allowedRunnerTypes"]
+    project.ci_token_allowed_testcase_ids = policy_data["allowedTestCaseIds"]
+    project.ci_token_max_testcase_count = policy_data["maxTestCaseCount"]
+    await db.flush()
+    await create_audit_log(
+        db,
+        user=user,
+        project_id=project.id,
+        module="RUN",
+        action="ROTATE_CI_TOKEN",
+        resource_type="project_ci_token",
+        resource_id=str(project.id),
+        summary="Rotate project CI token",
+        detail={"hint": project.ci_token_hint, "expiresAt": int(expires_at.timestamp()) if expires_at else None},
+    )
+    return project, token
+
+
+async def get_project_ci_token_status(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+) -> Project:
+    project = await _get_project(db, user=user, project_id=project_id)
+    await _require_project_read(db, user=user, project=project)
+    return project
+
+
+async def list_project_ci_token_records(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+) -> tuple[Project, list[ProjectCiToken]]:
+    project = await _get_project(db, user=user, project_id=project_id)
+    await _require_project_read(db, user=user, project=project)
+    tokens = (
+        await db.execute(
+            select(ProjectCiToken)
+            .where(ProjectCiToken.tenant_id == user.tenant_id, ProjectCiToken.project_id == project.id)
+            .order_by(ProjectCiToken.is_primary.desc(), ProjectCiToken.name.asc(), ProjectCiToken.created_at.asc())
+        )
+    ).scalars().all()
+    return project, list(tokens)
+
+
+async def rotate_project_ci_token_record(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+    name: str,
+    primary: bool = False,
+    policy: dict[str, object] | None = None,
+    expires_at: datetime | None = None,
+) -> tuple[ProjectCiToken, str]:
+    project = await _get_project(db, user=user, project_id=project_id)
+    await _require_project_write(db, user=user, project=project)
+
+    token_name = _normalize_ci_token_name(name)
+    now = datetime.utcnow()
+    raw_token = f"ci_{secrets.token_urlsafe(24)}"
+    policy_data = normalize_ci_token_policy(policy)
+    record = await db.scalar(
+        select(ProjectCiToken).where(
+            ProjectCiToken.tenant_id == user.tenant_id,
+            ProjectCiToken.project_id == project.id,
+            ProjectCiToken.name == token_name,
+        )
+    )
+    if record is None:
+        record = ProjectCiToken(
+            tenant_id=project.tenant_id,
+            project_id=project.id,
+            name=token_name,
+            token_hash=_hash_ci_token(raw_token),
+            token_hint=_build_ci_token_hint(raw_token),
+            is_primary=bool(primary),
+            rotated_at=now,
+            rotated_by=user.id,
+            expires_at=expires_at,
+            allowed_runner_types=policy_data["allowedRunnerTypes"],
+            allowed_testcase_ids=policy_data["allowedTestCaseIds"],
+            max_testcase_count=policy_data["maxTestCaseCount"],
+        )
+        db.add(record)
+    else:
+        record.token_hash = _hash_ci_token(raw_token)
+        record.token_hint = _build_ci_token_hint(raw_token)
+        record.is_primary = bool(primary or record.is_primary)
+        record.rotated_at = now
+        record.last_used_at = None
+        record.rotated_by = user.id
+        record.expires_at = expires_at
+        record.revoked_at = None
+        record.revoked_by = None
+        record.revoked_reason = None
+        record.leak_reported_at = None
+        record.leak_reported_by = None
+        record.leak_report_reason = None
+        record.allowed_runner_types = policy_data["allowedRunnerTypes"]
+        record.allowed_testcase_ids = policy_data["allowedTestCaseIds"]
+        record.max_testcase_count = policy_data["maxTestCaseCount"]
+
+    if record.is_primary:
+        await db.execute(
+            update(ProjectCiToken)
+            .where(ProjectCiToken.project_id == project.id, ProjectCiToken.id != record.id)
+            .values(is_primary=False)
+        )
+        project.ci_token_hash = record.token_hash
+        project.ci_token_hint = record.token_hint
+        project.ci_token_rotated_at = record.rotated_at
+        project.ci_token_last_used_at = None
+        project.ci_token_rotated_by = user.id
+        project.ci_token_expires_at = expires_at
+        project.ci_token_revoked_at = None
+        project.ci_token_revoked_by = None
+        project.ci_token_revoked_reason = None
+        project.ci_token_leak_reported_at = None
+        project.ci_token_leak_reported_by = None
+        project.ci_token_leak_report_reason = None
+        project.ci_token_allowed_runner_types = policy_data["allowedRunnerTypes"]
+        project.ci_token_allowed_testcase_ids = policy_data["allowedTestCaseIds"]
+        project.ci_token_max_testcase_count = policy_data["maxTestCaseCount"]
+
+    await db.flush()
+    await create_audit_log(
+        db,
+        user=user,
+        project_id=project.id,
+        module="RUN",
+        action="ROTATE_CI_TOKEN",
+        resource_type="project_ci_token",
+        resource_id=str(record.id),
+        summary="Rotate named project CI token",
+        detail={
+            "id": str(record.id),
+            "name": record.name,
+            "hint": record.token_hint,
+            "primary": record.is_primary,
+            "expiresAt": int(expires_at.timestamp()) if expires_at else None,
+        },
+    )
+    return record, raw_token
+
+
+async def _get_project_ci_token_record_for_write(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+    token_id: uuid.UUID | None = None,
+    name: str | None = None,
+) -> tuple[Project, ProjectCiToken]:
+    project = await _get_project(db, user=user, project_id=project_id)
+    await _require_project_write(db, user=user, project=project)
+    stmt = select(ProjectCiToken).where(ProjectCiToken.tenant_id == user.tenant_id, ProjectCiToken.project_id == project.id)
+    if token_id is not None:
+        stmt = stmt.where(ProjectCiToken.id == token_id)
+    else:
+        stmt = stmt.where(ProjectCiToken.name == _normalize_ci_token_name(name))
+    token = await db.scalar(stmt)
+    if token is None:
+        raise HTTPException(status_code=404, detail="CI token not found")
+    return project, token
+
+
+async def update_project_ci_token_record_policy(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+    policy: dict[str, object],
+    token_id: uuid.UUID | None = None,
+    name: str | None = None,
+) -> ProjectCiToken:
+    project, token = await _get_project_ci_token_record_for_write(db, user=user, project_id=project_id, token_id=token_id, name=name)
+    policy_data = normalize_ci_token_policy(policy)
+    token.allowed_runner_types = policy_data["allowedRunnerTypes"]
+    token.allowed_testcase_ids = policy_data["allowedTestCaseIds"]
+    token.max_testcase_count = policy_data["maxTestCaseCount"]
+    if token.is_primary:
+        project.ci_token_allowed_runner_types = token.allowed_runner_types
+        project.ci_token_allowed_testcase_ids = token.allowed_testcase_ids
+        project.ci_token_max_testcase_count = token.max_testcase_count
+    await db.flush()
+    await create_audit_log(
+        db,
+        user=user,
+        project_id=project.id,
+        module="RUN",
+        action="UPDATE_CI_TOKEN_POLICY",
+        resource_type="project_ci_token",
+        resource_id=str(token.id),
+        summary="Update named CI token policy",
+        detail={"id": str(token.id), "name": token.name, "hint": token.token_hint, "policy": policy_data},
+    )
+    return token
+
+
+async def update_project_ci_token_policy(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+    policy: dict[str, object],
+) -> Project:
+    project = await _get_project(db, user=user, project_id=project_id)
+    await _require_project_write(db, user=user, project=project)
+
+    policy_data = normalize_ci_token_policy(policy)
+    project.ci_token_allowed_runner_types = policy_data["allowedRunnerTypes"]
+    project.ci_token_allowed_testcase_ids = policy_data["allowedTestCaseIds"]
+    project.ci_token_max_testcase_count = policy_data["maxTestCaseCount"]
+    await db.flush()
+    await create_audit_log(
+        db,
+        user=user,
+        project_id=project.id,
+        module="RUN",
+        action="UPDATE_CI_TOKEN_POLICY",
+        resource_type="project_ci_token",
+        resource_id=str(project.id),
+        summary="Update project CI token policy",
+        detail={"hint": project.ci_token_hint, "policy": policy_data},
+    )
+    return project
+
+
+async def revoke_project_ci_token(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+    reason: str | None = None,
+) -> Project:
+    project = await _get_project(db, user=user, project_id=project_id)
+    await _require_project_write(db, user=user, project=project)
+    old_hint = project.ci_token_hint
+    now = datetime.utcnow()
+    project.ci_token_last_used_at = None
+    project.ci_token_revoked_at = now
+    project.ci_token_revoked_by = user.id
+    project.ci_token_revoked_reason = _normalize_ci_token_reason(reason)
+    project.ci_token_leak_reported_at = None
+    project.ci_token_leak_reported_by = None
+    project.ci_token_leak_report_reason = None
+    project.ci_token_allowed_runner_types = None
+    project.ci_token_allowed_testcase_ids = None
+    project.ci_token_max_testcase_count = None
+    await db.flush()
+    await create_audit_log(
+        db,
+        user=user,
+        project_id=project.id,
+        module="RUN",
+        action="REVOKE_CI_TOKEN",
+        resource_type="project_ci_token",
+        resource_id=str(project.id),
+        summary="Revoke project CI token",
+        detail={"hint": old_hint, "reason": project.ci_token_revoked_reason},
+    )
+    return project
+
+
+async def revoke_project_ci_token_record(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+    token_id: uuid.UUID | None = None,
+    name: str | None = None,
+    reason: str | None = None,
+) -> ProjectCiToken:
+    project, token = await _get_project_ci_token_record_for_write(db, user=user, project_id=project_id, token_id=token_id, name=name)
+    now = datetime.utcnow()
+    token.last_used_at = None
+    token.revoked_at = now
+    token.revoked_by = user.id
+    token.revoked_reason = _normalize_ci_token_reason(reason)
+    token.leak_reported_at = None
+    token.leak_reported_by = None
+    token.leak_report_reason = None
+    token.allowed_runner_types = None
+    token.allowed_testcase_ids = None
+    token.max_testcase_count = None
+    if token.is_primary:
+        project.ci_token_last_used_at = None
+        project.ci_token_revoked_at = token.revoked_at
+        project.ci_token_revoked_by = user.id
+        project.ci_token_revoked_reason = token.revoked_reason
+        project.ci_token_leak_reported_at = None
+        project.ci_token_leak_reported_by = None
+        project.ci_token_leak_report_reason = None
+        project.ci_token_allowed_runner_types = None
+        project.ci_token_allowed_testcase_ids = None
+        project.ci_token_max_testcase_count = None
+    await db.flush()
+    await create_audit_log(
+        db,
+        user=user,
+        project_id=project.id,
+        module="RUN",
+        action="REVOKE_CI_TOKEN",
+        resource_type="project_ci_token",
+        resource_id=str(token.id),
+        summary="Revoke named CI token",
+        detail={"id": str(token.id), "name": token.name, "hint": token.token_hint, "reason": token.revoked_reason},
+    )
+    return token
+
+
+async def report_project_ci_token_leak(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+    reason: str | None = None,
+) -> Project:
+    project = await _get_project(db, user=user, project_id=project_id)
+    await _require_project_write(db, user=user, project=project)
+    now = datetime.utcnow()
+    project.ci_token_last_used_at = None
+    project.ci_token_leak_reported_at = now
+    project.ci_token_leak_reported_by = user.id
+    project.ci_token_leak_report_reason = _normalize_ci_token_reason(reason)
+    project.ci_token_revoked_at = None
+    project.ci_token_revoked_by = None
+    project.ci_token_revoked_reason = None
+    project.ci_token_allowed_runner_types = None
+    project.ci_token_allowed_testcase_ids = None
+    project.ci_token_max_testcase_count = None
+    await db.flush()
+    await create_audit_log(
+        db,
+        user=user,
+        project_id=project.id,
+        module="RUN",
+        action="REPORT_CI_TOKEN_LEAK",
+        resource_type="project_ci_token",
+        resource_id=str(project.id),
+        summary="Report project CI token leak",
+        detail={"hint": project.ci_token_hint, "reason": project.ci_token_leak_report_reason},
+    )
+    return project
+
+
+async def report_project_ci_token_record_leak(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+    token_id: uuid.UUID | None = None,
+    name: str | None = None,
+    reason: str | None = None,
+) -> ProjectCiToken:
+    project, token = await _get_project_ci_token_record_for_write(db, user=user, project_id=project_id, token_id=token_id, name=name)
+    now = datetime.utcnow()
+    token.last_used_at = None
+    token.leak_reported_at = now
+    token.leak_reported_by = user.id
+    token.leak_report_reason = _normalize_ci_token_reason(reason)
+    token.revoked_at = None
+    token.revoked_by = None
+    token.revoked_reason = None
+    token.allowed_runner_types = None
+    token.allowed_testcase_ids = None
+    token.max_testcase_count = None
+    if token.is_primary:
+        project.ci_token_last_used_at = None
+        project.ci_token_leak_reported_at = token.leak_reported_at
+        project.ci_token_leak_reported_by = user.id
+        project.ci_token_leak_report_reason = token.leak_report_reason
+        project.ci_token_revoked_at = None
+        project.ci_token_revoked_by = None
+        project.ci_token_revoked_reason = None
+        project.ci_token_allowed_runner_types = None
+        project.ci_token_allowed_testcase_ids = None
+        project.ci_token_max_testcase_count = None
+    await db.flush()
+    await create_audit_log(
+        db,
+        user=user,
+        project_id=project.id,
+        module="RUN",
+        action="REPORT_CI_TOKEN_LEAK",
+        resource_type="project_ci_token",
+        resource_id=str(token.id),
+        summary="Report named CI token leak",
+        detail={"id": str(token.id), "name": token.name, "hint": token.token_hint, "reason": token.leak_report_reason},
+    )
+    return token
+
+
+async def retry_run(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    run_id: uuid.UUID,
+    failed_only: bool,
+    idempotency_key: str | None,
+) -> Run:
+    run = await db.scalar(select(Run).where(Run.id == run_id, Run.tenant_id == user.tenant_id))
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    project = await _get_project(db, user=user, project_id=run.project_id)
+    await _require_project_write(db, user=user, project=project)
+
+    suite_id = run.suite_id
+    env_id = run.env_id
+    if suite_id is None or env_id is None:
+        raise HTTPException(status_code=400, detail="Run cannot be retried")
+
+    suite_items = ((run.summary_json or {}).get("suiteSnapshot") or {}).get("items") or []
+    if not suite_items:
+        suite_items_rows = (
+            await db.execute(
+                select(SuiteItem).where(SuiteItem.tenant_id == user.tenant_id, SuiteItem.suite_id == suite_id).order_by(
+                    SuiteItem.order_no.asc()
+                )
+            )
+        ).scalars()
+        suite_items = [
+            {"orderNo": int(i.order_no), "testcaseId": str(i.testcase_id), "params": dict(i.params_json or {})}
+            for i in suite_items_rows.all()
+        ]
+
+    if failed_only:
+        failed_ids = (
+            await db.execute(
+                select(CaseRun.testcase_id).where(
+                    CaseRun.tenant_id == user.tenant_id, CaseRun.run_id == run.id, CaseRun.status == CaseRunStatus.FAILED
+                )
+            )
+        ).scalars()
+        failed_set = {str(tid) for tid in failed_ids.all()}
+        suite_items = [i for i in suite_items if str(i.get("testcaseId")) in failed_set]
+
+    if not suite_items:
+        raise HTTPException(status_code=400, detail="No cases to retry")
+
+    suite = await db.scalar(select(Suite).where(Suite.id == suite_id, Suite.tenant_id == user.tenant_id))
+    env = await db.scalar(select(Environment).where(Environment.id == env_id, Environment.tenant_id == user.tenant_id))
+    if suite is None or env is None:
+        raise HTTPException(status_code=404, detail="Suite or Environment not found")
+    run_summary = dict(run.summary_json or {}) if isinstance(run.summary_json, dict) else {}
+    summary_runner_type = str(run_summary.get("runnerType") or "").strip().upper()
+    runner_type = summary_runner_type if summary_runner_type in _SUPPORTED_RUNNER_TYPES else _RUNNER_TYPE_DEFAULT
+
+    payload_for_sig: dict[str, object] = {
+        "projectId": str(run.project_id),
+        "suiteId": str(suite_id),
+        "envId": str(env_id),
+        "triggerType": TriggerType.MANUAL.value,
+        "meta": {"retryOf": str(run.id), "failedOnly": failed_only},
+        "notifyRuleId": (run.summary_json or {}).get("notifyRuleId"),
+    }
+    payload_sig = _stable_payload_sig(payload_for_sig)
+    if idempotency_key:
+        existing = await _get_existing_idempotent_run(
+            db,
+            user=user,
+            project_id=run.project_id,
+            idempotency_key=idempotency_key,
+            payload_sig=payload_sig,
+        )
+        if existing is not None:
+            return existing
+
+    retry_summary = {
+        "meta": {"retryOf": str(run.id), "failedOnly": failed_only},
+        "runnerType": runner_type,
+        "notifyRuleId": (run.summary_json or {}).get("notifyRuleId"),
+        "suiteSnapshot": {
+            "suiteId": str(suite.id),
+            "name": suite.name,
+            "config": dict(suite.config_json or {}),
+            "items": suite_items,
+        },
+    }
+    if idempotency_key:
+        retry_summary["idempotency"] = {"key": idempotency_key, "sig": payload_sig}
+
+    retry_run_obj = Run(
+        tenant_id=user.tenant_id,
+        project_id=run.project_id,
+        suite_id=suite.id,
+        env_id=env.id,
+        trigger_type=TriggerType.MANUAL,
+        status=RunStatus.QUEUED,
+        start_at=datetime.utcnow(),
+        summary_json=retry_summary,
+        idempotency_key=idempotency_key,
+        created_by=user.id,
+    )
+    db.add(retry_run_obj)
+    try:
+        await db.flush()
+    except IntegrityError:
+        if not idempotency_key:
+            raise
+        await db.rollback()
+        existing = await _get_existing_idempotent_run(
+            db,
+            user=user,
+            project_id=run.project_id,
+            idempotency_key=idempotency_key,
+            payload_sig=payload_sig,
+        )
+        if existing is None:
+            raise
+        return existing
+
+    testcase_ids = [uuid.UUID(str(i["testcaseId"])) for i in suite_items]
+
+    testcase_types = {
+        r[0]: r[1]
+        for r in (
+            await db.execute(
+                select(TestCase.id, TestCase.type).where(TestCase.tenant_id == user.tenant_id, TestCase.id.in_(testcase_ids))
+            )
+        ).all()
+    }
+
+    retry_case_runs: list[CaseRun] = []
+    retry_suite_items: list[dict] = []
+    for item in suite_items:
+        testcase_id = uuid.UUID(str(item["testcaseId"]))
+        case_run = CaseRun(
+            tenant_id=user.tenant_id,
+            run_id=retry_run_obj.id,
+            testcase_id=testcase_id,
+            status=CaseRunStatus.QUEUED,
+        )
+        db.add(case_run)
+        retry_case_runs.append(case_run)
+        retry_suite_items.append(dict(item))
+
+    await db.flush()
+
+    items_for_job = []
+    for item, case_run in zip(retry_suite_items, retry_case_runs, strict=True):
+        testcase_id = uuid.UUID(str(item["testcaseId"]))
+        items_for_job.append(
+            {
+                "caseRunId": str(case_run.id),
+                "testcaseId": str(testcase_id),
+                "type": testcase_types.get(testcase_id).value if testcase_types.get(testcase_id) else None,
+                "params": dict(item.get("params") or {}),
+                "orderNo": int(item.get("orderNo") or 0),
+            }
+        )
+
+    job = Job(
+        tenant_id=user.tenant_id,
+        run_id=retry_run_obj.id,
+        status=JobStatus.QUEUED,
+        meta_json={
+            "projectId": str(run.project_id),
+            "suiteId": str(suite.id),
+            "envId": str(env.id),
+            "triggerType": TriggerType.MANUAL.value,
+            "meta": {"retryOf": str(run.id), "failedOnly": failed_only},
+            "runnerType": runner_type,
+            "notifyRuleId": (run.summary_json or {}).get("notifyRuleId"),
+            "suiteConfig": dict(suite.config_json or {}),
+            "items": items_for_job,
+        },
+    )
+    db.add(job)
+    await db.flush()
+    await create_audit_log(
+        db,
+        user=user,
+        project_id=project.id,
+        module="RUN",
+        action="RETRY_RUN",
+        resource_type="run",
+        resource_id=str(retry_run_obj.id),
+        summary="Retry run",
+        detail={
+            "retryOf": str(run.id),
+            "failedOnly": failed_only,
+            "suiteId": str(suite.id),
+            "envId": str(env.id),
+            "runnerType": runner_type,
+            "caseCount": len(retry_case_runs),
+        },
+    )
+    return retry_run_obj
+
+
+async def delete_run_allure_report(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    run_id: uuid.UUID,
+) -> tuple[int, int, int]:
+    run = await db.scalar(select(Run).where(Run.id == run_id, Run.tenant_id == user.tenant_id))
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    project = await _get_project(db, user=user, project_id=run.project_id)
+    await _require_project_write(db, user=user, project=project)
+
+    artifact_rows = (
+        await db.execute(
+            select(Artifact)
+            .where(
+                Artifact.tenant_id == user.tenant_id,
+                Artifact.run_id == run.id,
+                Artifact.type == ArtifactType.LOG_BUNDLE,
+            )
+            .order_by(Artifact.created_at.desc())
+        )
+    ).scalars().all()
+
+    report_artifacts = [
+        row
+        for row in artifact_rows
+        if isinstance(row.meta_json, dict) and str(row.meta_json.get("kind") or "").strip().upper() == "ALLURE_REPORT"
+    ]
+
+    deleted_files = 0
+    deleted_dirs = 0
+    for row in report_artifacts:
+        storage = str(row.storage_url or "").strip()
+        if storage:
+            try:
+                candidate = Path(storage).expanduser()
+                if candidate.exists():
+                    if candidate.is_file():
+                        candidate.unlink()
+                        deleted_files += 1
+                        if candidate.suffix.lower() == ".zip":
+                            extracted_dir = candidate.parent / "allure-report"
+                            if extracted_dir.exists() and extracted_dir.is_dir():
+                                shutil.rmtree(extracted_dir, ignore_errors=True)
+                                deleted_dirs += 1
+                    elif candidate.is_dir():
+                        shutil.rmtree(candidate, ignore_errors=True)
+                        deleted_dirs += 1
+            except OSError:
+                pass
+        await db.delete(row)
+
+    try:
+        _, report_dir = resolve_run_allure_paths(str(run.id))
+        if report_dir.exists():
+            shutil.rmtree(report_dir, ignore_errors=True)
+            deleted_dirs += 1
+        report_zip = report_dir.parent / "allure-report.zip"
+        if report_zip.exists() and report_zip.is_file():
+            try:
+                report_zip.unlink()
+                deleted_files += 1
+            except OSError:
+                pass
+    except Exception:
+        pass
+
+    run_summary = dict(run.summary_json or {})
+    execution_result = dict(run_summary.get("executionResult") or {})
+    execution_result["reportStatus"] = "DELETED"
+    execution_result["reportErrorCode"] = None
+    execution_result["reportMessage"] = None
+    execution_result["reportPath"] = None
+    run_summary["executionResult"] = execution_result
+    run.summary_json = run_summary
+
+    await create_audit_log(
+        db,
+        user=user,
+        project_id=project.id,
+        module="RUN",
+        action="DELETE_ALLURE_REPORT",
+        resource_type="run",
+        resource_id=str(run.id),
+        summary="Delete run allure report",
+        detail={
+            "deletedArtifacts": len(report_artifacts),
+            "deletedFiles": deleted_files,
+            "deletedDirs": deleted_dirs,
+        },
+    )
+    await db.flush()
+    return len(report_artifacts), deleted_files, deleted_dirs
