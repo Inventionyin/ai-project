@@ -24,7 +24,12 @@ from app.schemas.integration import (
     NotificationDiagnosticsSummary,
 )
 from app.schemas.ops import OpsHealthCheck, OpsHealthSummaryData
-from app.services.acceptance import _build_checks, _load_devops_external_systems, _render_report_markdown
+from app.services.acceptance import (
+    _build_checks,
+    _build_defect_confirmation_groups,
+    _load_devops_external_systems,
+    _render_report_markdown,
+)
 
 
 @dataclass
@@ -424,12 +429,54 @@ def test_render_report_markdown_includes_blocking_defect_governance_context() ->
         ),
     )
 
-    markdown = _render_report_markdown(summary, trial=trial)
+    confirmation_groups = [
+        {
+            "key": "must_fix",
+            "label": "必须修复后再放行",
+            "count": 22,
+            "decision": "默认不建议豁免。",
+            "samples": ["【客户端MVP】【双端】【直播间】观众进房拉不到流，一直显示黑屏加载中"],
+        },
+        {
+            "key": "experience",
+            "label": "体验优化/展示类候选",
+            "count": 38,
+            "decision": "可作为观察项或排期优化。",
+            "samples": ["【客户端MVP】【双端】【动态】【体验问题】人气值展示了全部数值"],
+        },
+    ]
+
+    markdown = _render_report_markdown(summary, trial=trial, defect_confirmation_groups=confirmation_groups)
 
     assert "## 阻塞缺陷治理清单" in markdown
     assert "P0: 22" in markdown
     assert "OPEN: 460" in markdown
     assert "客户端mvp-双端-动态" in markdown
     assert "直播间黑屏拉流失败" in markdown
+    assert "## 默认验收确认口径" in markdown
+    assert "| 必须修复后再放行 | 22 | 默认不建议豁免。 |" in markdown
+    assert "观众进房拉不到流" in markdown
     assert "## 需需求方确认" in markdown
     assert "460 个未关闭缺陷是否都属于当前验收范围" in markdown
+
+
+def test_build_defect_confirmation_groups_uses_conservative_business_rules() -> None:
+    rows = [
+        SimpleNamespace(title="【客户端MVP】【双端】【直播间】观众进房拉不到流，一直黑屏", description="", severity="P0", status="OPEN"),
+        SimpleNamespace(title="【历史遗留】旧版本昵称展示异常", description="老问题，建议延期", severity="P2", status="OPEN"),
+        SimpleNamespace(title="【客户端MVP】【双端】【动态】【体验问题】按钮样式不美观", description="", severity="P2", status="OPEN"),
+        SimpleNamespace(title="【客户端MVP】【双端】【动态】评论点赞数据展示异常", description="", severity="P1", status="OPEN"),
+        SimpleNamespace(title="【客户端MVP】【双端】【动态】动态详情刷新异常", description="", severity="P1", status="OPEN"),
+        SimpleNamespace(title="【客户端MVP】【双端】【动态】发布后状态异常", description="", severity="P1", status="OPEN"),
+        SimpleNamespace(title="【客户端MVP】【安卓】【开播】封面提示文案错误", description="", severity="P3", status="OPEN"),
+    ]
+
+    groups = _build_defect_confirmation_groups(rows)
+
+    by_key = {item["key"]: item for item in groups}
+    assert by_key["must_fix"]["count"] == 1
+    assert "黑屏" in by_key["must_fix"]["samples"][0]
+    assert by_key["historical"]["count"] == 1
+    assert by_key["experience"]["count"] == 1
+    assert by_key["duplicate"]["count"] == 3
+    assert by_key["deferrable"]["count"] == 1

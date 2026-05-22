@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
+import re
 
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser
+from app.models.defect import Defect
 from app.models.devops_pipeline import DevOpsPipeline, DevOpsRun
 from app.schemas.acceptance import (
     AcceptanceCheck,
@@ -53,12 +55,115 @@ def _score_penalty(status: str) -> int:
     return 0
 
 
+def _defect_text(row: object) -> str:
+    return f"{getattr(row, 'title', '') or ''} {getattr(row, 'description', '') or ''}".lower()
+
+
+def _defect_sample(row: object) -> str:
+    title = str(getattr(row, "title", "") or "").strip()
+    return title[:120] if title else "-"
+
+
+def _defect_cluster_key(row: object) -> str:
+    title = str(getattr(row, "title", "") or "").lower()
+    tokens = [part.strip(" 　\t\r\n") for part in re.findall(r"[【\[]([^】\]]+)[】\]]", title)]
+    useful = [token for token in tokens if token and len(token) >= 2 and token not in {"体验问题", "双端", "客户端mvp"}]
+    return "-".join(useful[:3]) if useful else title[:24]
+
+
+def _build_defect_confirmation_groups(rows: list[object]) -> list[dict[str, object]]:
+    buckets = [
+        {
+            "key": "must_fix",
+            "label": "必须修复后再放行",
+            "decision": "默认不建议豁免；P0、关键链路、崩溃、黑屏、支付、消息丢失等风险需关闭或负责人签字。",
+            "samples": [],
+        },
+        {
+            "key": "duplicate",
+            "label": "疑似重复/同模块合并确认",
+            "decision": "建议合并同类项，指定模块 owner 后统一关闭或拆分。",
+            "samples": [],
+        },
+        {
+            "key": "historical",
+            "label": "疑似历史遗留/已知问题",
+            "decision": "可进入延期候选，但需要需求方确认是否属于本轮验收范围。",
+            "samples": [],
+        },
+        {
+            "key": "experience",
+            "label": "体验优化/展示类候选",
+            "decision": "可作为观察项或排期优化，前提是不影响核心链路和验收标准。",
+            "samples": [],
+        },
+        {
+            "key": "deferrable",
+            "label": "可延期/低风险候选",
+            "decision": "默认可申请延期，但需给出截止日期和责任人。",
+            "samples": [],
+        },
+    ]
+    by_key = {str(item["key"]): item for item in buckets}
+    cluster_counts: dict[str, int] = {}
+    for row in rows:
+        cluster_counts[_defect_cluster_key(row)] = cluster_counts.get(_defect_cluster_key(row), 0) + 1
+
+    def _append(key: str, row: object) -> None:
+        bucket = by_key[key]
+        bucket["count"] = int(bucket.get("count", 0) or 0) + 1
+        samples = bucket["samples"]
+        if isinstance(samples, list) and len(samples) < 5:
+            sample = _defect_sample(row)
+            if sample not in samples:
+                samples.append(sample)
+
+    for row in rows:
+        severity = str(getattr(row, "severity", "") or "").upper()
+        text = _defect_text(row)
+        cluster_key = _defect_cluster_key(row)
+        if severity == "P0" or any(word in text for word in ("崩溃", "crash", "黑屏", "拉不到流", "支付", "消息丢失", "登录失败")):
+            _append("must_fix", row)
+        elif any(word in text for word in ("历史", "遗留", "老问题", "已知问题")):
+            _append("historical", row)
+        elif any(word in text for word in ("体验", "样式", "不美观", "缩略")):
+            _append("experience", row)
+        elif cluster_counts.get(cluster_key, 0) >= 3:
+            _append("duplicate", row)
+        else:
+            _append("deferrable", row)
+
+    for bucket in buckets:
+        bucket.setdefault("count", 0)
+    return buckets
+
+
 def _provider_status(configured: bool, ready: bool, missing_fields: list[str]) -> AcceptanceStatus:
     if ready:
         return "READY"
     if configured and not missing_fields:
         return "WARN"
     return "BLOCKED"
+
+
+async def _load_open_defects_for_confirmation(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+) -> list[object]:
+    return (
+        await db.execute(
+            select(Defect.title, Defect.description, Defect.status, Defect.severity)
+            .where(
+                Defect.tenant_id == user.tenant_id,
+                Defect.project_id == project_id,
+                Defect.status.in_(("OPEN", "IN_PROGRESS")),
+            )
+            .order_by(Defect.severity.asc(), desc(Defect.updated_at), desc(Defect.id))
+            .limit(1000)
+        )
+    ).all()
 
 
 async def _load_devops_external_systems(
@@ -283,7 +388,12 @@ async def get_acceptance_summary(
     )
 
 
-def _render_report_markdown(summary: AcceptanceSummaryData, *, trial: DashboardTrialOperationData | None = None) -> str:
+def _render_report_markdown(
+    summary: AcceptanceSummaryData,
+    *,
+    trial: DashboardTrialOperationData | None = None,
+    defect_confirmation_groups: list[dict[str, object]] | None = None,
+) -> str:
     def _lines(items: list[str]) -> list[str]:
         return [f"- {item}" for item in items] if items else ["- 暂无"]
 
@@ -311,6 +421,18 @@ def _render_report_markdown(summary: AcceptanceSummaryData, *, trial: DashboardT
             f"- [{item.severity}/{item.status}] {item.title}，风险分 {item.riskScore:g}，提示：{item.hint}"
             for item in trial.topRiskHints[:5]
         ]
+
+    def _confirmation_group_lines() -> list[str]:
+        if not defect_confirmation_groups:
+            return ["- 暂无未关闭缺陷确认分组。"]
+        lines = ["| 分类 | 数量 | 默认确认口径 | 样例 |", "| --- | ---: | --- | --- |"]
+        for item in defect_confirmation_groups:
+            samples = item.get("samples")
+            sample_text = "；".join(str(sample) for sample in samples[:2]) if isinstance(samples, list) and samples else "-"
+            lines.append(
+                f"| {item.get('label', '-')} | {int(item.get('count', 0) or 0)} | {item.get('decision', '-')} | {sample_text} |"
+            )
+        return lines
 
     checks_by_key = {item.key: item for item in summary.checks}
     real_data = checks_by_key.get("realData")
@@ -394,6 +516,10 @@ def _render_report_markdown(summary: AcceptanceSummaryData, *, trial: DashboardT
             "### Top 风险提示",
             *_risk_hint_lines(),
             "",
+            "## 默认验收确认口径",
+            "- 说明：以下为系统按保守规则自动分组，用于减少人工梳理成本；最终放行仍需需求方/测试负责人确认。",
+            *_confirmation_group_lines(),
+            "",
             "## 需需求方确认",
             *_lines(blocking_questions),
             "",
@@ -417,9 +543,12 @@ async def get_acceptance_report(
 ) -> AcceptanceReportData:
     summary = await get_acceptance_summary(db, user=user, project_id=project_id)
     trial = await get_dashboard_trial_operation(db, user=user, project_id=project_id)
+    defect_confirmation_groups = _build_defect_confirmation_groups(
+        await _load_open_defects_for_confirmation(db, user=user, project_id=project_id)
+    )
     return AcceptanceReportData(
         title="生产验收中心报告",
         generatedAt=summary.generatedAt,
         summary=summary,
-        markdown=_render_report_markdown(summary, trial=trial),
+        markdown=_render_report_markdown(summary, trial=trial, defect_confirmation_groups=defect_confirmation_groups),
     )
