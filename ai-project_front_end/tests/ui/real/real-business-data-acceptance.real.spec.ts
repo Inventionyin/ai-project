@@ -9,6 +9,7 @@ const dataRoot = process.env.WEITESTING_REAL_DATA_ROOT || 'D:\\OtherProject\\New
 const requirementDir = path.join(dataRoot, 'requirement_analysis', 'requirement_analysis')
 const testcaseFile = path.join(requirementDir, 'case_repository', 'case_repository.xlsx')
 const defectDir = path.join(dataRoot, 'bug数量', 'bug数量')
+const hasRealBusinessData = fs.existsSync(requirementDir) && fs.existsSync(testcaseFile) && fs.existsSync(defectDir)
 
 type ApiEnvelope<T> = {
   code?: number
@@ -202,13 +203,10 @@ function parseMarkdownDefectRows(filePath: string): DefectImportItem[] {
 
 test.describe('real business data acceptance flow', () => {
   test.skip(!runRealE2E, 'Set WEITESTING_REAL_E2E=1 to import real business data into the configured environment.')
+  test.skip(!hasRealBusinessData, `Set WEITESTING_REAL_DATA_ROOT to a directory containing requirement_analysis, case_repository.xlsx, and bug数量. Current root: ${dataRoot}`)
 
   test('imports real requirements, cases, defects and captures acceptance screens', async ({ page, request }, testInfo) => {
     test.setTimeout(240_000)
-
-    expect(fs.existsSync(requirementDir), `requirement dir not found: ${requirementDir}`).toBeTruthy()
-    expect(fs.existsSync(testcaseFile), `testcase file not found: ${testcaseFile}`).toBeTruthy()
-    expect(fs.existsSync(defectDir), `defect dir not found: ${defectDir}`).toBeTruthy()
 
     const health = await request.get(`${apiBaseUrl}/health`)
     expect(health.ok(), `Backend health check failed at ${apiBaseUrl}/health`).toBeTruthy()

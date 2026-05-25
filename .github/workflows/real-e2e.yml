@@ -173,6 +173,7 @@ jobs:
             $env:PYTHONPATH = "."
             $env:TEST_DATABASE_URL = $dbUrl
             $env:DATABASE_URL = $dbUrl
+            $env:JWT_SECRET_KEY = "real_e2e_secret_change_me_please_32chars_min_123456"
             python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
           } -ArgumentList $backendDir, $env:TEST_DATABASE_URL
 
