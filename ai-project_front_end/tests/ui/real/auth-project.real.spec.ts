@@ -17,7 +17,7 @@ test.describe('real backend auth and project flow', () => {
     expect(health.ok(), `Backend health check failed at ${apiBaseUrl}/health`).toBeTruthy()
 
     const suffix = `${Date.now()}${Math.floor(Math.random() * 1000)}`.slice(-10)
-    const username = `ui_auth_${suffix}`
+    const username = `ui_auth_${suffix}@example.com`
     const phone = `13${suffix.slice(0, 9)}`
     const password = 'RealE2e123'
     const projectName = `真实联调项目 ${suffix}`
