@@ -46,6 +46,6 @@ test.describe('real backend auth and project flow', () => {
     await expect(page.getByText(projectName)).toBeVisible()
     await page.getByText(projectName).click()
     await expect(page).toHaveURL(/\/projects\/[^/]+\/dashboard/)
-    await expect(page.getByText('仪表盘')).toBeVisible()
+    await expect(page.getByRole('button', { name: '仪表盘' })).toBeVisible()
   })
 })
