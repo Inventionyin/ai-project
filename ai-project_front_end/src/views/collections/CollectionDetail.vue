@@ -1,7 +1,18 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { createTestcaseBinding } from '@/lib/aiTestingPlatformApi'
+import {
+  createTestcaseBinding,
+  fetchProjectEnvironments,
+  fetchProjectTestcasesLite,
+  fetchSuiteItems,
+  fetchSuitesLite,
+  upsertSuiteItems,
+  type ProjectEnvironment,
+  type ProjectTestcaseLite,
+  type SuiteItem,
+  type SuiteLite
+} from '@/lib/aiTestingPlatformApi'
 import {
   exportCollection,
   fetchCollectionBindings,
@@ -12,6 +23,7 @@ import {
   runCollectionRequest,
   updateCollectionRequest,
   type ApiAssetBinding,
+  type ApiRequestRunResult,
   type CollectionDetail
 } from '@/lib/api/collections'
 
@@ -44,21 +56,29 @@ const exporting = ref(false)
 
 const error = ref('')
 const success = ref('')
-const runResultText = ref('')
+const runResult = ref<ApiRequestRunResult | null>(null)
 const exportText = ref('')
 
 const detail = ref<CollectionDetail | null>(null)
 const selectedRequestId = ref('')
 const requestForm = ref<RequestForm | null>(null)
+const projectEnvironments = ref<ProjectEnvironment[]>([])
+const projectTestcases = ref<ProjectTestcaseLite[]>([])
+const suiteOptions = ref<SuiteLite[]>([])
+const selectedEnvId = ref('')
+const selectedSuiteId = ref('')
 const collectionBindings = ref<ApiAssetBinding[]>([])
 const requestBindings = ref<ApiAssetBinding[]>([])
 const collectionBindingsLoading = ref(false)
 const requestBindingsLoading = ref(false)
 const bindingSubmitting = ref(false)
+const suiteAppendSubmitting = ref(false)
 const collectionBindingsError = ref('')
 const requestBindingsError = ref('')
 const bindingError = ref('')
 const bindingSuccess = ref('')
+const suiteAppendMessage = ref('')
+const suiteAppendError = ref('')
 
 const bindingForm = reactive({
   testcaseId: '',
@@ -77,8 +97,46 @@ const allRequests = computed(() => {
   return [...grouped, ...ungrouped]
 })
 
+const selectedSuiteName = computed(() => {
+  return suiteOptions.value.find((suite) => suite.id === selectedSuiteId.value)?.name || ''
+})
+
+const selectedBindingTestcaseId = computed(() => {
+  return bindingForm.testcaseId || requestBindings.value[0]?.testcaseId || ''
+})
+
 function formatJson(data: unknown) {
   return JSON.stringify(data ?? {}, null, 2)
+}
+
+function formatResponseBody(body?: string | null) {
+  const raw = String(body || '').trim()
+  if (!raw) return ''
+  try {
+    return JSON.stringify(JSON.parse(raw), null, 2)
+  } catch {
+    return raw
+  }
+}
+
+async function loadWorkbenchOptions() {
+  const pid = projectId.value
+  if (!pid) return
+  try {
+    const [envs, testcasePage, suitePage] = await Promise.all([
+      fetchProjectEnvironments(pid),
+      fetchProjectTestcasesLite(pid, 1, 200),
+      fetchSuitesLite(pid, 1, 200)
+    ])
+    projectEnvironments.value = envs
+    projectTestcases.value = testcasePage.items || []
+    suiteOptions.value = suitePage.items || []
+    if (!selectedEnvId.value && envs[0]?.id) selectedEnvId.value = envs[0].id
+    if (!bindingForm.testcaseId && testcasePage.items?.[0]?.id) bindingForm.testcaseId = testcasePage.items[0].id
+    if (!selectedSuiteId.value && suitePage.items?.[0]?.id) selectedSuiteId.value = suitePage.items[0].id
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '调试选项加载失败'
+  }
 }
 
 function formatUnixTime(timestamp?: number | null) {
@@ -170,8 +228,9 @@ async function loadCollection() {
   if (!collectionId.value) return
   loading.value = true
   error.value = ''
-  runResultText.value = ''
+  runResult.value = null
   try {
+    await loadWorkbenchOptions()
     const data = await fetchCollectionDetail(collectionId.value)
     detail.value = data
     void loadCollectionBindings()
@@ -196,6 +255,9 @@ async function loadRequestDetail(requestId: string) {
   error.value = ''
   bindingError.value = ''
   bindingSuccess.value = ''
+  suiteAppendMessage.value = ''
+  suiteAppendError.value = ''
+  runResult.value = null
   requestBindingsError.value = ''
   try {
     const data = await fetchCollectionRequestDetail(collectionId.value, requestId)
@@ -220,9 +282,11 @@ async function loadRequestDetail(requestId: string) {
 async function onSelectRequest(requestId: string) {
   selectedRequestId.value = requestId
   success.value = ''
-  runResultText.value = ''
+  runResult.value = null
   bindingSuccess.value = ''
   bindingError.value = ''
+  suiteAppendMessage.value = ''
+  suiteAppendError.value = ''
   await loadRequestDetail(requestId)
 }
 
@@ -256,12 +320,15 @@ async function saveRequest() {
 
 async function runSingleRequest() {
   if (!collectionId.value || !requestForm.value) return
+  if (!selectedEnvId.value) {
+    error.value = '请选择调试环境'
+    return
+  }
   running.value = true
   error.value = ''
-  runResultText.value = ''
+  runResult.value = null
   try {
-    const result = await runCollectionRequest(collectionId.value, requestForm.value.requestId, { envId: null })
-    runResultText.value = JSON.stringify(result, null, 2)
+    runResult.value = await runCollectionRequest(collectionId.value, requestForm.value.requestId, { envId: selectedEnvId.value })
   } catch (e) {
     error.value = e instanceof Error ? e.message : '运行失败'
   } finally {
@@ -292,7 +359,6 @@ async function createRequestBinding() {
       enabled: true
     })
     bindingSuccess.value = '绑定已创建'
-    bindingForm.testcaseId = ''
     bindingForm.assertSummary = ''
     await Promise.all([
       loadRequestBindings(requestForm.value.requestId),
@@ -302,6 +368,48 @@ async function createRequestBinding() {
     bindingError.value = e instanceof Error ? e.message : '绑定创建失败'
   } finally {
     bindingSubmitting.value = false
+  }
+}
+
+async function addSelectedBindingToSuite() {
+  const suiteId = selectedSuiteId.value
+  const testcaseId = selectedBindingTestcaseId.value
+  suiteAppendMessage.value = ''
+  suiteAppendError.value = ''
+  if (!suiteId) {
+    suiteAppendError.value = '请选择加入套件'
+    return
+  }
+  if (!testcaseId) {
+    suiteAppendError.value = '请先选择或创建用例绑定'
+    return
+  }
+  suiteAppendSubmitting.value = true
+  try {
+    const currentItems = await fetchSuiteItems(suiteId)
+    if (currentItems.some((item) => item.testcaseId === testcaseId)) {
+      suiteAppendMessage.value = '已在套件中'
+      return
+    }
+    const nextOrder = currentItems.reduce((max, item) => Math.max(max, Number(item.orderNo || 0)), 0) + 1
+    const nextItems: SuiteItem[] = [
+      ...currentItems.map((item, index) => ({
+        testcaseId: item.testcaseId,
+        orderNo: Number(item.orderNo || index + 1),
+        params: item.params || {}
+      })),
+      {
+        testcaseId,
+        orderNo: nextOrder,
+        params: {}
+      }
+    ]
+    await upsertSuiteItems(suiteId, nextItems)
+    suiteAppendMessage.value = selectedSuiteName.value ? `已加入套件：${selectedSuiteName.value}` : '已加入套件'
+  } catch (e) {
+    suiteAppendError.value = e instanceof Error ? e.message : '加入套件失败'
+  } finally {
+    suiteAppendSubmitting.value = false
   }
 }
 
@@ -479,7 +587,56 @@ watch([collectionId, requestIdFromQuery], () => {
               </div>
               <div class="mt-3 flex gap-2">
                 <button class="rounded-[6px] bg-[#155DFC] px-3 py-1 text-[12px] text-white disabled:opacity-60" :disabled="saving" @click="saveRequest">保存</button>
-                <button class="rounded-[6px] border border-black/10 px-3 py-1 text-[12px] disabled:opacity-60" :disabled="running" @click="runSingleRequest">单请求运行</button>
+              </div>
+
+              <div class="mt-4 border-t border-black/10 pt-3">
+                <h2 class="text-[14px] font-semibold leading-5 text-[#0A0A0A]">API 调试台</h2>
+                <div class="mt-3 grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_120px]">
+                  <label class="block">
+                    <span class="mb-1 block text-[12px] text-[#717182]">调试环境</span>
+                    <select
+                      v-model="selectedEnvId"
+                      aria-label="调试环境"
+                      class="w-full rounded-[6px] border border-black/10 px-2 py-1 text-[12px]"
+                    >
+                      <option value="">请选择环境</option>
+                      <option v-for="env in projectEnvironments" :key="env.id" :value="env.id">{{ env.name }}</option>
+                    </select>
+                  </label>
+                  <button
+                    class="mt-[20px] rounded-[6px] bg-[#155DFC] px-3 py-1 text-[12px] text-white disabled:opacity-60"
+                    :disabled="running || !selectedEnvId"
+                    @click="runSingleRequest"
+                  >
+                    {{ running ? '运行中...' : '运行请求' }}
+                  </button>
+                </div>
+                <div class="mt-3 rounded-[8px] border border-black/10 bg-[#F8FAFC] p-3">
+                  <div v-if="!runResult" class="text-[12px] text-[#717182]">
+                    {{ selectedEnvId ? '点击运行请求查看响应。' : '选择环境后运行请求。' }}
+                  </div>
+                  <div v-else class="space-y-2 text-[12px]">
+                    <div class="flex flex-wrap gap-2">
+                      <span class="rounded-[6px] bg-white px-2 py-1 text-[#0A0A0A]">状态码 {{ runResult.status ?? '-' }}</span>
+                      <span class="rounded-[6px] bg-white px-2 py-1 text-[#0A0A0A]">耗时 {{ runResult.elapsedMs }} ms</span>
+                      <span
+                        class="rounded-[6px] px-2 py-1"
+                        :class="runResult.ok ? 'bg-[#DCFCE7] text-[#008236]' : 'bg-[#FEE2E2] text-[#E7000B]'"
+                      >
+                        {{ runResult.ok ? '断言通过' : '断言失败' }}
+                      </span>
+                    </div>
+                    <div v-if="runResult.error" class="text-[#E7000B]">{{ runResult.error }}</div>
+                    <div>
+                      <div class="mb-1 text-[#717182]">响应体</div>
+                      <pre class="max-h-[220px] overflow-auto whitespace-pre-wrap rounded-[6px] bg-white p-2 text-[11px] text-[#0A0A0A]">{{ formatResponseBody(runResult.response?.body) }}</pre>
+                    </div>
+                    <details>
+                      <summary class="cursor-pointer text-[#717182]">响应头</summary>
+                      <pre class="mt-1 max-h-[160px] overflow-auto whitespace-pre-wrap rounded-[6px] bg-white p-2 text-[11px] text-[#0A0A0A]">{{ formatJson(runResult.response?.headers || {}) }}</pre>
+                    </details>
+                  </div>
+                </div>
               </div>
 
               <div class="mt-4 border-t border-black/10 pt-3">
@@ -495,16 +652,19 @@ watch([collectionId, requestIdFromQuery], () => {
                     :disabled="bindingSubmitting"
                     @click="createRequestBinding"
                   >
-                    {{ bindingSubmitting ? '绑定中...' : '绑定 TestCase' }}
+                    {{ bindingSubmitting ? '绑定中...' : '保存为用例绑定' }}
                   </button>
                 </div>
 
                 <div class="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-                  <input
+                  <select
                     v-model="bindingForm.testcaseId"
+                    aria-label="选择绑定用例"
                     class="rounded-[6px] border border-black/10 px-2 py-1 text-[12px]"
-                    placeholder="TestCase ID"
-                  />
+                  >
+                    <option value="">选择绑定用例</option>
+                    <option v-for="item in projectTestcases" :key="item.id" :value="item.id">{{ item.title || item.name || item.id }}</option>
+                  </select>
                   <input
                     v-model="bindingForm.name"
                     class="rounded-[6px] border border-black/10 px-2 py-1 text-[12px]"
@@ -541,14 +701,32 @@ watch([collectionId, requestIdFromQuery], () => {
                   </div>
                   <div v-else class="border-t border-black/10 px-3 py-3 text-[12px] text-[#717182]">暂无请求级绑定</div>
                 </div>
+
+                <div class="mt-4 rounded-[8px] border border-black/10 bg-[#F8FAFC] p-3">
+                  <div class="mb-2 text-[12px] font-medium text-[#0A0A0A]">加入测试套件</div>
+                  <div class="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_120px]">
+                    <select
+                      v-model="selectedSuiteId"
+                      aria-label="选择加入套件"
+                      class="rounded-[6px] border border-black/10 px-2 py-1 text-[12px]"
+                    >
+                      <option value="">选择加入套件</option>
+                      <option v-for="suite in suiteOptions" :key="suite.id" :value="suite.id">{{ suite.name }}</option>
+                    </select>
+                    <button
+                      class="rounded-[6px] bg-[#155DFC] px-3 py-1 text-[12px] text-white disabled:opacity-60"
+                      :disabled="suiteAppendSubmitting || !selectedSuiteId || !selectedBindingTestcaseId"
+                      @click="addSelectedBindingToSuite"
+                    >
+                      {{ suiteAppendSubmitting ? '加入中...' : '加入测试套件' }}
+                    </button>
+                  </div>
+                  <div v-if="suiteAppendError" class="mt-2 text-[12px] text-[#E7000B]">{{ suiteAppendError }}</div>
+                  <div v-else-if="suiteAppendMessage" class="mt-2 text-[12px] text-[#008236]">{{ suiteAppendMessage }}</div>
+                </div>
               </div>
             </div>
             <div v-else class="rounded-[8px] border border-black/10 p-3 text-[12px] text-[#717182]">请选择一个请求</div>
-
-            <div v-if="runResultText" class="rounded-[8px] border border-black/10 bg-[#F8FAFC] p-3">
-              <div class="mb-1 text-[12px] font-medium text-[#717182]">运行结果</div>
-              <pre class="max-h-[220px] overflow-auto whitespace-pre-wrap text-[11px] text-[#0A0A0A]">{{ runResultText }}</pre>
-            </div>
 
             <div v-if="exportText" class="rounded-[8px] border border-black/10 bg-[#F8FAFC] p-3">
               <div class="mb-1 text-[12px] font-medium text-[#717182]">导出内容</div>

@@ -5,6 +5,7 @@ import headerPlus from '@/assets/figma/ai-testing-platform/header-plus.svg'
 import filterSearch from '@/assets/figma/ai-testing-platform/filter-search.svg'
 import SuiteCard, { type SuiteCardData } from '@/components/figma/ai-testing-platform/SuiteCard.vue'
 import CreateSuiteModal from '@/components/figma/ai-testing-platform/CreateSuiteModal.vue'
+import { createSuiteRun } from '@/lib/aiTestingPlatformApi'
 
 type ApiResponse<T> = {
   code?: number
@@ -92,6 +93,7 @@ const mapSuiteToCard = (suite: SuitePublic, environmentNameMap: Record<string, s
     timeout: `${suite.config.timeoutSec}s`,
     retry: `${suite.config.retryCount}次`,
     environment: suite.defaultEnvId ? (environmentNameMap[suite.defaultEnvId] || '-') : '-',
+    defaultEnvId: suite.defaultEnvId || null,
     lastRunAt: formatDateTime(suite.updatedAt),
     metaRowHeight: 16
   }
@@ -203,8 +205,8 @@ async function handleCreateSuite(data: {
   }
 }
 
-function showToast(message: string) {
-  window.dispatchEvent(new CustomEvent('app-toast', { detail: { message } }))
+function showToast(message: string, type: 'success' | 'error' = 'success') {
+  window.dispatchEvent(new CustomEvent('app-toast', { detail: { message, type } }))
 }
 
 function deleteSuite(index: number) {
@@ -212,9 +214,28 @@ function deleteSuite(index: number) {
   showToast('套件已删除')
 }
 
-function runSuite() {
-  showToast('套件已运行')
-  router.push(`/projects/${projectId.value || '1'}/runs`)
+async function runSuite(suite: SuiteCardData) {
+  const pid = projectId.value || '1'
+  if (!suite.defaultEnvId) {
+    showToast('套件未配置默认环境，无法运行', 'error')
+    return
+  }
+  try {
+    const run = await createSuiteRun({
+      projectId: pid,
+      suiteId: suite.id,
+      envId: suite.defaultEnvId,
+      triggerType: 'MANUAL',
+      meta: { source: 'suite_card' }
+    })
+    const rid = String(run?.id || '').trim()
+    if (!rid) throw new Error('运行创建成功但未返回 runId')
+    showToast(`运行已触发：${rid}`)
+    await router.push(`/projects/${pid}/runs/${rid}`)
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : '运行触发失败，请稍后重试'
+    showToast(errorMessage, 'error')
+  }
 }
 
 function arrangeSuite(suiteId: string) {
@@ -258,7 +279,7 @@ onMounted(() => {
           :key="suite.id"
           :suite="suite"
           @delete="deleteSuite(index)"
-          @run="runSuite"
+          @run="runSuite(suite)"
           @arrange="arrangeSuite(suite.id)"
         />
       </div>

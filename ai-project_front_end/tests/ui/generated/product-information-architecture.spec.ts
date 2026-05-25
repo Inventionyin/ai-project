@@ -2,9 +2,11 @@ import { expect, test } from '@playwright/test'
 
 test.describe('产品信息架构收敛', () => {
   let failureTopQueries: string[]
+  let suiteItems: Array<Record<string, unknown>>
 
   test.beforeEach(async ({ page }) => {
     failureTopQueries = []
+    suiteItems = []
     await page.addInitScript(() => {
       localStorage.setItem('accessToken', 'e2e-smoke-token')
       localStorage.setItem('accessTokenExpiresAt', String(Date.now() + 60 * 60 * 1000))
@@ -162,6 +164,26 @@ test.describe('产品信息架构收敛', () => {
           }),
         })
       }
+      if (url.pathname === '/api/runs' && req.method() === 'POST') {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            code: 0,
+            data: {
+              id: 'run-1',
+              status: 'QUEUED',
+              progress: { done: 0, total: 1 },
+              triggerType: 'MANUAL',
+              executionSource: null,
+              metrics: { total: 1, done: 0, passed: 0, failed: 0, skipped: 0 },
+              suiteId: 'suite-1',
+              envId: 'env-1',
+              startAt: 1710000000,
+            },
+          }),
+        })
+      }
       if (url.pathname === '/api/runs') {
         return route.fulfill({
           status: 200,
@@ -173,14 +195,223 @@ test.describe('产品信息架构收敛', () => {
         return route.fulfill({
           status: 200,
           contentType: 'application/json',
-          body: JSON.stringify({ code: 0, data: { page: 1, pageSize: 200, total: 0, items: [] } }),
+          body: JSON.stringify({
+            code: 0,
+            data: {
+              page: 1,
+              pageSize: 200,
+              total: 1,
+              items: [
+                {
+                  id: 'suite-1',
+                  projectId: '1',
+                  name: '核心回归套件',
+                  defaultEnvId: 'env-1',
+                  config: { timeoutSec: 30, concurrency: 1, retryCount: 0 },
+                  createdAt: 1710000000,
+                  updatedAt: 1710000000,
+                },
+              ],
+            },
+          }),
         })
       }
       if (url.pathname === '/api/projects/1/environments') {
         return route.fulfill({
           status: 200,
           contentType: 'application/json',
+          body: JSON.stringify({ code: 0, data: [{ id: 'env-1', name: '测试环境', baseUrl: 'https://api.test.local' }] }),
+        })
+      }
+      if (url.pathname === '/api/collections/coll-1') {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            code: 0,
+            data: {
+              id: 'coll-1',
+              projectId: '1',
+              name: '登录接口集合',
+              variables: {},
+              groups: [
+                {
+                  id: 'group-1',
+                  collectionId: 'coll-1',
+                  name: '认证',
+                  order: 1,
+                  requests: [
+                    {
+                      id: 'req-1',
+                      collectionId: 'coll-1',
+                      groupId: 'group-1',
+                      name: '登录成功',
+                      method: 'POST',
+                      url: '/api/login',
+                      headers: { 'Content-Type': 'application/json' },
+                      auth: {},
+                      body: { raw: '{"username":"demo","password":"demo"}' },
+                      asserts: { statusCode: 200 },
+                      updatedAt: 1710000000,
+                    },
+                  ],
+                },
+              ],
+              requests: [],
+              updatedAt: 1710000000,
+            },
+          }),
+        })
+      }
+      if (url.pathname === '/api/collections/coll-1/requests/req-1' && req.method() === 'GET') {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            code: 0,
+            data: {
+              id: 'req-1',
+              collectionId: 'coll-1',
+              groupId: 'group-1',
+              name: '登录成功',
+              method: 'POST',
+              url: '/api/login',
+              headers: { 'Content-Type': 'application/json' },
+              auth: {},
+              body: { raw: '{"username":"demo","password":"demo"}' },
+              asserts: { statusCode: 200 },
+              updatedAt: 1710000000,
+            },
+          }),
+        })
+      }
+      if (url.pathname === '/api/collections/coll-1/requests/req-1/run') {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            code: 0,
+            data: {
+              collectionId: 'coll-1',
+              requestId: 'req-1',
+              envId: 'env-1',
+              ok: true,
+              status: 200,
+              elapsedMs: 23,
+              error: null,
+              response: {
+                headers: { 'content-type': 'application/json' },
+                body: '{"token":"mock-token"}',
+              },
+            },
+          }),
+        })
+      }
+      if (url.pathname === '/api/projects/1/collections/coll-1/bindings') {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
           body: JSON.stringify({ code: 0, data: [] }),
+        })
+      }
+      if (url.pathname === '/api/projects/1/requests/req-1/bindings') {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            code: 0,
+            data: [
+              {
+                id: 'binding-1',
+                projectId: '1',
+                testcaseId: 'tc-1',
+                name: '登录成功-接口绑定',
+                linkType: 'REQUEST',
+                requestId: 'req-1',
+                collectionId: 'coll-1',
+                sourceType: 'MANUAL',
+                assertSummary: '状态码为 200',
+                lastRunStatus: null,
+                lastRunAt: null,
+                params: {},
+                priority: 100,
+                enabled: true,
+                version: 1,
+                updatedAt: 1710000000,
+              },
+            ],
+          }),
+        })
+      }
+      if (url.pathname === '/api/testcases') {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            code: 0,
+            data: {
+              page: 1,
+              pageSize: 200,
+              total: 1,
+              items: [{ id: 'tc-1', projectId: '1', title: '登录成功用例', type: 'API', priority: 'P0', status: 'ACTIVE' }],
+            },
+          }),
+        })
+      }
+      if (url.pathname === '/api/testcases/tc-1/bindings' && req.method() === 'POST') {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            code: 0,
+            data: {
+              id: 'binding-1',
+              projectId: '1',
+              testcaseId: 'tc-1',
+              name: '登录成功-接口绑定',
+              linkType: 'REQUEST',
+              requestId: 'req-1',
+              collectionId: 'coll-1',
+              sourceType: 'MANUAL',
+              assertSummary: '状态码为 200',
+              lastRunStatus: null,
+              lastRunAt: null,
+              params: {},
+              priority: 100,
+              enabled: true,
+              version: 1,
+              updatedAt: 1710000000,
+            },
+          }),
+        })
+      }
+      if (url.pathname === '/api/suites/suite-1/items' && req.method() === 'GET') {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ code: 0, data: suiteItems }),
+        })
+      }
+      if (url.pathname === '/api/suites/suite-1/items' && req.method() === 'POST') {
+        const posted = req.postDataJSON() as { items?: Array<Record<string, unknown>> }
+        suiteItems = posted.items || []
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            code: 0,
+            data: suiteItems.map((item, index) => ({
+              id: `suite-item-${index + 1}`,
+              suiteId: 'suite-1',
+              testcaseId: item.testcaseId,
+              orderNo: item.orderNo,
+              params: item.params || {},
+              testcaseTitle: '登录成功用例',
+              testcaseType: 'API',
+              testcasePriority: 'P0',
+              testcaseStatus: 'ACTIVE',
+            })),
+          }),
         })
       }
       if (url.pathname === '/api/doc-ingest/generate-csv') {
@@ -355,5 +586,38 @@ test.describe('产品信息架构收敛', () => {
     await page.getByLabel('选择项目角色').selectOption('editor')
     await expect(page.getByText('可维护需求、用例、接口和执行资产')).toBeVisible()
     await expect(page.getByRole('link', { name: '进入项目设置' })).toHaveAttribute('href', '/projects/1/settings')
+  })
+
+  test('接口集合详情支持调试请求并加入测试套件', async ({ page }) => {
+    await page.goto('/projects/1/assets/apis/coll-1', { waitUntil: 'domcontentloaded' })
+
+    await expect(page.getByRole('heading', { name: 'API 调试台' })).toBeVisible()
+    await expect(page.getByLabel('调试环境')).toBeVisible()
+    await page.getByLabel('调试环境').selectOption('env-1')
+    await page.getByRole('button', { name: '运行请求' }).click()
+    await expect(page.getByText('状态码 200')).toBeVisible()
+    await expect(page.getByText('耗时 23 ms')).toBeVisible()
+    await expect(page.getByText('mock-token')).toBeVisible()
+
+    await expect(page.getByLabel('选择绑定用例')).toBeVisible()
+    await page.getByLabel('选择绑定用例').selectOption('tc-1')
+    await page.getByRole('button', { name: '保存为用例绑定' }).click()
+    await expect(page.getByText('绑定已创建')).toBeVisible()
+
+    await expect(page.getByLabel('选择加入套件')).toBeVisible()
+    await page.getByLabel('选择加入套件').selectOption('suite-1')
+    await page.getByRole('button', { name: '加入测试套件' }).click()
+    await expect(page.getByText('已加入套件：核心回归套件')).toBeVisible()
+    await page.getByRole('button', { name: '加入测试套件' }).click()
+    await expect(page.getByText('已在套件中')).toBeVisible()
+  })
+
+  test('测试套件列表运行真实套件并跳转到运行详情', async ({ page }) => {
+    await page.goto('/projects/1/assets/suites', { waitUntil: 'domcontentloaded' })
+
+    await expect(page.getByText('核心回归套件')).toBeVisible()
+    await page.getByRole('button', { name: '运行' }).click()
+    await expect(page.getByText('运行已触发：run-1')).toBeVisible()
+    await expect(page).toHaveURL(/\/projects\/1\/runs\/run-1$/)
   })
 })

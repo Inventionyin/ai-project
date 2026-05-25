@@ -76,6 +76,20 @@ export type RunApiRequestPayload = {
   envId?: string | null
 }
 
+export type ApiRequestRunResult = {
+  collectionId: string
+  requestId: string
+  envId?: string | null
+  ok: boolean
+  status?: number | null
+  elapsedMs: number
+  error?: string | null
+  response?: {
+    headers?: Record<string, string>
+    body?: string
+  }
+}
+
 export async function fetchCollections(projectId: string, page = 1, pageSize = 200) {
   const pid = String(projectId || '').trim()
   if (!pid) return []
@@ -169,7 +183,7 @@ export async function runCollectionRequest(collectionId: string, requestId: stri
   const rid = String(requestId || '').trim()
   if (!cid) throw new Error('集合 ID 不能为空')
   if (!rid) throw new Error('请求 ID 不能为空')
-  return requestJson<Record<string, unknown>>(`/api/collections/${encodeURIComponent(cid)}/requests/${encodeURIComponent(rid)}/run`, {
+  return requestJson<ApiRequestRunResult>(`/api/collections/${encodeURIComponent(cid)}/requests/${encodeURIComponent(rid)}/run`, {
     method: 'POST',
     headers: {
       ...authHeader(),

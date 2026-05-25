@@ -40,6 +40,30 @@ test.describe('接口集合详情 Postman-like 调试链路', () => {
         })
       }
 
+      if (url.pathname === '/api/projects/1/environments') {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ code: 0, data: [{ id: 'env-1', name: '测试环境' }] }),
+        })
+      }
+
+      if (url.pathname === '/api/testcases' && url.searchParams.get('projectId') === '1') {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ code: 0, data: { page: 1, pageSize: 200, total: 1, items: [{ id: 'TC-001', title: '登录用例' }] } }),
+        })
+      }
+
+      if (url.pathname === '/api/suites' && url.searchParams.get('projectId') === '1') {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ code: 0, data: { page: 1, pageSize: 200, total: 0, items: [] } }),
+        })
+      }
+
       if (url.pathname === '/api/collections/col-1') {
         return route.fulfill({
           status: 200,
@@ -93,7 +117,21 @@ test.describe('接口集合详情 Postman-like 调试链路', () => {
         return route.fulfill({
           status: 200,
           contentType: 'application/json',
-          body: JSON.stringify({ code: 0, data: { statusCode: 200, durationMs: 42, body: { token: 'mock-token' } } }),
+          body: JSON.stringify({
+            code: 0,
+            data: {
+              collectionId: 'col-1',
+              requestId: 'req-col-1',
+              envId: 'env-1',
+              ok: true,
+              status: 200,
+              elapsedMs: 42,
+              response: {
+                headers: { 'content-type': 'application/json' },
+                body: '{"token":"mock-token"}',
+              },
+            },
+          }),
         })
       }
 
@@ -164,20 +202,23 @@ test.describe('接口集合详情 Postman-like 调试链路', () => {
 
     await expect(page.getByText('请求详情表单（可编辑）')).toBeVisible()
     await page.getByPlaceholder('请求名称').fill('登录接口已保存')
-    await page.getByRole('button', { name: '保存' }).click()
+    await page.getByRole('button', { name: '保存', exact: true }).click()
     await expect(page.getByText('保存成功')).toBeVisible()
 
-    await page.getByRole('button', { name: '单请求运行' }).click()
-    await expect(page.getByText('运行结果')).toBeVisible()
-    await expect(page.getByText('"statusCode": 200')).toBeVisible()
+    await page.getByLabel('调试环境').selectOption('env-1')
+    await page.getByRole('button', { name: '运行请求' }).click()
+    await expect(page.getByText('状态码 200')).toBeVisible()
+    await expect(page.getByText('耗时 42 ms')).toBeVisible()
+    await expect(page.getByText('mock-token')).toBeVisible()
 
     await page.getByRole('button', { name: '导出 Postman' }).click()
     await expect(page.getByText('导出成功（postman）')).toBeVisible()
     await expect(page.getByText('导出内容')).toBeVisible()
 
-    await page.getByPlaceholder('TestCase ID').fill('TC-001')
+    await page.getByLabel('选择绑定用例').selectOption('TC-001')
+    await page.getByPlaceholder('绑定名称').fill('登录绑定')
     await page.getByPlaceholder('断言摘要，可留空').fill('状态码 200')
-    await page.getByRole('button', { name: '绑定 TestCase' }).click()
+    await page.getByRole('button', { name: '保存为用例绑定' }).click()
     await expect(page.getByText('绑定已创建')).toBeVisible()
     await expect(page.getByText('TC-001')).toBeVisible()
   })
