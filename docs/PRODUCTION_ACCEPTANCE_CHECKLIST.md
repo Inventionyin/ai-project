@@ -1,6 +1,6 @@
 # WeiTesting 生产验收收口清单
 
-更新时间：2026-05-21
+更新时间：2026-05-25
 
 ## 已完成
 
@@ -21,6 +21,12 @@
 - 已补 GitHub Actions CI：`.github/workflows/ci.yml`。
 - GitHub Actions 后端作业已包含 PostgreSQL 服务，并运行真实数据库 E2E。
 - Oracle 生产服务器已启用 `weitesting-postgres-backup.timer`，首次备份成功生成在 `/opt/weitesting/backups/postgres/`。
+- GitHub Actions `real-e2e` 已完成 Jira / 禅道 / Jenkins / 钉钉真实 smoke 与可逆业务闭环，Run #63/#64/#65 均为 success。
+- 生产域名与 HTTPS 已完成收口：`https://app.evanshine.me`、`https://api.evanshine.me`、`https://grafana.evanshine.me`、`https://jenkins.evanshine.me` 均在服务器生产就绪检查中返回 READY。
+- Oracle 服务器生产就绪检查已通过：`8 READY / 0 WARN / 0 BLOCKED`，证据归档在 `artifacts/server-verification/production-readiness-server-20260525-101244.json`。
+- PostgreSQL 最新生产备份 `/opt/weitesting/backups/postgres/weitesting-20260525T021501Z.dump.gz` 已通过 `pg_restore --list` 可读性验证。
+- Jenkins 最新备份 `/opt/weitesting/backups/jenkins/jenkins-20260525-031701.tgz` 已完成恢复演练，解包文件数 `1681`，缺失必需路径为空。
+- 真实服务器性能基线趋势已生成，趋势历史 `history=3`，最新结论 `READY`，证据归档在 `artifacts/server-verification/performance-trend-server.json`。
 - 默认关闭开发用身份头旁路，`X-User-Id` / `X-Tenant-Id` 只有显式开启 `AUTH_HEADER_IMPERSONATION_ENABLED=true` 时可用。
 
 ## 交付前必须确认
@@ -28,10 +34,8 @@
 - 业务方确认当前 P0 缺陷处理状态。
 - 如果 P0 缺陷已修复或降级，在平台更新缺陷状态后重新生成验收报告快照。
 - 重新生成“验收汇报稿”，以最新快照作为最终验收附件。
-- 泄露过或临时使用过的外部 Token 完成轮换。
-- Jira / 禅道 / Jenkins / 钉钉至少各跑一次真实闭环，并保留记录。
-- Jenkins 生产入口完成域名、HTTPS、访问控制和备份。
-- 数据库备份需要定期抽查恢复演练，至少执行一次 `scripts/verify-production-backup.sh` 并保存记录。
+- 泄露过或临时使用过的外部 Token 完成轮换；如果本次只是验收环境，可在正式上线前统一轮换。
+- Jenkins/Grafana 是否额外接 Cloudflare Access 属生产增强项，不阻塞当前验收。
 
 ## 本地验收命令
 
