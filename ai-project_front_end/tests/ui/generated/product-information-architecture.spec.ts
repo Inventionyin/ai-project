@@ -1,7 +1,10 @@
 import { expect, test } from '@playwright/test'
 
 test.describe('产品信息架构收敛', () => {
+  let failureTopQueries: string[]
+
   test.beforeEach(async ({ page }) => {
+    failureTopQueries = []
     await page.addInitScript(() => {
       localStorage.setItem('accessToken', 'e2e-smoke-token')
       localStorage.setItem('accessTokenExpiresAt', String(Date.now() + 60 * 60 * 1000))
@@ -129,6 +132,7 @@ test.describe('产品信息架构收敛', () => {
         })
       }
       if (url.pathname === '/api/projects/1/dashboard/failure-top') {
+        failureTopQueries.push(url.search)
         return route.fulfill({
           status: 200,
           contentType: 'application/json',
@@ -177,6 +181,28 @@ test.describe('产品信息架构收敛', () => {
           status: 200,
           contentType: 'application/json',
           body: JSON.stringify({ code: 0, data: [] }),
+        })
+      }
+      if (url.pathname === '/api/doc-ingest/generate-csv') {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            code: 0,
+            data: {
+              fileName: 'generated_cases.csv',
+              csvText: 'title,apiMethod,apiUrl,expectedResult\n登录成功,POST,/api/login,返回 token',
+              itemCount: 1,
+              status: 'SUCCESS',
+            },
+          }),
+        })
+      }
+      if (url.pathname === '/api/testcases/import') {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ code: 0, data: { imported: 1, skipped: 0, errors: [] } }),
         })
       }
       return route.continue()
@@ -240,6 +266,7 @@ test.describe('产品信息架构收敛', () => {
     await expect(page.getByLabel('选择资产操作')).toBeVisible()
     await page.getByLabel('选择资产操作').selectOption('批量编辑')
     await expect(page.getByText('批量编辑字段、标签、模块和关联关系')).toBeVisible()
+    await expect(page.getByRole('link', { name: '前往用例管理' })).toHaveAttribute('href', '/projects/1/assets/testcases')
     await page.getByLabel('选择资产类型').selectOption('接口管理')
     await expect(page.getByRole('link', { name: /进入接口/ })).toHaveAttribute('href', '/projects/1/assets/apis')
 
@@ -276,8 +303,9 @@ test.describe('产品信息架构收敛', () => {
     await expect(page.getByLabel('时间范围')).toBeVisible()
     await expect(page.getByLabel('统计维度')).toBeVisible()
     await page.getByLabel('时间范围').selectOption('14')
-    await page.getByLabel('统计维度').selectOption('module')
-    await expect(page.getByText('当前筛选：近 14 天 · 按模块')).toBeVisible()
+    await page.getByLabel('统计维度').selectOption('suite')
+    await expect(page.getByText('当前筛选：近 14 天 · 按套件')).toBeVisible()
+    await expect.poll(() => failureTopQueries.some((query) => query.includes('days=14') && query.includes('dimension=suite'))).toBeTruthy()
 
     await page.getByRole('button', { name: /自定义/ }).click()
     await page.getByRole('checkbox', { name: '近 7 天趋势' }).uncheck()
@@ -304,9 +332,28 @@ test.describe('产品信息架构收敛', () => {
     await expect(page.getByText('Cloud Sync')).not.toBeVisible()
     await expect(page.getByText('生成并导入到用例列表')).not.toBeVisible()
     await expect(page.getByText('生成候选用例，确认后入库')).toBeVisible()
+    await page.getByPlaceholder('粘贴接口文档内容（支持 Markdown / OpenAPI JSON 或 YAML）...').fill('POST /api/login')
+    await page.getByRole('button', { name: '生成候选用例，确认后入库' }).click()
+    await expect(page.getByText('登录成功')).toBeVisible()
+    await expect(page.getByText('去重状态')).toBeVisible()
+    await expect(page.getByLabel('确认已完成去重检查和人工审核')).toBeVisible()
+    await page.getByLabel('更多操作').selectOption('import')
+    await expect(page.getByRole('button', { name: '执行操作' })).toBeDisabled()
+    await page.getByLabel('确认已完成去重检查和人工审核').check()
+    await expect(page.getByRole('button', { name: '执行操作' })).toBeEnabled()
     await expect(page.locator('div').filter({ hasText: /^测试用例生成$/ })).toBeVisible()
     await page.getByLabel('智能体类型').selectOption('PERF')
     await expect(page.locator('div').filter({ hasText: /^性能脚本生成$/ })).toBeVisible()
     await expect(page.getByText('性能参数')).toBeVisible()
+  })
+
+  test('权限设置页提供最小可用角色与成员入口', async ({ page }) => {
+    await page.goto('/settings/rbac', { waitUntil: 'domcontentloaded' })
+
+    await expect(page.getByRole('heading', { name: '权限与成员' })).toBeVisible()
+    await expect(page.getByLabel('选择项目角色')).toBeVisible()
+    await page.getByLabel('选择项目角色').selectOption('editor')
+    await expect(page.getByText('可维护需求、用例、接口和执行资产')).toBeVisible()
+    await expect(page.getByRole('link', { name: '进入项目设置' })).toHaveAttribute('href', '/projects/1/settings')
   })
 })

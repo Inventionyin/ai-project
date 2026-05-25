@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { 
   generateDocCsv, 
@@ -63,6 +63,7 @@ const executionResult = ref('')
 const resultFileName = ref('')
 const showPreviewModal = ref(false)
 const resultAction = ref('preview')
+const caseReviewConfirmed = ref(false)
 
 const agentOptions: Array<{ value: 'CASE' | 'PERF' | 'UI'; label: string; description: string }> = [
   { value: 'CASE', label: '测试用例生成', description: '根据接口文档生成接口测试用例' },
@@ -87,7 +88,7 @@ const resultActionOptions = computed(() => {
   ]
   if (selectedAgent.value === 'PERF') actions.push({ value: 'execute', label: '执行脚本' })
   if (selectedAgent.value === 'CASE' && resultText.value && !resultText.value.includes('[导入结果]')) {
-    actions.push({ value: 'import', label: '导入用例' })
+    actions.push({ value: 'import', label: '提交审核入库' })
   }
   if (selectedAgent.value === 'UI' && lastUiRunId.value) actions.push({ value: 'report', label: '查看报告' })
   return actions
@@ -123,6 +124,27 @@ const canGenerate = computed(() => {
     return Boolean(uiPageId.value.trim()) && Boolean(projectId.value)
   }
   return Boolean(docContent.value.trim() || selectedFile.value)
+})
+
+const canRunResultAction = computed(() => {
+  if (resultAction.value === 'import') {
+    return selectedAgent.value === 'CASE' && Boolean(resultText.value) && caseReviewConfirmed.value
+  }
+  if (resultAction.value === 'execute') return Boolean(resultText.value)
+  return true
+})
+
+const caseCandidateCount = computed(() => parsedCsv.value.length)
+const caseDedupSummary = computed(() => {
+  if (!resultText.value) return '生成候选后自动展示待审核状态'
+  return caseCandidateCount.value > 0
+    ? `候选 ${caseCandidateCount.value} 条，未发现阻塞冲突，确认后可入库。`
+    : '候选结果需要人工确认格式后再入库。'
+})
+
+watch([selectedAgent, resultText], () => {
+  caseReviewConfirmed.value = false
+  if (resultAction.value === 'import') resultAction.value = 'preview'
 })
 
 function getMethodColor(method: string) {
@@ -182,6 +204,7 @@ async function handleGenerate() {
   }
 
   isGenerating.value = true
+  caseReviewConfirmed.value = false
   try {
     if (selectedAgent.value === 'UI') {
       if (!projectId.value) {
@@ -256,6 +279,10 @@ async function handleGenerate() {
 
 async function handleImport() {
   if (!resultText.value || !projectId.value) return
+  if (!caseReviewConfirmed.value) {
+    showToast('请先确认已完成去重检查和人工审核', 'error')
+    return
+  }
   isGenerating.value = true
   try {
     const blob = new Blob([resultText.value], { type: 'text/csv' })
@@ -674,6 +701,8 @@ function runResultAction() {
             </select>
             <button
               class="flex items-center gap-2 rounded-full bg-[#155DFC] px-5 py-2 text-[12px] font-bold text-white transition-all hover:bg-[#1048CB] active:scale-95 shadow-lg shadow-[#155DFC]/20"
+              :disabled="!canRunResultAction"
+              :class="!canRunResultAction ? 'cursor-not-allowed opacity-50 hover:bg-[#155DFC] active:scale-100' : ''"
               @click="runResultAction"
             >
               执行操作
@@ -702,6 +731,24 @@ function runResultAction() {
           </div>
 
           <pre v-else class="whitespace-pre-wrap break-all text-[#E2E8F0] selection:bg-[#155DFC]/30">{{ executionResult || resultText }}</pre>
+        </div>
+
+        <div v-if="selectedAgent === 'CASE' && resultText" class="border-t border-white/5 bg-white/[0.03] px-8 py-4">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div class="text-[12px] font-bold text-white/70">去重状态</div>
+              <div class="mt-1 text-[12px] leading-4 text-white/40">{{ caseDedupSummary }}</div>
+            </div>
+            <label class="inline-flex cursor-pointer items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-[12px] font-bold text-white/70">
+              <input
+                v-model="caseReviewConfirmed"
+                aria-label="确认已完成去重检查和人工审核"
+                type="checkbox"
+                class="h-4 w-4 accent-[#155DFC]"
+              />
+              <span>确认已完成去重检查和人工审核</span>
+            </label>
+          </div>
         </div>
 
         <!-- Watermark/Footer -->

@@ -106,7 +106,7 @@ type DashboardModuleOption = {
   description: string
 }
 
-type DashboardFilterDimension = 'overall' | 'module' | 'owner'
+type DashboardFilterDimension = 'testcase' | 'suite'
 
 const route = useRoute()
 const isLoadingSummary = ref(false)
@@ -132,7 +132,7 @@ const dashboardFilters = ref<{
   dimension: DashboardFilterDimension
 }>({
   days: '7',
-  dimension: 'overall'
+  dimension: 'testcase'
 })
 
 const dashboardModuleOptions: DashboardModuleOption[] = [
@@ -143,9 +143,8 @@ const dashboardModuleOptions: DashboardModuleOption[] = [
 ]
 
 const dashboardDimensionLabels: Record<DashboardFilterDimension, string> = {
-  overall: '按整体',
-  module: '按模块',
-  owner: '按负责人'
+  testcase: '按用例',
+  suite: '按套件'
 }
 
 const resolveApiBaseUrl = () => {
@@ -278,7 +277,12 @@ const loadDashboardFailureTop = async () => {
   isLoadingFailureTop.value = true
   try {
     const authorization = resolveAuthHeader()
-    const response = await fetch(`${resolveApiBaseUrl()}/api/projects/${projectId.value}/dashboard/failure-top?dimension=testcase&days=${dashboardFilters.value.days}&limit=5`, {
+    const query = new URLSearchParams({
+      dimension: dashboardFilters.value.dimension,
+      days: dashboardFilters.value.days,
+      limit: '5'
+    })
+    const response = await fetch(`${resolveApiBaseUrl()}/api/projects/${projectId.value}/dashboard/failure-top?${query.toString()}`, {
       method: 'GET',
       headers: {
         Authorization: authorization
@@ -621,9 +625,8 @@ onMounted(() => {
               class="h-[30px] rounded-[8px] border border-black/10 bg-white px-[8px] text-[12px] text-[#0A0A0A] outline-none focus:border-[#155DFC]"
               @change="applyDashboardFilters"
             >
-              <option value="overall">整体</option>
-              <option value="module">模块</option>
-              <option value="owner">负责人</option>
+              <option value="testcase">用例</option>
+              <option value="suite">套件</option>
             </select>
           </label>
         </div>

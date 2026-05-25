@@ -25,6 +25,7 @@
 | Jenkins 备份恢复演练 | DONE | 最新备份 `/opt/weitesting/backups/jenkins/jenkins-20260525-031701.tgz` 可解包，`extractedFileCount=1681`，`missingRequiredPaths=[]`；本地归档：`artifacts/server-verification/jenkins-restore-drill-latest.json` |
 | 服务器性能基线趋势 | DONE | Oracle 服务器执行 `run_performance_baseline.sh`，趋势历史 `history=3`，最新结论 `READY`；本地归档：`artifacts/server-verification/performance-trend-server.json` |
 | PowerShell 性能趋势脚本 | DONE | 修复第二次趋势对比读取目标快照元数据的问题，验证连续运行可写入 `trend-summary.json` |
+| GitHub `real-e2e` 全量门禁 | DONE | Run #98 success，head `7c44de58`；覆盖后端 pytest、前端 build、generated E2E、生产 readiness dry-run、性能 dry-run、Jira/禅道/Jenkins/钉钉 smoke、可逆业务闭环、前端真实 E2E |
 
 ## 2026-05-21 当前诊断结果
 
@@ -56,6 +57,7 @@ GitHub Actions 会从仓库 `Secrets / Variables` 注入外部系统配置，本
 | `#63` | `externalSmokeTargets=Jira`，业务闭环关闭 | DONE | Jira account API reachable；Jira project `AIT` reachable |
 | `#64` | `externalSmokeTargets=Jira,Zentao,Jenkins,DingTalk`，业务闭环关闭 | DONE | DingTalk webhook accepted；Jenkins job metadata reachable；Jira account/project reachable；Zentao product API reachable |
 | `#65` | `externalSmokeTargets=Jira,Zentao,Jenkins,DingTalk`，业务闭环开启 | DONE | Jenkins build trigger accepted；Jira issue `AIT-11` created/deleted；Zentao bug `5` created/deleted；DingTalk webhook accepted |
+| `#98` | `includeFrontendRealE2E=true`，`externalSmokeTargets=Jira,Zentao,Jenkins,DingTalk`，业务闭环开启 | DONE | 后端 pytest、前端 build、generated E2E、生产 readiness/performance dry-run、外部系统 smoke、Jira/禅道/Jenkins/钉钉业务闭环、前端真实 E2E 全部通过 |
 
 对应 GitHub Actions 页面：
 
@@ -63,6 +65,7 @@ GitHub Actions 会从仓库 `Secrets / Variables` 注入外部系统配置，本
 https://github.com/Inventionyin/ai-project/actions/runs/26235196113
 https://github.com/Inventionyin/ai-project/actions/runs/26235455869
 https://github.com/Inventionyin/ai-project/actions/runs/26235787731
+https://github.com/Inventionyin/ai-project/actions/runs/26405181929
 ```
 
 结论：你之前填入的 GitHub Secrets/Variables 已经被 CI 正确读取，真实外部系统 smoke 和可逆业务闭环均已通过。
@@ -84,9 +87,9 @@ https://github.com/Inventionyin/ai-project/actions/runs/26235787731
 
 | 编号 | 模块 | 状态 | 需要你/客户提供 | 我能执行的动作 | 验收证据 |
 |---|---|---|---|---|---|
-| A1 | 真实外部系统配置诊断 | DONE | GitHub Secrets/Variables 已配置 | GitHub Actions `real-e2e.yml` 已读取配置 | Run #63/#64/#65 |
-| A2 | 真实外部系统 smoke | DONE | 外网、有效 token | GitHub Actions 已执行 smoke | DingTalk/Jira/Jenkins/Zentao smoke 输出 |
-| A3 | 真实业务闭环 | DONE | 已允许创建/删除测试 issue/bug，允许触发 Jenkins job | GitHub Actions 已执行 business closure | Jira issue 创建/删除、禅道 bug 创建/删除、Jenkins build accepted、钉钉消息 |
+| A1 | 真实外部系统配置诊断 | DONE | GitHub Secrets/Variables 已配置 | GitHub Actions `real-e2e.yml` 已读取配置 | Run #63/#64/#65/#98 |
+| A2 | 真实外部系统 smoke | DONE | 外网、有效 token | GitHub Actions 已执行 smoke | DingTalk/Jira/Jenkins/Zentao smoke 输出，Run #98 success |
+| A3 | 真实业务闭环 | DONE | 已允许创建/删除测试 issue/bug，允许触发 Jenkins job | GitHub Actions 已执行 business closure | Jira issue 创建/删除、禅道 bug 创建/删除、Jenkins build accepted、钉钉消息，Run #98 success |
 | B1 | 域名解析 | DONE | 已沿用 `evanshine.me` 子域名 | 已核对 `app/api/jenkins/grafana` 生产入口 | 生产就绪检查全部 HTTP 200 |
 | B2 | HTTPS | DONE | 服务器已提供 HTTPS 入口 | 已核对 `app/api/jenkins/grafana` HTTPS | `production-readiness-server-20260525-101244.json` |
 | B3 | 访问控制 | DONE | Jenkins/Grafana 已有登录入口；Cloudflare Access 属增强项 | 已核对 Jenkins/Grafana 不作为匿名业务入口开放 | Jenkins login、Grafana health 均可达 |

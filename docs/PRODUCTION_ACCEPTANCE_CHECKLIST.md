@@ -21,7 +21,7 @@
 - 已补 GitHub Actions CI：`.github/workflows/ci.yml`。
 - GitHub Actions 后端作业已包含 PostgreSQL 服务，并运行真实数据库 E2E。
 - Oracle 生产服务器已启用 `weitesting-postgres-backup.timer`，首次备份成功生成在 `/opt/weitesting/backups/postgres/`。
-- GitHub Actions `real-e2e` 已完成 Jira / 禅道 / Jenkins / 钉钉真实 smoke 与可逆业务闭环，Run #63/#64/#65 均为 success。
+- GitHub Actions `real-e2e` 已完成 Jira / 禅道 / Jenkins / 钉钉真实 smoke 与可逆业务闭环，Run #63/#64/#65 均为 success；2026-05-25 Run #98 追加通过前端真实 E2E、外部系统 smoke 与业务闭环全量门禁。
 - 生产域名与 HTTPS 已完成收口：`https://app.evanshine.me`、`https://api.evanshine.me`、`https://grafana.evanshine.me`、`https://jenkins.evanshine.me` 均在服务器生产就绪检查中返回 READY。
 - Oracle 服务器生产就绪检查已通过：`8 READY / 0 WARN / 0 BLOCKED`，证据归档在 `artifacts/server-verification/production-readiness-server-20260525-101244.json`。
 - PostgreSQL 最新生产备份 `/opt/weitesting/backups/postgres/weitesting-20260525T021501Z.dump.gz` 已通过 `pg_restore --list` 可读性验证。

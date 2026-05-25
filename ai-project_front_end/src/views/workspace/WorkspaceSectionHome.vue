@@ -74,8 +74,14 @@
                 </select>
               </label>
             </div>
-            <div class="mt-3 rounded-[8px] bg-[#F8FAFC] px-3 py-2 text-[12px] leading-5 text-[#374151]">
-              {{ selectedAssetOperation.description }}
+            <div class="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-[8px] bg-[#F8FAFC] px-3 py-2">
+              <div class="text-[12px] leading-5 text-[#374151]">{{ selectedAssetOperation.description }}</div>
+              <RouterLink
+                :to="selectedAssetOperation.to"
+                class="inline-flex h-8 items-center justify-center rounded-[8px] border border-black/10 bg-white px-3 text-[12px] font-medium text-[#155DFC]"
+              >
+                {{ selectedAssetOperation.action }}
+              </RouterLink>
             </div>
           </div>
 
@@ -126,6 +132,8 @@ type Action = {
 type AssetOperation = {
   title: string
   description: string
+  action: string
+  to: string
 }
 
 type SectionConfig = {
@@ -181,13 +189,13 @@ const zeroSummary: WorkspaceSummary = {
   }
 }
 
-const assetOperations: AssetOperation[] = [
-  { title: '导入', description: '按模板导入需求、用例或接口集合，先校验预览再提交。' },
-  { title: '导出', description: '导出当前筛选结果，用于评审、备份或给上面的人验收。' },
-  { title: '上传', description: '上传需求文档、用例表格、Swagger/OpenAPI 或补充附件。' },
-  { title: '编辑', description: '编辑标题、优先级、状态、负责人、模块和说明。' },
-  { title: '删除', description: '删除前需要确认影响范围，避免误删正式资产。' },
-  { title: '批量编辑', description: '批量编辑字段、标签、模块和关联关系。' }
+const buildAssetOperations = (pid: string): AssetOperation[] => [
+  { title: '导入', description: '按模板导入需求、用例或接口集合，先校验预览再提交。', action: '前往用例管理', to: `/projects/${pid}/assets/testcases` },
+  { title: '导出', description: '导出当前筛选结果，用于评审、备份或给上面的人验收。', action: '前往用例管理', to: `/projects/${pid}/assets/testcases` },
+  { title: '上传', description: '上传需求文档、用例表格、Swagger/OpenAPI 或补充附件。', action: '前往需求管理', to: `/projects/${pid}/requirements/docs` },
+  { title: '编辑', description: '编辑标题、优先级、状态、负责人、模块和说明。', action: '前往用例管理', to: `/projects/${pid}/assets/testcases` },
+  { title: '删除', description: '删除前需要确认影响范围，避免误删正式资产。', action: '前往用例管理', to: `/projects/${pid}/assets/testcases` },
+  { title: '批量编辑', description: '批量编辑字段、标签、模块和关联关系。', action: '前往用例管理', to: `/projects/${pid}/assets/testcases` }
 ]
 
 function formatTime(value: number | null) {
@@ -317,12 +325,13 @@ const configs: Record<typeof props.section, SectionConfig> = {
 
 const config = computed(() => configs[props.section])
 const actionOptions = computed(() => config.value.actions(projectId.value))
+const assetOperations = computed(() => buildAssetOperations(projectId.value))
 const selectedAction = computed(() => {
   return actionOptions.value.find((action) => action.title === selectedActionTitle.value) || actionOptions.value[0]
 })
 const secondaryActions = computed(() => actionOptions.value.filter((action) => action.title !== selectedAction.value.title))
 const selectedAssetOperation = computed(() => {
-  return assetOperations.find((operation) => operation.title === selectedAssetOperationTitle.value) || assetOperations[0]
+  return assetOperations.value.find((operation) => operation.title === selectedAssetOperationTitle.value) || assetOperations.value[0]
 })
 
 watch(

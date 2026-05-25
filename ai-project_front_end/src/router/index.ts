@@ -38,6 +38,7 @@ const CiTokenGovernance = defineAsyncComponent(() => import('@/views/settings/Ci
 const AiCapabilities = defineAsyncComponent(() => import('@/views/settings/AiCapabilities.vue'))
 const OpsHealth = defineAsyncComponent(() => import('@/views/settings/OpsHealth.vue'))
 const AcceptanceCenter = defineAsyncComponent(() => import('@/views/settings/AcceptanceCenter.vue'))
+const Rbac = defineAsyncComponent(() => import('@/views/settings/Rbac.vue'))
 const WorkspaceSectionHome = defineAsyncComponent(() => import('@/views/workspace/WorkspaceSectionHome.vue'))
 
 function createProjectShellPage(activeAssetChild: string, Content: Parameters<typeof h>[0]) {
@@ -332,7 +333,7 @@ const router = createRouter({
     },
     {
       path: '/settings/rbac',
-      component: createPlaceholderPage('权限与成员')
+      component: Rbac
     },
     {
       path: '/settings/audit',
