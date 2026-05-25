@@ -190,7 +190,9 @@ function Get-EndpointSummary {
 function Get-TargetComparison {
     param(
         [object]$Current,
-        [object]$Previous
+        [object]$Previous,
+        [object]$PreviousGeneratedAt = $null,
+        [object]$PreviousReportPath = $null
     )
 
     if (-not $Previous) {
@@ -210,8 +212,8 @@ function Get-TargetComparison {
     }
 
     return [PSCustomObject]@{
-        previousGeneratedAt = $Previous.generatedAt
-        previousReportPath = $Previous.reportPath
+        previousGeneratedAt = $PreviousGeneratedAt
+        previousReportPath = $PreviousReportPath
         p50DeltaMs = if ($Current.p50Ms -ne $null -and $Previous.p50Ms -ne $null) { [Math]::Round($Current.p50Ms - $Previous.p50Ms, 2) } else { $null }
         p90DeltaMs = if ($Current.p90Ms -ne $null -and $Previous.p90Ms -ne $null) { [Math]::Round($Current.p90Ms - $Previous.p90Ms, 2) } else { $null }
         p95DeltaMs = if ($Current.p95Ms -ne $null -and $Previous.p95Ms -ne $null) { [Math]::Round($Current.p95Ms - $Previous.p95Ms, 2) } else { $null }
@@ -582,8 +584,8 @@ function Update-TrendSummary {
     $comparison = [PSCustomObject]@{
         previousGeneratedAt = $previousGeneratedAt
         previousReportPath = $previousReportPath
-        backend = if ($previousSnapshot) { Get-TargetComparison -Current $currentSnapshot.backend -Previous $previousSnapshot.backend } else { Get-TargetComparison -Current $currentSnapshot.backend -Previous $null }
-        frontend = if ($previousSnapshot) { Get-TargetComparison -Current $currentSnapshot.frontend -Previous $previousSnapshot.frontend } else { Get-TargetComparison -Current $currentSnapshot.frontend -Previous $null }
+        backend = if ($previousSnapshot) { Get-TargetComparison -Current $currentSnapshot.backend -Previous $previousSnapshot.backend -PreviousGeneratedAt $previousGeneratedAt -PreviousReportPath $previousReportPath } else { Get-TargetComparison -Current $currentSnapshot.backend -Previous $null }
+        frontend = if ($previousSnapshot) { Get-TargetComparison -Current $currentSnapshot.frontend -Previous $previousSnapshot.frontend -PreviousGeneratedAt $previousGeneratedAt -PreviousReportPath $previousReportPath } else { Get-TargetComparison -Current $currentSnapshot.frontend -Previous $null }
         business = $businessComparison
         regressionCount = @($businessComparison | Where-Object { ($_.p95DeltaMs -ne $null -and $_.p95DeltaMs -gt 0) -or ($_.errorCountDelta -ne $null -and $_.errorCountDelta -gt 0) }).Count
     }
