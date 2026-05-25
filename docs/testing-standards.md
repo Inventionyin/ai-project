@@ -21,7 +21,7 @@
 ### 后端真实数据库 E2E
 
 - 仅在需要验证真实 SQL、Alembic、事务或数据导入链路时启用。
-- 本地默认可以跳过，CI 或专项验收使用 `-IncludeE2E`。
+- 本地一键门禁使用 `scripts/verify_real_e2e.ps1`，会自动创建/迁移测试库并运行后端真实库 E2E。
 - 测试库连接串不得指向生产库。
 
 ### 前端构建测试
@@ -61,19 +61,19 @@ npm run build
 ### 日常本地验证
 
 ```powershell
-.\scripts\verify-local.ps1
+.\scripts\verify_real_e2e.ps1
 ```
 
-### 完整后端回归
+### 只跑真实后端 E2E
 
 ```powershell
-.\scripts\verify-local.ps1 -FullBackend
+.\scripts\verify_real_e2e.ps1 -BackendE2EOnly
 ```
 
-### 包含真实 E2E
+### 包含前端真实 E2E
 
 ```powershell
-.\scripts\verify-local.ps1 -IncludeE2E
+.\scripts\verify_real_e2e.ps1 -WithFrontendRealE2E
 ```
 
 ### 单独后端定向测试

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { RefreshCw, CheckCircle, XCircle, Clock, Activity } from 'lucide-vue-next'
+import { RefreshCw, CheckCircle, XCircle, Clock, Activity, SlidersHorizontal } from 'lucide-vue-next'
 import QualityGateCard from '@/components/figma/QualityGateCard.vue'
 import FailureTop5Card from '@/components/figma/FailureTop5Card.vue'
 import RecentRunsCard from '@/components/figma/RecentRunsCard.vue'
@@ -98,6 +98,16 @@ type RecentRunCardItem = {
   right: { type: 'text'; value: string; color: string } | { type: 'spinner' }
 }
 
+type DashboardModuleKey = 'trend' | 'qualityGate' | 'failureTop' | 'recentRuns'
+
+type DashboardModuleOption = {
+  key: DashboardModuleKey
+  label: string
+  description: string
+}
+
+type DashboardFilterDimension = 'testcase' | 'suite'
+
 const route = useRoute()
 const isLoadingSummary = ref(false)
 const summary = ref<DashboardSummaryData | null>(null)
@@ -109,6 +119,33 @@ const isLoadingTrend = ref(false)
 const trendItems = ref<DashboardTrendItem[]>([])
 const isLoadingRecentRuns = ref(false)
 const recentRuns = ref<RecentRunCardItem[]>([])
+const isCustomizeOpen = ref(false)
+const layoutMessage = ref('')
+const visibleModules = ref<Record<DashboardModuleKey, boolean>>({
+  trend: true,
+  qualityGate: true,
+  failureTop: true,
+  recentRuns: true
+})
+const dashboardFilters = ref<{
+  days: '7' | '14' | '30'
+  dimension: DashboardFilterDimension
+}>({
+  days: '7',
+  dimension: 'testcase'
+})
+
+const dashboardModuleOptions: DashboardModuleOption[] = [
+  { key: 'trend', label: '近 7 天趋势', description: '通过率与失败数趋势图' },
+  { key: 'qualityGate', label: '质量门禁', description: '上线/验收门禁结果' },
+  { key: 'failureTop', label: '失败 Top 5', description: '高频失败用例排行' },
+  { key: 'recentRuns', label: '最近运行', description: '最新执行记录回执' }
+]
+
+const dashboardDimensionLabels: Record<DashboardFilterDimension, string> = {
+  testcase: '按用例',
+  suite: '按套件'
+}
 
 const resolveApiBaseUrl = () => {
   const envBase = String(import.meta.env.VITE_API_BASE_URL || '').trim()
@@ -125,7 +162,9 @@ const resolveAuthHeader = () => {
 }
 
 const projectId = computed(() => String(route.params.projectId || '').trim())
+const layoutStorageKey = computed(() => `weitesting.dashboard.layout.${projectId.value || 'default'}`)
 const dashboardDate = computed(() => summary.value?.date || '-')
+const dashboardFilterSummary = computed(() => `当前筛选：近 ${dashboardFilters.value.days} 天 · ${dashboardDimensionLabels[dashboardFilters.value.dimension]}`)
 const totalRuns = computed(() => summary.value?.totalRuns ?? 0)
 const passedRuns = computed(() => summary.value?.passedRuns ?? 0)
 const failedRuns = computed(() => summary.value?.failedRuns ?? 0)
@@ -238,7 +277,12 @@ const loadDashboardFailureTop = async () => {
   isLoadingFailureTop.value = true
   try {
     const authorization = resolveAuthHeader()
-    const response = await fetch(`${resolveApiBaseUrl()}/api/projects/${projectId.value}/dashboard/failure-top?dimension=testcase&days=7&limit=5`, {
+    const query = new URLSearchParams({
+      dimension: dashboardFilters.value.dimension,
+      days: dashboardFilters.value.days,
+      limit: '5'
+    })
+    const response = await fetch(`${resolveApiBaseUrl()}/api/projects/${projectId.value}/dashboard/failure-top?${query.toString()}`, {
       method: 'GET',
       headers: {
         Authorization: authorization
@@ -293,7 +337,7 @@ const loadDashboardTrend = async () => {
   isLoadingTrend.value = true
   try {
     const authorization = resolveAuthHeader()
-    const response = await fetch(`${resolveApiBaseUrl()}/api/projects/${projectId.value}/dashboard/trend?days=7`, {
+    const response = await fetch(`${resolveApiBaseUrl()}/api/projects/${projectId.value}/dashboard/trend?days=${dashboardFilters.value.days}`, {
       method: 'GET',
       headers: {
         Authorization: authorization
@@ -369,6 +413,55 @@ const refreshDashboard = async () => {
   await Promise.all([loadDashboardSummary(), loadDashboardFailureTop(), loadDashboardQualityGate(), loadDashboardTrend(), loadRecentRuns()])
 }
 
+const applyDashboardFilters = () => {
+  void Promise.all([loadDashboardFailureTop(), loadDashboardTrend()])
+}
+
+const normalizeLayout = (source: unknown) => {
+  const next = { ...visibleModules.value }
+  if (!source || typeof source !== 'object') return next
+  const raw = source as Record<string, unknown>
+  for (const option of dashboardModuleOptions) {
+    if (typeof raw[option.key] === 'boolean') {
+      next[option.key] = raw[option.key] as boolean
+    }
+  }
+  if (!Object.values(next).some(Boolean)) {
+    next.trend = true
+  }
+  return next
+}
+
+const loadDashboardLayout = () => {
+  try {
+    const raw = localStorage.getItem(layoutStorageKey.value)
+    if (!raw) return
+    visibleModules.value = normalizeLayout(JSON.parse(raw))
+  } catch {
+    visibleModules.value = normalizeLayout(null)
+  }
+}
+
+const saveDashboardLayout = () => {
+  visibleModules.value = normalizeLayout(visibleModules.value)
+  localStorage.setItem(layoutStorageKey.value, JSON.stringify(visibleModules.value))
+  layoutMessage.value = '布局已保存'
+  isCustomizeOpen.value = false
+  window.setTimeout(() => {
+    layoutMessage.value = ''
+  }, 2200)
+}
+
+const resetDashboardLayout = () => {
+  visibleModules.value = {
+    trend: true,
+    qualityGate: true,
+    failureTop: true,
+    recentRuns: true
+  }
+  saveDashboardLayout()
+}
+
 const buildDefaultTrendItems = () => {
   const today = new Date()
   return Array.from({ length: 7 }, (_, i) => {
@@ -424,6 +517,7 @@ const passPoints = computed(() => passRate.value.map((v, i) => `${xForIndex(i)},
 const failPoints = computed(() => failCount.value.map((v, i) => `${xForIndex(i)},${yForCount(v)}`).join(' '))
 
 onMounted(() => {
+  loadDashboardLayout()
   void refreshDashboard()
   const updateSize = () => {
     const el = trendContainerRef.value
@@ -449,6 +543,51 @@ onMounted(() => {
         </div>
 
         <div class="flex h-[32px] items-center gap-[8px]">
+          <div v-if="layoutMessage" class="hidden text-[12px] leading-4 text-[#166534] sm:block">{{ layoutMessage }}</div>
+          <div class="relative">
+            <button
+              type="button"
+              class="flex h-[32px] items-center justify-center gap-[6px] rounded-[10px] border border-black/10 bg-white px-[10px]"
+              @click="isCustomizeOpen = !isCustomizeOpen"
+            >
+              <SlidersHorizontal class="h-[13px] w-[13px] text-[#717182]" />
+              <span class="text-[14px] font-medium leading-[20px] text-[#717182]">自定义</span>
+            </button>
+
+            <div
+              v-if="isCustomizeOpen"
+              class="absolute right-0 z-20 mt-[8px] w-[280px] rounded-[10px] border border-black/10 bg-white p-[12px] shadow-lg"
+            >
+              <div class="text-[13px] font-semibold leading-5 text-[#0A0A0A]">自定义仪表盘</div>
+              <div class="mt-[2px] text-[12px] leading-4 text-[#717182]">选择本项目首页要显示的模块。</div>
+              <div class="mt-[10px] space-y-[8px]">
+                <label
+                  v-for="option in dashboardModuleOptions"
+                  :key="option.key"
+                  class="flex cursor-pointer items-start gap-[8px] rounded-[8px] border border-black/10 p-[8px]"
+                >
+                  <input
+                    v-model="visibleModules[option.key]"
+                    :aria-label="option.label"
+                    type="checkbox"
+                    class="mt-[3px] h-[14px] w-[14px] accent-[#155DFC]"
+                  />
+                  <span class="min-w-0">
+                    <span class="block text-[12px] font-medium leading-4 text-[#0A0A0A]">{{ option.label }}</span>
+                    <span class="mt-[1px] block text-[11px] leading-4 text-[#717182]">{{ option.description }}</span>
+                  </span>
+                </label>
+              </div>
+              <div class="mt-[12px] flex items-center justify-end gap-[8px]">
+                <button type="button" class="h-[30px] rounded-[8px] border border-black/10 px-[10px] text-[12px] text-[#717182]" @click="resetDashboardLayout">
+                  恢复默认
+                </button>
+                <button type="button" class="h-[30px] rounded-[8px] bg-[#155DFC] px-[10px] text-[12px] font-medium text-white" @click="saveDashboardLayout">
+                  保存布局
+                </button>
+              </div>
+            </div>
+          </div>
           <button
             type="button"
             class="flex h-[32px] w-[72.33px] items-center justify-center gap-[6px] rounded-[10px] border border-black/10 bg-white"
@@ -459,6 +598,37 @@ onMounted(() => {
               {{ isLoadingSummary || isLoadingFailureTop || isLoadingQualityGate || isLoadingTrend || isLoadingRecentRuns ? '刷新中...' : '刷新' }}
             </span>
           </button>
+        </div>
+      </div>
+
+      <div class="flex flex-col gap-[8px] rounded-[10px] border border-black/10 bg-white px-[12px] py-[10px] md:flex-row md:items-center md:justify-between">
+        <div class="text-[12px] leading-4 text-[#717182]">{{ dashboardFilterSummary }}</div>
+        <div class="flex flex-wrap items-center gap-[8px]">
+          <label class="flex items-center gap-[6px] text-[12px] leading-4 text-[#717182]">
+            时间范围
+            <select
+              v-model="dashboardFilters.days"
+              aria-label="时间范围"
+              class="h-[30px] rounded-[8px] border border-black/10 bg-white px-[8px] text-[12px] text-[#0A0A0A] outline-none focus:border-[#155DFC]"
+              @change="applyDashboardFilters"
+            >
+              <option value="7">近 7 天</option>
+              <option value="14">近 14 天</option>
+              <option value="30">近 30 天</option>
+            </select>
+          </label>
+          <label class="flex items-center gap-[6px] text-[12px] leading-4 text-[#717182]">
+            统计维度
+            <select
+              v-model="dashboardFilters.dimension"
+              aria-label="统计维度"
+              class="h-[30px] rounded-[8px] border border-black/10 bg-white px-[8px] text-[12px] text-[#0A0A0A] outline-none focus:border-[#155DFC]"
+              @change="applyDashboardFilters"
+            >
+              <option value="testcase">用例</option>
+              <option value="suite">套件</option>
+            </select>
+          </label>
         </div>
       </div>
 
@@ -512,11 +682,14 @@ onMounted(() => {
         </div>
       </div>
 
-      <div class="grid grid-cols-1 gap-[16px] xl:grid-cols-2 xl:items-start">
-        <section class="w-full rounded-[14px] border border-black/10 bg-white p-[20.67px]">
+      <div
+        v-if="visibleModules.trend || visibleModules.qualityGate"
+        class="grid grid-cols-1 gap-[16px] xl:grid-cols-2 xl:items-start"
+      >
+        <section v-if="visibleModules.trend" class="w-full rounded-[14px] border border-black/10 bg-white p-[20.67px]">
           <div class="flex items-start justify-between gap-4">
             <div class="min-w-0">
-              <div class="text-sm font-semibold leading-5 text-[#0A0A0A]">近 7 天趋势</div>
+              <h2 class="text-sm font-semibold leading-5 text-[#0A0A0A]">近 7 天趋势</h2>
               <div class="mt-0.5 text-xs font-normal leading-4 text-[#717182]">通过率与失败数变化</div>
             </div>
 
@@ -596,6 +769,7 @@ onMounted(() => {
         </section>
 
         <QualityGateCard
+          v-if="visibleModules.qualityGate"
           :items="qualityGateItems"
           :overall="qualityGateOverall"
           :loading="isLoadingQualityGate"
@@ -603,9 +777,12 @@ onMounted(() => {
         />
       </div>
 
-      <div class="grid grid-cols-1 gap-[16px] xl:grid-cols-2 xl:items-start">
-        <FailureTop5Card :items="failureTopItems" :loading="isLoadingFailureTop" class="w-full" />
-        <RecentRunsCard :items="recentRuns" :loading="isLoadingRecentRuns" class="w-full xl:justify-self-end" />
+      <div
+        v-if="visibleModules.failureTop || visibleModules.recentRuns"
+        class="grid grid-cols-1 gap-[16px] xl:grid-cols-2 xl:items-start"
+      >
+        <FailureTop5Card v-if="visibleModules.failureTop" :items="failureTopItems" :loading="isLoadingFailureTop" class="w-full" />
+        <RecentRunsCard v-if="visibleModules.recentRuns" :items="recentRuns" :loading="isLoadingRecentRuns" class="w-full xl:justify-self-end" />
       </div>
     </div>
   </div>

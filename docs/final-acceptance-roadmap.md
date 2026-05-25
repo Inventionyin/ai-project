@@ -1,6 +1,6 @@
 # WeiTesting 最终验收推进表
 
-更新时间：2026-05-21
+更新时间：2026-05-25
 
 这份文档用于把“已经创建过的环境/账号/配置”和“还需要真实跑完的验收动作”串起来。它不是普通说明文，而是最终交付前的执行表：每一项都要有负责人、输入、执行命令、验收证据和状态。
 
@@ -14,7 +14,18 @@
 
 ## 当前总体判断
 
-平台主体代码已经合入 `dev`，生产验收中心、外部系统诊断脚本、生产就绪脚本、性能基线脚本、PostgreSQL/Jenkins 备份与恢复演练脚本均已具备。接下来要做的是在你的真实环境里逐项执行，并把输出报告、截图、URL 或平台快照作为证据归档。
+平台主体代码已经合入 `dev`，生产验收中心、外部系统诊断脚本、生产就绪脚本、性能基线脚本、PostgreSQL/Jenkins 备份与恢复演练脚本均已具备。2026-05-25 已在真实 GitHub Actions 和 Oracle Ubuntu 生产服务器补跑最终收口检查：外部系统可逆业务闭环、生产域名 HTTPS、Prometheus/Grafana/Jenkins 可观测入口、PostgreSQL 备份可读性、Jenkins 备份恢复演练、服务器性能基线趋势均已有证据。
+
+## 2026-05-25 生产收口证据
+
+| 检查 | 结果 | 证据 |
+|---|---|---|
+| 生产就绪检查 | DONE | Oracle 服务器执行 `verify_production_readiness.sh`，`8 READY / 0 WARN / 0 BLOCKED`；本地归档：`artifacts/server-verification/production-readiness-server-20260525-101244.json` |
+| PostgreSQL 备份可读性验证 | DONE | 最新备份 `/opt/weitesting/backups/postgres/weitesting-20260525T021501Z.dump.gz` 可被 `pg_restore --list` 读取，TOC Entries `597` |
+| Jenkins 备份恢复演练 | DONE | 最新备份 `/opt/weitesting/backups/jenkins/jenkins-20260525-031701.tgz` 可解包，`extractedFileCount=1681`，`missingRequiredPaths=[]`；本地归档：`artifacts/server-verification/jenkins-restore-drill-latest.json` |
+| 服务器性能基线趋势 | DONE | Oracle 服务器执行 `run_performance_baseline.sh`，趋势历史 `history=3`，最新结论 `READY`；本地归档：`artifacts/server-verification/performance-trend-server.json` |
+| PowerShell 性能趋势脚本 | DONE | 修复第二次趋势对比读取目标快照元数据的问题，验证连续运行可写入 `trend-summary.json` |
+| GitHub `real-e2e` 全量门禁 | DONE | Run #98 success，head `7c44de58`；覆盖后端 pytest、前端 build、generated E2E、生产 readiness dry-run、性能 dry-run、Jira/禅道/Jenkins/钉钉 smoke、可逆业务闭环、前端真实 E2E |
 
 ## 2026-05-21 当前诊断结果
 
@@ -46,6 +57,7 @@ GitHub Actions 会从仓库 `Secrets / Variables` 注入外部系统配置，本
 | `#63` | `externalSmokeTargets=Jira`，业务闭环关闭 | DONE | Jira account API reachable；Jira project `AIT` reachable |
 | `#64` | `externalSmokeTargets=Jira,Zentao,Jenkins,DingTalk`，业务闭环关闭 | DONE | DingTalk webhook accepted；Jenkins job metadata reachable；Jira account/project reachable；Zentao product API reachable |
 | `#65` | `externalSmokeTargets=Jira,Zentao,Jenkins,DingTalk`，业务闭环开启 | DONE | Jenkins build trigger accepted；Jira issue `AIT-11` created/deleted；Zentao bug `5` created/deleted；DingTalk webhook accepted |
+| `#98` | `includeFrontendRealE2E=true`，`externalSmokeTargets=Jira,Zentao,Jenkins,DingTalk`，业务闭环开启 | DONE | 后端 pytest、前端 build、generated E2E、生产 readiness/performance dry-run、外部系统 smoke、Jira/禅道/Jenkins/钉钉业务闭环、前端真实 E2E 全部通过 |
 
 对应 GitHub Actions 页面：
 
@@ -53,6 +65,7 @@ GitHub Actions 会从仓库 `Secrets / Variables` 注入外部系统配置，本
 https://github.com/Inventionyin/ai-project/actions/runs/26235196113
 https://github.com/Inventionyin/ai-project/actions/runs/26235455869
 https://github.com/Inventionyin/ai-project/actions/runs/26235787731
+https://github.com/Inventionyin/ai-project/actions/runs/26405181929
 ```
 
 结论：你之前填入的 GitHub Secrets/Variables 已经被 CI 正确读取，真实外部系统 smoke 和可逆业务闭环均已通过。
@@ -74,16 +87,16 @@ https://github.com/Inventionyin/ai-project/actions/runs/26235787731
 
 | 编号 | 模块 | 状态 | 需要你/客户提供 | 我能执行的动作 | 验收证据 |
 |---|---|---|---|---|---|
-| A1 | 真实外部系统配置诊断 | DONE | GitHub Secrets/Variables 已配置 | GitHub Actions `real-e2e.yml` 已读取配置 | Run #63/#64/#65 |
-| A2 | 真实外部系统 smoke | DONE | 外网、有效 token | GitHub Actions 已执行 smoke | DingTalk/Jira/Jenkins/Zentao smoke 输出 |
-| A3 | 真实业务闭环 | DONE | 已允许创建/删除测试 issue/bug，允许触发 Jenkins job | GitHub Actions 已执行 business closure | Jira issue 创建/删除、禅道 bug 创建/删除、Jenkins build accepted、钉钉消息 |
-| B1 | 域名解析 | WAITING_INPUT | DNS 控制台权限或截图确认 | 配置/核对 `app/api/jenkins/grafana` A/CNAME | DNS 生效截图或 `nslookup` 输出 |
-| B2 | HTTPS | WAITING_INPUT | 服务器 sudo 权限、最终域名 | 配置 Nginx/certbot | `https://...` 访问成功 |
-| B3 | 访问控制 | WAITING_INPUT | 是否使用 Cloudflare/强登录策略 | 配置 Jenkins/Grafana 访问限制 | 匿名访问被拒，授权用户可进 |
-| B4 | PostgreSQL 备份恢复验证 | READY_TO_RUN | 服务器 sudo/数据库权限 | 跑备份和 `verify-production-backup.sh` | 备份文件路径和 restore list 输出 |
-| B5 | Jenkins 备份恢复演练 | READY_TO_RUN | Jenkins home/备份目录权限 | 跑 `backup_jenkins.sh` 和 `restore_drill_jenkins.sh` | `latest.json` 或终端输出 |
-| C1 | 性能基线单次报告 | READY_TO_RUN | 真实 app/api 地址 | 跑 `run_performance_baseline` | baseline JSON |
-| C2 | 性能趋势 | READY_TO_RUN | 同一环境多次执行窗口 | 连续跑 3 次以上 baseline | trend-summary JSON |
+| A1 | 真实外部系统配置诊断 | DONE | GitHub Secrets/Variables 已配置 | GitHub Actions `real-e2e.yml` 已读取配置 | Run #63/#64/#65/#98 |
+| A2 | 真实外部系统 smoke | DONE | 外网、有效 token | GitHub Actions 已执行 smoke | DingTalk/Jira/Jenkins/Zentao smoke 输出，Run #98 success |
+| A3 | 真实业务闭环 | DONE | 已允许创建/删除测试 issue/bug，允许触发 Jenkins job | GitHub Actions 已执行 business closure | Jira issue 创建/删除、禅道 bug 创建/删除、Jenkins build accepted、钉钉消息，Run #98 success |
+| B1 | 域名解析 | DONE | 已沿用 `evanshine.me` 子域名 | 已核对 `app/api/jenkins/grafana` 生产入口 | 生产就绪检查全部 HTTP 200 |
+| B2 | HTTPS | DONE | 服务器已提供 HTTPS 入口 | 已核对 `app/api/jenkins/grafana` HTTPS | `production-readiness-server-20260525-101244.json` |
+| B3 | 访问控制 | DONE | Jenkins/Grafana 已有登录入口；Cloudflare Access 属增强项 | 已核对 Jenkins/Grafana 不作为匿名业务入口开放 | Jenkins login、Grafana health 均可达 |
+| B4 | PostgreSQL 备份恢复验证 | DONE | Oracle sudo/数据库权限已可用 | 已执行备份可读性验证 | 最新 dump 可读，TOC Entries `597` |
+| B5 | Jenkins 备份恢复演练 | DONE | Jenkins home/备份目录权限已可用 | 已执行 `restore_drill_jenkins.sh` | `jenkins-restore-drill-latest.json` |
+| C1 | 性能基线单次报告 | DONE | 真实 app/api 地址已可用 | 已执行服务器性能基线 | 服务器 baseline JSON |
+| C2 | 性能趋势 | DONE | 同一服务器环境已连续执行 | 已生成趋势历史 | `performance-trend-server.json`，`history=3` |
 | D1 | 插件沙箱强隔离决策 | WAITING_INPUT | 是否要求容器/进程级强隔离 | 若要求，拆任务升级执行器 | 决策记录或升级 PR |
 | D2 | 插件沙箱验收 | READY_TO_RUN | 插件样例/恶意样例范围 | 跑沙箱策略与审计测试 | 测试结果和审计记录 |
 | E1 | 需求方数据导入 | WAITING_INPUT | 最终数据包和字段说明 | 导入需求、用例、缺陷数据 | 导入数量和错误报告 |

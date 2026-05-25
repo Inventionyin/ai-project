@@ -7,7 +7,7 @@ param(
     [switch]$BackendE2EOnly,
     [switch]$WithFrontendRealE2E,
     [int]$GeneratedE2EWorkers = 1,
-    [string]$TestDatabaseUrl = "postgresql+asyncpg://postgres:postgres@localhost:5432/ai_test_platform_e2e",
+    [string]$TestDatabaseUrl = "postgresql+asyncpg://postgres:123456@localhost:5432/ai_test_platform_e2e",
     [string]$ApiBaseUrl = "http://127.0.0.1:8000",
     [string]$FrontendUrl = "http://127.0.0.1:4173",
     [string]$DingTalkWebhookUrl = $env:DINGTALK_WEBHOOK_URL,

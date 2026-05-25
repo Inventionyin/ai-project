@@ -1,4 +1,20 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Route } from '@playwright/test'
+
+async function fulfillCommonApi(route: Route, path: string) {
+  if (path === '/api/auth/me' || path === '/auth/me') {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ code: 0, data: { id: 'u1', username: 'qa', roles: ['Admin'] } })
+    })
+    return true
+  }
+  if (path.startsWith('/api/') || path.startsWith('/auth/')) {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ code: 0, data: {} }) })
+    return true
+  }
+  return false
+}
 
 test.describe('integrations strategy visualization smoke', () => {
   test('策略中心与策略模拟器可见（含 mock 数据汇总断言）', async ({ page }) => {
@@ -115,6 +131,7 @@ test.describe('integrations strategy visualization smoke', () => {
         return
       }
 
+      if (await fulfillCommonApi(route, path)) return
       await route.continue()
     })
 
@@ -261,6 +278,7 @@ test.describe('integrations strategy visualization smoke', () => {
         return
       }
 
+      if (await fulfillCommonApi(route, path)) return
       await route.continue()
     })
 
@@ -405,6 +423,7 @@ test.describe('integrations strategy visualization smoke', () => {
         return
       }
 
+      if (await fulfillCommonApi(route, path)) return
       await route.continue()
     })
 
@@ -543,6 +562,7 @@ test.describe('integrations strategy visualization smoke', () => {
         return
       }
 
+      if (await fulfillCommonApi(route, path)) return
       await route.continue()
     })
 
@@ -700,6 +720,7 @@ test.describe('integrations strategy visualization smoke', () => {
         return
       }
 
+      if (await fulfillCommonApi(route, path)) return
       await route.continue()
     })
 

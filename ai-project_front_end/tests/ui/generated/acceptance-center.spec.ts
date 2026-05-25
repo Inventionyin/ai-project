@@ -14,6 +14,13 @@ test.describe('acceptance-center 生产验收中心冒烟', () => {
       const url = new URL(req.url())
       const path = url.pathname
       if (req.resourceType() === 'document') return route.continue()
+      if (path === '/api/auth/me') {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ code: 0, data: { id: 'u1', username: 'e2e', roles: ['Admin'] } }),
+        })
+      }
       if (path === '/api/projects/22222222-2222-2222-2222-222222222222') {
         return route.fulfill({
           status: 200,
@@ -117,6 +124,10 @@ test.describe('acceptance-center 生产验收中心冒烟', () => {
     await expect(page.getByText('460').first()).toBeVisible()
     await expect(page.getByRole('cell', { name: 'Jira' })).toBeVisible()
     await expect(page.getByText('API Token 已过期')).toBeVisible()
+    await expect(page.getByRole('link', { name: '进入联调诊断' })).toHaveAttribute(
+      'href',
+      '/projects/22222222-2222-2222-2222-222222222222/settings/integrations#integration-diagnostics'
+    )
     await expect(page.getByText('生产验收报告')).toBeVisible()
     await expect(page.getByRole('button', { name: '复制报告' })).toBeVisible()
     await expect(page.getByRole('button', { name: '复制汇报口径' })).toBeVisible()

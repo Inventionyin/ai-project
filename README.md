@@ -84,8 +84,11 @@ npm run build
 ## 验收与生产检查
 
 ```powershell
-# 本地一键验证：后端关键回归 + 前端生产构建
-.\scripts\verify-local.ps1
+# 本地一键门禁：测试库迁移 + 后端 pytest + 前端构建 + generated Playwright E2E
+.\scripts\verify_real_e2e.ps1
+
+# 只跑真实后端 E2E
+.\scripts\verify_real_e2e.ps1 -BackendE2EOnly
 
 # 生产公开可达性检查
 .\scripts\check-production.ps1

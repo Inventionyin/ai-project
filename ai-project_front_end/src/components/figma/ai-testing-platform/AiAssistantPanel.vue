@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { 
   generateDocCsv, 
@@ -7,7 +7,6 @@ import {
   generateAndRunUiTest,
   executeK6,
   importTestcases,
-  generateDocAndImport,
   fetchProjectEnvironments,
   type ProjectEnvironment
 } from '@/lib/aiTestingPlatformApi'
@@ -63,6 +62,37 @@ const resultText = ref('')
 const executionResult = ref('')
 const resultFileName = ref('')
 const showPreviewModal = ref(false)
+const resultAction = ref('preview')
+const caseReviewConfirmed = ref(false)
+
+const agentOptions: Array<{ value: 'CASE' | 'PERF' | 'UI'; label: string; description: string }> = [
+  { value: 'CASE', label: '测试用例生成', description: '根据接口文档生成接口测试用例' },
+  { value: 'PERF', label: '性能脚本生成', description: '根据接口文档生成 K6 性能压测脚本' },
+  { value: 'UI', label: 'UI测试生成并执行', description: '按 pageId 生成并执行 Playwright 测试' }
+]
+
+const caseWorkflowSteps = [
+  '文档检查',
+  '候选用例',
+  '人工确认',
+  '正式入库'
+]
+
+const selectedAgentOption = computed(() => agentOptions.find((item) => item.value === selectedAgent.value) || agentOptions[0])
+
+const resultActionOptions = computed(() => {
+  const actions = [
+    { value: 'preview', label: '预览结果' },
+    { value: 'copy', label: '复制结果' },
+    { value: 'download', label: '下载结果' }
+  ]
+  if (selectedAgent.value === 'PERF') actions.push({ value: 'execute', label: '执行脚本' })
+  if (selectedAgent.value === 'CASE' && resultText.value && !resultText.value.includes('[导入结果]')) {
+    actions.push({ value: 'import', label: '提交审核入库' })
+  }
+  if (selectedAgent.value === 'UI' && lastUiRunId.value) actions.push({ value: 'report', label: '查看报告' })
+  return actions
+})
 
 const parsedCsv = computed(() => {
   if (selectedAgent.value !== 'CASE' || !resultText.value) return []
@@ -94,6 +124,27 @@ const canGenerate = computed(() => {
     return Boolean(uiPageId.value.trim()) && Boolean(projectId.value)
   }
   return Boolean(docContent.value.trim() || selectedFile.value)
+})
+
+const canRunResultAction = computed(() => {
+  if (resultAction.value === 'import') {
+    return selectedAgent.value === 'CASE' && Boolean(resultText.value) && caseReviewConfirmed.value
+  }
+  if (resultAction.value === 'execute') return Boolean(resultText.value)
+  return true
+})
+
+const caseCandidateCount = computed(() => parsedCsv.value.length)
+const caseDedupSummary = computed(() => {
+  if (!resultText.value) return '生成候选后自动展示待审核状态'
+  return caseCandidateCount.value > 0
+    ? `候选 ${caseCandidateCount.value} 条，未发现阻塞冲突，确认后可入库。`
+    : '候选结果需要人工确认格式后再入库。'
+})
+
+watch([selectedAgent, resultText], () => {
+  caseReviewConfirmed.value = false
+  if (resultAction.value === 'import') resultAction.value = 'preview'
 })
 
 function getMethodColor(method: string) {
@@ -153,6 +204,7 @@ async function handleGenerate() {
   }
 
   isGenerating.value = true
+  caseReviewConfirmed.value = false
   try {
     if (selectedAgent.value === 'UI') {
       if (!projectId.value) {
@@ -227,6 +279,10 @@ async function handleGenerate() {
 
 async function handleImport() {
   if (!resultText.value || !projectId.value) return
+  if (!caseReviewConfirmed.value) {
+    showToast('请先确认已完成去重检查和人工审核', 'error')
+    return
+  }
   isGenerating.value = true
   try {
     const blob = new Blob([resultText.value], { type: 'text/csv' })
@@ -239,36 +295,6 @@ async function handleImport() {
     showToast('导入成功')
   } catch (err) {
     showToast(err instanceof Error ? err.message : '导入失败', 'error')
-  } finally {
-    isGenerating.value = false
-  }
-}
-
-async function handleGenerateAndImport() {
-  if (!docContent.value.trim() && !selectedFile.value) {
-    showToast('请输入接口文档内容或上传文件', 'error')
-    return
-  }
-  if (!projectId.value) return
-
-  isGenerating.value = true
-  try {
-    const file = selectedFile.value || new File([new Blob([docContent.value], { type: 'text/plain' })], 'openapi_doc.yaml')
-    const res = await generateDocAndImport({
-      projectId: projectId.value,
-      file,
-      llmMode: llmMode.value,
-      caseGenMode: 'AUTO',
-      instruction: instruction.value,
-      maxCases: 100,
-      baseUrl: environmentUrl.value
-    })
-    showToast(`成功导入 ${res.importedCount} 条用例`)
-    resultText.value = `[导入结果]\n已成功导入 ${res.importedCount} 条用例${res.failedCount > 0 ? `，失败 ${res.failedCount} 条` : ''}`
-    resultFileName.value = ''
-    executionResult.value = ''
-  } catch (err) {
-    showToast(err instanceof Error ? err.message : '生成或导入失败', 'error')
   } finally {
     isGenerating.value = false
   }
@@ -335,6 +361,32 @@ function downloadResult() {
 
 function showToast(message: string, type: 'success' | 'error' = 'success') {
   window.dispatchEvent(new CustomEvent('app-toast', { detail: { message, type } }))
+}
+
+function runResultAction() {
+  if (resultAction.value === 'preview') {
+    showPreviewModal.value = true
+    return
+  }
+  if (resultAction.value === 'copy') {
+    void copyResult()
+    return
+  }
+  if (resultAction.value === 'download') {
+    downloadResult()
+    return
+  }
+  if (resultAction.value === 'execute') {
+    void handleExecute()
+    return
+  }
+  if (resultAction.value === 'import') {
+    void handleImport()
+    return
+  }
+  if (resultAction.value === 'report') {
+    goToUiReports()
+  }
 }
 </script>
 
@@ -461,74 +513,52 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
           </div>
         </div>
 
-        <!-- Agent Selection Section -->
-        <div class="flex flex-col gap-4">
-          <div class="flex items-center justify-between text-sm font-bold text-[#0A0A0A]">
-            <div class="flex items-center gap-2">
-              <span class="w-1.5 h-4 bg-[#155DFC] rounded-full"></span>
-              <span>选择智能体</span>
+        <div v-if="selectedAgent === 'CASE'" class="rounded-[16px] border border-black/5 bg-white p-5 shadow-sm">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div class="text-sm font-bold text-[#0A0A0A]">用例生成审核流程</div>
+              <div class="mt-1 text-[12px] leading-4 text-[#717182]">AI 只生成候选，正式入库必须由你确认。</div>
             </div>
-            <img :src="filterChevron" alt="" class="h-4 w-4 opacity-40" />
+            <div class="flex flex-wrap items-center gap-2">
+              <span
+                v-for="(step, index) in caseWorkflowSteps"
+                :key="step"
+                class="flex h-8 items-center gap-2 rounded-full border border-black/10 bg-[#F8FAFC] px-3 text-[12px] font-medium text-[#475569]"
+              >
+                <span class="flex h-5 w-5 items-center justify-center rounded-full bg-white text-[11px] text-[#155DFC]">{{ index + 1 }}</span>
+                {{ step }}
+              </span>
+            </div>
           </div>
+        </div>
 
-          <div class="grid grid-cols-3 gap-4">
-            <!-- Case Agent Card -->
-            <div 
-              class="group relative flex cursor-pointer flex-col gap-3 rounded-[16px] border-2 p-5 transition-all duration-200"
-              :class="selectedAgent === 'CASE' ? 'border-[#155DFC] bg-[#F0F7FF] shadow-sm' : 'border-black/5 bg-white hover:border-black/10'"
-              @click="selectedAgent = 'CASE'"
-            >
-              <div class="flex items-center justify-between">
-                <div class="flex h-10 w-10 items-center justify-center rounded-[12px] bg-[#E0E7FF] text-[#155DFC]">
-                  <img :src="navCases" alt="" class="h-5 w-5" />
-                </div>
-                <div v-if="selectedAgent === 'CASE'" class="flex h-5 w-5 items-center justify-center rounded-full bg-[#155DFC]">
-                  <span class="text-white text-[10px]">✓</span>
-                </div>
+        <!-- Agent Selection Section -->
+        <div class="rounded-[16px] border border-black/5 bg-white p-5 shadow-sm">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div class="flex items-center gap-2 text-sm font-bold text-[#0A0A0A]">
+                <span class="w-1.5 h-4 bg-[#155DFC] rounded-full"></span>
+                <span>智能体类型</span>
               </div>
-              <div>
-                <div class="text-[15px] font-bold text-[#0A0A0A]">测试用例智能体</div>
-                <div class="text-[11px] leading-relaxed text-[#717182] mt-1">生成接口测试用例（pytest + requests）</div>
-              </div>
+              <div class="mt-1 text-[12px] leading-4 text-[#717182]">{{ selectedAgentOption.description }}</div>
             </div>
-
-            <!-- Perf Agent Card -->
-            <div 
-              class="group relative flex cursor-pointer flex-col gap-3 rounded-[16px] border-2 p-5 transition-all duration-200"
-              :class="selectedAgent === 'PERF' ? 'border-[#155DFC] bg-[#F0F7FF] shadow-sm' : 'border-black/5 bg-white hover:border-black/10'"
-              @click="selectedAgent = 'PERF'"
+            <select
+              v-model="selectedAgent"
+              aria-label="智能体类型"
+              class="h-10 min-w-[220px] rounded-[10px] border border-black/10 bg-[#F8FAFC] px-3 text-[13px] font-medium text-[#0A0A0A] outline-none focus:border-[#155DFC]"
             >
-              <div class="flex items-center justify-between">
-                <div class="flex h-10 w-10 items-center justify-center rounded-[12px] bg-[#E0E7FF] text-[#155DFC]">
-                  <img :src="navExecution" alt="" class="h-5 w-5 text-[#155DFC]" />
-                </div>
-                <div v-if="selectedAgent === 'PERF'" class="flex h-5 w-5 items-center justify-center rounded-full bg-[#155DFC]">
-                  <span class="text-white text-[10px]">✓</span>
-                </div>
-              </div>
-              <div>
-                <div class="text-[15px] font-bold text-[#0A0A0A]">性能脚本智能体</div>
-                <div class="text-[11px] leading-relaxed text-[#717182] mt-1">生成 K6 性能压测脚本</div>
-              </div>
+              <option v-for="item in agentOptions" :key="item.value" :value="item.value">
+                {{ item.label }}
+              </option>
+            </select>
+          </div>
+          <div class="mt-4 flex items-center gap-3 rounded-[10px] bg-[#F8FAFC] px-3 py-3">
+            <div class="flex h-9 w-9 items-center justify-center rounded-[10px] bg-[#E0E7FF]">
+              <img :src="selectedAgent === 'CASE' ? navCases : navExecution" alt="" class="h-5 w-5" />
             </div>
-
-            <div 
-              class="group relative flex cursor-pointer flex-col gap-3 rounded-[16px] border-2 p-5 transition-all duration-200"
-              :class="selectedAgent === 'UI' ? 'border-[#155DFC] bg-[#F0F7FF] shadow-sm' : 'border-black/5 bg-white hover:border-black/10'"
-              @click="selectedAgent = 'UI'"
-            >
-              <div class="flex items-center justify-between">
-                <div class="flex h-10 w-10 items-center justify-center rounded-[12px] bg-[#E0E7FF] text-[#155DFC]">
-                  <img :src="navExecution" alt="" class="h-5 w-5 text-[#155DFC]" />
-                </div>
-                <div v-if="selectedAgent === 'UI'" class="flex h-5 w-5 items-center justify-center rounded-full bg-[#155DFC]">
-                  <span class="text-white text-[10px]">✓</span>
-                </div>
-              </div>
-              <div>
-                <div class="text-[15px] font-bold text-[#0A0A0A]">UI测试智能体</div>
-                <div class="text-[11px] leading-relaxed text-[#717182] mt-1">按 pageId 生成并执行 Playwright</div>
-              </div>
+            <div>
+              <div class="text-[13px] font-semibold text-[#0A0A0A]">{{ selectedAgentOption.label }}</div>
+              <div class="text-[12px] leading-4 text-[#717182]">下方只展示当前类型需要的配置。</div>
             </div>
           </div>
         </div>
@@ -554,6 +584,7 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
           </template>
 
           <template v-else-if="selectedAgent === 'PERF'">
+            <div class="text-[13px] font-semibold leading-5 text-[#0A0A0A]">性能参数</div>
             <div class="flex items-center justify-between">
               <div class="flex items-center gap-2.5 text-[13px] font-medium text-[#475569]">
                 <span class="text-lg">👥</span> 并发用户数
@@ -611,7 +642,7 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
         >
           <img v-if="isGenerating" :src="runsStatusRunning" alt="" class="h-5 w-5 animate-spin" />
           <img v-else :src="btnAiGenerate" alt="" class="h-5 w-5 brightness-0 invert" />
-          <span>{{ selectedAgent === 'CASE' ? '仅生成预览' : selectedAgent === 'PERF' ? '立即生成' : '生成并执行UI测试' }}</span>
+          <span>{{ selectedAgent === 'CASE' ? '开始生成' : selectedAgent === 'PERF' ? '开始生成' : '生成并执行UI测试' }}</span>
         </button>
         
         <button 
@@ -619,11 +650,11 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
           type="button"
           class="flex h-[52px] w-full items-center justify-center gap-3 rounded-full bg-[#155DFC] text-[16px] font-bold text-white shadow-xl transition-all hover:bg-[#1048CB] active:scale-[0.98] disabled:opacity-50"
           :disabled="(!docContent.trim() && !selectedFile) || isGenerating"
-          @click="handleGenerateAndImport"
+          @click="handleGenerate"
         >
           <img v-if="isGenerating" :src="runsStatusRunning" alt="" class="h-5 w-5 animate-spin" />
           <img v-else :src="btnAiGenerate" alt="" class="h-5 w-5 brightness-0 invert" />
-          <span>生成并导入到用例列表</span>
+          <span>生成候选用例，确认后入库</span>
         </button>
 
         <button
@@ -648,42 +679,33 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
               <div class="h-3 w-3 rounded-full bg-[#FFBD2E]"></div>
               <div class="h-3 w-3 rounded-full bg-[#27C93F]"></div>
             </div>
-            <span class="ml-6 text-[12px] font-bold tracking-widest text-white/30 uppercase">Generation Result</span>
+            <span class="ml-6 text-[12px] font-bold text-white/45">生成结果</span>
           </div>
 
           <div v-if="resultText" class="flex items-center gap-3">
-            <button 
+            <button
               v-if="executionResult"
               class="flex items-center gap-2 rounded-full bg-white/5 px-5 py-2 text-[12px] font-bold text-white transition-all hover:bg-white/10 active:scale-95"
               @click="executionResult = ''"
             >
               <span>📄</span> 脚本
             </button>
-            <button 
-              class="flex items-center gap-2 rounded-full bg-white/5 px-5 py-2 text-[12px] font-bold text-white transition-all hover:bg-white/10 active:scale-95" 
-              @click="showPreviewModal = true"
+            <select
+              v-model="resultAction"
+              aria-label="更多操作"
+              class="h-9 rounded-full border border-white/10 bg-white/5 px-4 text-[12px] font-bold text-white outline-none"
             >
-              <span>👁️</span> 预览
-            </button>
-            <button class="flex items-center gap-2 rounded-full bg-white/5 px-5 py-2 text-[12px] font-bold text-white transition-all hover:bg-white/10 active:scale-95" @click="copyResult">
-              <span>📋</span> 复制
-            </button>
-            <button class="flex items-center gap-2 rounded-full bg-[#155DFC] px-5 py-2 text-[12px] font-bold text-white transition-all hover:bg-[#1048CB] active:scale-95 shadow-lg shadow-[#155DFC]/20" @click="downloadResult">
-              <span>📥</span> 下载
-            </button>
-            <button 
-              v-if="selectedAgent === 'PERF'"
-              class="flex items-center gap-2 rounded-full bg-[#27C93F] px-5 py-2 text-[12px] font-bold text-white transition-all hover:bg-[#1EA835] active:scale-95 shadow-lg shadow-[#27C93F]/20"
-              @click="handleExecute"
-            >
-              <span>⚡</span> 执行
-            </button>
-            <button 
-              v-if="selectedAgent === 'CASE' && resultText && !resultText.includes('[导入结果]')"
+              <option v-for="item in resultActionOptions" :key="item.value" :value="item.value" class="text-[#0A0A0A]">
+                {{ item.label }}
+              </option>
+            </select>
+            <button
               class="flex items-center gap-2 rounded-full bg-[#155DFC] px-5 py-2 text-[12px] font-bold text-white transition-all hover:bg-[#1048CB] active:scale-95 shadow-lg shadow-[#155DFC]/20"
-              @click="handleImport"
+              :disabled="!canRunResultAction"
+              :class="!canRunResultAction ? 'cursor-not-allowed opacity-50 hover:bg-[#155DFC] active:scale-100' : ''"
+              @click="runResultAction"
             >
-              <span>📥</span> 导入
+              执行操作
             </button>
           </div>
         </div>
@@ -711,9 +733,27 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
           <pre v-else class="whitespace-pre-wrap break-all text-[#E2E8F0] selection:bg-[#155DFC]/30">{{ executionResult || resultText }}</pre>
         </div>
 
+        <div v-if="selectedAgent === 'CASE' && resultText" class="border-t border-white/5 bg-white/[0.03] px-8 py-4">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div class="text-[12px] font-bold text-white/70">去重状态</div>
+              <div class="mt-1 text-[12px] leading-4 text-white/40">{{ caseDedupSummary }}</div>
+            </div>
+            <label class="inline-flex cursor-pointer items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-[12px] font-bold text-white/70">
+              <input
+                v-model="caseReviewConfirmed"
+                aria-label="确认已完成去重检查和人工审核"
+                type="checkbox"
+                class="h-4 w-4 accent-[#155DFC]"
+              />
+              <span>确认已完成去重检查和人工审核</span>
+            </label>
+          </div>
+        </div>
+
         <!-- Watermark/Footer -->
         <div class="h-10 border-t border-white/5 bg-white/[0.01] flex items-center px-8 justify-between">
-          <span class="text-[10px] text-white/10 font-medium uppercase tracking-tighter">AI Powered Generation Engine v1.0</span>
+          <span class="text-[10px] text-white/18 font-medium">AI 生成引擎 v1.0</span>
           <span class="text-[10px] text-white/10 font-mono">{{ (executionResult || resultText) ? ((executionResult || resultText).length / 1024).toFixed(2) + ' KB' : '0 KB' }}</span>
         </div>
       </div>
@@ -766,18 +806,6 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
           <button class="rounded-full border border-black/10 px-8 py-2.5 text-sm font-bold text-[#475569] transition-all hover:bg-black/5" @click="showPreviewModal = false">关闭</button>
           <button class="rounded-full bg-[#155DFC] px-8 py-2.5 text-sm font-bold text-white transition-all hover:bg-[#1048CB] shadow-lg shadow-[#155DFC]/20" @click="downloadResult">下载并保存</button>
         </div>
-      </div>
-    </div>
-
-    <!-- Floating Side Widget -->
-    <div class="fixed right-0 top-1/2 -translate-y-1/2 z-50">
-      <div class="flex flex-col items-center gap-4 rounded-l-[16px] bg-[#155DFC] p-3 shadow-2xl border-y border-l border-white/10">
-        <button class="flex h-11 w-11 items-center justify-center rounded-[12px] bg-white/10 text-white transition-all hover:bg-white/20 active:scale-90 group relative">
-          <span class="text-2xl group-hover:scale-110 transition-transform">☁️</span>
-          <div class="absolute right-full mr-4 px-3 py-1.5 rounded-lg bg-[#0F172A] text-white text-[11px] font-bold whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-xl border border-white/5">
-            Cloud Sync
-          </div>
-        </button>
       </div>
     </div>
   </div>

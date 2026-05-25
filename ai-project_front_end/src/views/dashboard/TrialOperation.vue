@@ -59,6 +59,7 @@ type DimensionKey =
 
 type ImportType = 'requirements' | 'testcases' | 'defects'
 type ImportQueueStatus = 'queued' | 'previewing' | 'ready' | 'importing' | 'success' | 'failed'
+type TrialView = 'overview' | 'import' | 'governance' | 'details'
 
 type ImportQueueItem = {
   id: string
@@ -79,6 +80,7 @@ const caseGovernance = ref<TrialOperationCaseGovernanceData | null>(null)
 const chartMode = ref<ChartMode>('bar')
 const selectedDimension = ref<DimensionKey>('testcasePriorityDistribution')
 const topLimit = ref(10)
+const activeView = ref<TrialView>('overview')
 const importType = ref<ImportType>('testcases')
 const isImporting = ref(false)
 const importMessage = ref('')
@@ -88,6 +90,7 @@ const importMapping = ref<Record<string, string>>({})
 const isPreviewing = ref(false)
 const importQueue = ref<ImportQueueItem[]>([])
 const activeImportId = ref('')
+const showImportMoreActions = ref(false)
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const directoryInputRef = ref<HTMLInputElement | null>(null)
 const importHistory = ref<TrialOperationImportRecord[]>([])
@@ -362,6 +365,12 @@ const metricLabelMap: Record<string, string> = {
 }
 
 const topLimitOptions = [5, 10, 16, 24]
+const trialViewOptions: Array<{ key: TrialView; label: string; description: string }> = [
+  { key: 'overview', label: '演示概览', description: '验收结论、汇报稿、快照和核心指标' },
+  { key: 'import', label: '数据导入', description: '选择文件、字段映射、多文件导入' },
+  { key: 'governance', label: '治理分析', description: '用例治理、AI建议、执行结果接入' },
+  { key: 'details', label: '缺陷明细', description: '图表、缺陷聚类、风险提示和样例用例' }
+]
 
 const percentWidth = (value: number) => {
   return `${Math.max(3, Math.round((value / maxRowValue.value) * 100))}%`
@@ -1241,7 +1250,25 @@ onMounted(() => {
       <span>{{ errorMessage }}</span>
     </div>
 
-    <section class="mb-[16px] rounded-[8px] border border-black/10 bg-white p-[14px]">
+    <div class="mb-[16px] rounded-[8px] border border-black/10 bg-white p-[8px]">
+      <div class="grid grid-cols-2 gap-[6px] xl:grid-cols-4">
+        <button
+          v-for="item in trialViewOptions"
+          :key="item.key"
+          type="button"
+          class="rounded-[8px] px-[12px] py-[10px] text-left transition-colors"
+          :class="activeView === item.key ? 'bg-[#155DFC] text-white' : 'bg-white text-[#0A0A0A] hover:bg-[#F6F7F9]'"
+          @click="activeView = item.key"
+        >
+          <span class="block text-[14px] font-semibold leading-[20px]">{{ item.label }}</span>
+          <span class="mt-[2px] block text-[12px] leading-[16px]" :class="activeView === item.key ? 'text-white/75' : 'text-[#717182]'">
+            {{ item.description }}
+          </span>
+        </button>
+      </div>
+    </div>
+
+    <section v-if="activeView === 'overview'" class="mb-[16px] rounded-[8px] border border-black/10 bg-white p-[14px]">
       <div class="flex flex-col gap-[12px] lg:flex-row lg:items-center lg:justify-between">
         <div class="min-w-0">
           <div class="flex flex-wrap items-center gap-[8px]">
@@ -1264,7 +1291,7 @@ onMounted(() => {
       </div>
     </section>
 
-    <section class="mb-[16px] rounded-[8px] border border-black/10 bg-white p-[14px] md:p-[16px]">
+    <section v-if="activeView === 'overview'" class="mb-[16px] rounded-[8px] border border-black/10 bg-white p-[14px] md:p-[16px]">
       <div class="grid grid-cols-1 gap-[14px] xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.55fr)] xl:items-start">
         <div class="min-w-0">
           <div class="text-[12px] leading-[16px] text-[#717182]">验收结论 / 质量报告摘要</div>
@@ -1449,7 +1476,7 @@ onMounted(() => {
       </div>
     </section>
 
-    <section class="grid grid-cols-1 gap-[12px] sm:grid-cols-2 xl:grid-cols-5">
+    <section v-if="activeView === 'overview'" class="grid grid-cols-1 gap-[12px] sm:grid-cols-2 xl:grid-cols-5">
       <div v-for="card in metricCards" :key="card.label" class="rounded-[8px] border border-black/10 bg-white p-[16px]">
         <div class="flex items-center justify-between">
           <div class="text-[12px] leading-[16px] text-[#717182]">{{ card.label }}</div>
@@ -1461,7 +1488,7 @@ onMounted(() => {
       </div>
     </section>
 
-    <section class="mt-[16px] rounded-[8px] border border-black/10 bg-white p-[18px]">
+    <section v-if="activeView === 'governance'" class="mt-[16px] rounded-[8px] border border-black/10 bg-white p-[18px]">
       <div class="flex flex-col gap-[10px] lg:flex-row lg:items-start lg:justify-between">
         <div>
           <h2 class="flex items-center gap-[8px] text-[15px] font-semibold leading-[22px] text-[#0A0A0A]">
@@ -1694,8 +1721,8 @@ onMounted(() => {
       </div>
     </section>
 
-    <section class="mt-[16px] grid grid-cols-1 gap-[16px] 2xl:grid-cols-[minmax(0,1.55fr)_minmax(360px,0.8fr)]">
-      <div class="rounded-[8px] border border-black/10 bg-white p-[18px]">
+    <section v-if="activeView === 'details' || activeView === 'import'" class="mt-[16px] grid grid-cols-1 gap-[16px]" :class="activeView === 'details' ? '2xl:grid-cols-[minmax(0,1.55fr)_minmax(360px,0.8fr)]' : ''">
+      <div v-if="activeView === 'details'" class="rounded-[8px] border border-black/10 bg-white p-[18px]">
         <div class="flex flex-col gap-[14px] xl:flex-row xl:items-start xl:justify-between">
           <div>
             <div class="flex items-center gap-[8px] text-[15px] font-semibold leading-[22px] text-[#0A0A0A]">
@@ -1752,26 +1779,25 @@ onMounted(() => {
         <div v-if="!currentRows.length" class="mt-[18px] rounded-[8px] bg-[#F6F7F9] px-[12px] py-[16px] text-[13px] text-[#717182]">暂无可展示数据</div>
       </div>
 
-      <div class="rounded-[8px] border border-black/10 bg-white p-[18px]">
+      <div v-if="activeView === 'import'" class="rounded-[8px] border border-black/10 bg-white p-[18px]">
         <div class="flex items-center gap-[8px] text-[15px] font-semibold leading-[22px] text-[#0A0A0A]">
           <UploadCloud class="h-[16px] w-[16px] text-[#155DFC]" />
           自助导入
         </div>
-        <div class="mt-[14px] grid grid-cols-3 gap-[8px]">
-          <button
-            v-for="item in importOptions"
-            :key="item.type"
-            type="button"
-            class="h-[34px] rounded-[8px] border px-[10px] text-[13px] font-medium"
-            :class="importType === item.type ? 'border-[#155DFC] bg-[#EFF6FF] text-[#155DFC]' : 'border-black/10 bg-white text-[#374151]'"
-            @click="importType = item.type"
-          >
-            {{ item.title }}
-          </button>
-        </div>
-
-        <div class="mt-[14px] rounded-[8px] bg-[#F6F7F9] p-[12px] text-[12px] leading-[18px] text-[#717182]">
-          {{ selectedImportOption.description }}
+        <div class="mt-[14px] rounded-[8px] border border-black/10 bg-[#FAFAFC] p-[12px]">
+          <label class="flex flex-wrap items-center justify-between gap-[10px] text-[12px] leading-[18px] text-[#717182]">
+            <span class="font-medium text-[#374151]">1. 选择导入类型</span>
+            <select
+              v-model="importType"
+              aria-label="选择导入类型"
+              class="h-[34px] min-w-[180px] rounded-[8px] border border-black/10 bg-white px-[10px] text-[13px] font-medium text-[#0A0A0A]"
+            >
+              <option v-for="item in importOptions" :key="item.type" :value="item.type">{{ item.title }}</option>
+            </select>
+          </label>
+          <div class="mt-[10px] text-[12px] leading-[18px] text-[#717182]">
+            {{ selectedImportOption.description }}
+          </div>
         </div>
 
         <div
@@ -1779,18 +1805,10 @@ onMounted(() => {
           @dragover.prevent
           @drop.prevent="onImportDrop"
         >
-          <button
-            type="button"
-            class="inline-flex h-[34px] items-center justify-center gap-[6px] rounded-[8px] border border-black/10 bg-white px-[12px] text-[13px] font-medium text-[#0A0A0A] hover:bg-[#F9FAFB]"
-            @click="downloadImportTemplate"
-          >
-            <Download class="h-[14px] w-[14px]" />
-            下载当前模板
-          </button>
-
           <div class="rounded-[8px] border border-dashed border-black/20 bg-white px-[12px] py-[12px]">
             <input ref="fileInputRef" class="hidden" type="file" multiple :accept="selectedImportOption.accept" @change="onImportFileChange" />
             <input ref="directoryInputRef" class="hidden" type="file" multiple webkitdirectory :accept="selectedImportOption.accept" @change="onImportDirectoryChange" />
+            <div class="mb-[8px] text-[12px] font-medium leading-[18px] text-[#374151]">2. 上传文件</div>
             <div class="flex flex-wrap items-center gap-[8px]">
               <button
                 type="button"
@@ -1802,17 +1820,34 @@ onMounted(() => {
               <button
                 type="button"
                 class="inline-flex h-[32px] items-center justify-center rounded-[8px] border border-black/10 bg-white px-[12px] text-[13px] font-medium text-[#0A0A0A] hover:bg-[#F9FAFB]"
+                @click="showImportMoreActions = !showImportMoreActions"
+              >
+                更多
+              </button>
+            </div>
+            <div v-if="showImportMoreActions" class="mt-[8px] flex flex-wrap gap-[8px]">
+              <button
+                type="button"
+                class="inline-flex h-[30px] items-center justify-center rounded-[8px] border border-black/10 bg-white px-[10px] text-[12px] font-medium text-[#0A0A0A] hover:bg-[#F9FAFB]"
                 @click="directoryInputRef?.click()"
               >
                 选择目录
               </button>
               <button
                 type="button"
-                class="inline-flex h-[32px] items-center justify-center rounded-[8px] border border-black/10 bg-white px-[12px] text-[13px] font-medium text-[#C10007] hover:bg-[#FEF2F2]"
+                class="inline-flex h-[30px] items-center justify-center gap-[5px] rounded-[8px] border border-black/10 bg-white px-[10px] text-[12px] font-medium text-[#0A0A0A] hover:bg-[#F9FAFB]"
+                @click="downloadImportTemplate"
+              >
+                <Download class="h-[13px] w-[13px]" />
+                下载模板
+              </button>
+              <button
+                type="button"
+                class="inline-flex h-[30px] items-center justify-center rounded-[8px] border border-black/10 bg-white px-[10px] text-[12px] font-medium text-[#C10007] hover:bg-[#FEF2F2]"
                 :disabled="!importQueue.length || isImporting"
                 @click="clearImportQueue"
               >
-                清空
+                重置本次导入
               </button>
             </div>
             <div class="mt-[8px] text-[12px] leading-[18px] text-[#717182]">
@@ -1856,7 +1891,7 @@ onMounted(() => {
 
           <div v-if="currentImportPreview" class="rounded-[8px] border border-black/10 bg-white">
             <div class="border-b border-black/10 px-[12px] py-[10px]">
-              <div class="text-[13px] font-medium text-[#0A0A0A]">导入前预览</div>
+              <div class="text-[13px] font-medium text-[#0A0A0A]">3. 字段映射并导入</div>
               <div class="mt-[2px] text-[12px] text-[#717182]">{{ currentImportPreview.fileName }} · 识别 {{ currentImportPreview.totalRows }} 行</div>
             </div>
             <div class="grid grid-cols-1 gap-[8px] px-[12px] py-[10px] sm:grid-cols-2">
@@ -1901,7 +1936,7 @@ onMounted(() => {
           >
             <RefreshCw v-if="isImporting" class="h-[14px] w-[14px] animate-spin" />
             <UploadCloud v-else class="h-[14px] w-[14px]" />
-            {{ isImporting ? '导入中' : '开始导入' }}
+            {{ isImporting ? '导入中' : '确认导入' }}
           </button>
         </div>
 
@@ -1946,7 +1981,7 @@ onMounted(() => {
       </div>
     </section>
 
-    <section class="mt-[16px] grid grid-cols-1 gap-[16px] xl:grid-cols-2">
+    <section v-if="activeView === 'details'" class="mt-[16px] grid grid-cols-1 gap-[16px] xl:grid-cols-2">
       <div class="rounded-[8px] border border-black/10 bg-white p-[18px]">
         <h2 class="flex items-center gap-[8px] text-[15px] font-semibold leading-[22px] text-[#0A0A0A]">
           <GitBranch class="h-[16px] w-[16px] text-[#C2410C]" />
@@ -1986,7 +2021,7 @@ onMounted(() => {
       </div>
     </section>
 
-    <section class="mt-[16px] rounded-[8px] border border-black/10 bg-white p-[18px]">
+    <section v-if="activeView === 'details'" class="mt-[16px] rounded-[8px] border border-black/10 bg-white p-[18px]">
       <h2 class="flex items-center gap-[8px] text-[15px] font-semibold leading-[22px] text-[#0A0A0A]">
         <Settings2 class="h-[16px] w-[16px] text-[#155DFC]" />
         样例用例

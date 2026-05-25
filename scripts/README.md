@@ -230,7 +230,7 @@ This runs:
 The backend test run includes `tests/e2e`, so PostgreSQL must be reachable. By default it uses:
 
 ```text
-postgresql+asyncpg://postgres:postgres@localhost:5432/ai_test_platform_e2e
+postgresql+asyncpg://postgres:123456@localhost:5432/ai_test_platform_e2e
 ```
 
 The script refuses database names that do not contain `test` or `e2e`.
@@ -313,7 +313,7 @@ Default CI phases (same gate as local script):
 PostgreSQL service is provided in CI as:
 
 ```text
-postgresql+asyncpg://postgres:postgres@localhost:5432/ai_test_platform_e2e
+postgresql+asyncpg://postgres:123456@localhost:5432/ai_test_platform_e2e
 ```
 
 ### Frontend real E2E in CI

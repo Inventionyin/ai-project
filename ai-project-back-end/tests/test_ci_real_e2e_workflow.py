@@ -30,6 +30,7 @@ def test_real_e2e_workflow_contains_required_ci_entrypoints():
         "-EnableBusinessClosure",
         "externalSmokeTargets",
         "Run frontend real E2E (workflow_dispatch or nightly)",
+        'JWT_SECRET_KEY = "real_e2e_secret_change_me_please_32chars_min_123456"',
         "github.event_name == 'schedule'",
         "includeFrontendRealE2E",
         "actions/checkout@v6",

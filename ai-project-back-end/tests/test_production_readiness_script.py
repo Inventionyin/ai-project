@@ -191,6 +191,7 @@ def test_production_readiness_dry_run_is_offline_and_documents_targets():
         capture_output=True,
         text=True,
         encoding="utf-8",
+        errors="replace",
         env=_clean_env(),
     )
     output = f"{result.stdout}\n{result.stderr}"
@@ -276,6 +277,7 @@ def test_production_readiness_bash_dry_run_is_offline_and_documents_targets():
         capture_output=True,
         text=True,
         encoding="utf-8",
+        errors="replace",
         env=_clean_env(),
     )
     output = f"{result.stdout}\n{result.stderr}"

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { createTestcaseBinding } from '@/lib/aiTestingPlatformApi'
 import {
   exportCollection,
@@ -30,6 +30,7 @@ type RequestForm = {
 }
 
 const route = useRoute()
+const router = useRouter()
 
 const projectId = computed(() => String(route.params.projectId || '').trim())
 const collectionId = computed(() => String(route.params.id || '').trim())
@@ -169,7 +170,6 @@ async function loadCollection() {
   if (!collectionId.value) return
   loading.value = true
   error.value = ''
-  success.value = ''
   runResultText.value = ''
   try {
     const data = await fetchCollectionDetail(collectionId.value)
@@ -245,8 +245,8 @@ async function saveRequest() {
     if (!payload.name) throw new Error('请求名称不能为空')
     if (!payload.url) throw new Error('请求 URL 不能为空')
     await updateCollectionRequest(collectionId.value, requestForm.value.requestId, payload)
-    success.value = '保存成功'
     await loadCollection()
+    success.value = '保存成功'
   } catch (e) {
     error.value = e instanceof Error ? e.message : '保存失败'
   } finally {
@@ -335,7 +335,15 @@ async function handleImport() {
     })
     success.value = `导入成功：${created.name}`
     importContent.value = ''
-    await loadCollection()
+    const newId = String(created?.id || '').trim()
+    if (newId && newId !== collectionId.value) {
+      await router.replace({
+        path: `/projects/${projectId.value}/assets/apis/${newId}`,
+        query: {}
+      })
+    } else {
+      await loadCollection()
+    }
   } catch (e) {
     error.value = e instanceof Error ? e.message : '导入失败'
   } finally {

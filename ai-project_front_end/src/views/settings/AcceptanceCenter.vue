@@ -82,7 +82,15 @@
         </div>
 
         <div>
-          <div class="mb-2 text-[13px] font-medium text-[#0A0A0A]">外部系统</div>
+          <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <div class="text-[13px] font-medium text-[#0A0A0A]">外部系统</div>
+            <RouterLink
+              class="rounded border border-black/10 bg-white px-3 py-1 text-[12px] font-medium text-[#0A0A0A] hover:bg-[#F7F8FA]"
+              :to="integrationDiagnosticsUrl"
+            >
+              进入联调诊断
+            </RouterLink>
+          </div>
           <table v-if="summary.externalSystems.length" class="w-full table-fixed text-[12px]">
             <thead>
               <tr class="border-b border-black/5">
@@ -112,8 +120,8 @@
         <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <div class="rounded border border-black/10 bg-[#FAFBFC] p-3">
             <div class="mb-2 text-[13px] font-medium text-[#0A0A0A]">核心指标</div>
-            <div v-if="summary.metrics.length" class="space-y-1 text-[12px] text-[#374151]">
-              <div v-for="item in summary.metrics" :key="item.key" class="flex items-center justify-between gap-3">
+            <div v-if="acceptanceMetrics.length" class="space-y-1 text-[12px] text-[#374151]">
+              <div v-for="item in acceptanceMetrics" :key="item.key" class="flex items-center justify-between gap-3">
                 <span class="truncate">{{ item.label }}</span>
                 <span class="font-medium text-[#0A0A0A]">{{ item.value }}</span>
               </div>
@@ -201,6 +209,11 @@ const decisionClass = computed(() => {
 })
 const defectsUrl = computed(() => `/projects/${encodeURIComponent(projectId.value)}/defects?status=OPEN`)
 const trialOperationUrl = computed(() => `/projects/${encodeURIComponent(projectId.value)}/trial-operation`)
+const integrationDiagnosticsUrl = computed(
+  () => `/projects/${encodeURIComponent(projectId.value)}/settings/integrations#integration-diagnostics`
+)
+const hiddenAssetMetricKeys = new Set(['requirementDocs', 'testcases', 'defectClusters'])
+const acceptanceMetrics = computed(() => summary.metrics.filter((item) => !hiddenAssetMetricKeys.has(item.key)))
 const blockingMetricCards = computed(() => [
   { label: '未关闭缺陷', value: metricValue('defects'), tone: 'text-red-700' },
   { label: '风险提示', value: metricValue('riskHints'), tone: 'text-amber-700' },

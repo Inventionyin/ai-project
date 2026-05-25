@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import {
   createNotification,
   deleteNotification,
+  getExternalIntegrationDiagnostics,
   getNotificationDiagnostics,
   listNotifications,
   listStrategyCenter,
@@ -24,6 +25,8 @@ import {
   type IntegrationDiagnosticsCheck,
   type IntegrationDiagnosticsProviderReadiness,
   type IntegrationDiagnosticsRecentFailure,
+  type ExternalIntegrationDiagnostics,
+  type ExternalIntegrationDiagnosticItem,
   type StrategyCenterRuleItem,
   type StrategySimulationResult
 } from '@/lib/api/integrations'
@@ -54,6 +57,13 @@ const diagnostics = ref<IntegrationDiagnostics>({
   checks: [],
   recentFailures: [],
   providerReadiness: []
+})
+const externalDiagnostics = ref<ExternalIntegrationDiagnostics>({
+  generatedAt: null,
+  summary: { status: 'READY', totalChecks: 0, blocking: 0, warnings: 0, ready: 0 },
+  checks: [],
+  issueLinks: [],
+  nextActions: []
 })
 const strategySimulationLoading = ref(false)
 const strategySimulationErrorMessage = ref('')
@@ -1199,13 +1209,25 @@ async function loadDiagnostics() {
   diagnosticsLoading.value = true
   diagnosticsErrorMessage.value = ''
   try {
-    diagnostics.value = await getNotificationDiagnostics(projectId.value)
+    const [notificationDiagnostics, unifiedDiagnostics] = await Promise.all([
+      getNotificationDiagnostics(projectId.value),
+      getExternalIntegrationDiagnostics(projectId.value)
+    ])
+    diagnostics.value = notificationDiagnostics
+    externalDiagnostics.value = unifiedDiagnostics
   } catch (error) {
     diagnostics.value = {
       summary: { status: 'READY', total: 0, blocking: 0, warnings: 0, ready: 0, failedDeliveries: 0 },
       checks: [],
       recentFailures: [],
       providerReadiness: []
+    }
+    externalDiagnostics.value = {
+      generatedAt: null,
+      summary: { status: 'READY', totalChecks: 0, blocking: 0, warnings: 0, ready: 0 },
+      checks: [],
+      issueLinks: [],
+      nextActions: []
     }
     diagnosticsErrorMessage.value = error instanceof Error ? error.message : '加载联调诊断失败'
   } finally {
@@ -2334,7 +2356,7 @@ onMounted(async () => {
       </section>
     </div>
 
-    <section class="mt-4 rounded-[12px] border border-black/10 bg-white p-4">
+    <section id="integration-diagnostics" class="mt-4 rounded-[12px] border border-black/10 bg-white p-4">
       <div class="flex items-center justify-between gap-2">
         <h2 class="text-[14px] font-semibold leading-[20px] text-[#0A0A0A]">联调诊断</h2>
         <button class="h-8 rounded-[8px] border border-black/10 px-3 text-[12px]" :disabled="diagnosticsLoading" @click="loadDiagnostics">
@@ -2343,6 +2365,48 @@ onMounted(async () => {
       </div>
       <div v-if="diagnosticsErrorMessage" class="mt-3 rounded-[8px] border border-[#FB2C36]/30 bg-[#FEF2F2] p-2 text-[12px] text-[#B91C1C]">
         {{ diagnosticsErrorMessage }}
+      </div>
+      <div class="mt-3 rounded-[8px] border border-black/10 bg-[#FAFBFC] p-3">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div class="text-[13px] font-semibold text-[#0A0A0A]">统一联调总览</div>
+            <div class="mt-1 text-[12px] text-[#717182]">
+              总项: {{ externalDiagnostics.summary.totalChecks }} · 阻塞: {{ externalDiagnostics.summary.blocking }} · 告警: {{ externalDiagnostics.summary.warnings }} · 就绪: {{ externalDiagnostics.summary.ready }}
+            </div>
+          </div>
+          <span class="rounded-[999px] border px-2 py-1 text-[12px]" :class="diagnosticsStatusTagClass(externalDiagnostics.summary.status)">
+            {{ externalDiagnostics.summary.status }}
+          </span>
+        </div>
+        <div class="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
+          <div
+            v-for="row in externalDiagnostics.checks.slice(0, 6) as ExternalIntegrationDiagnosticItem[]"
+            :key="row.id"
+            class="rounded-[8px] border border-black/10 bg-white px-3 py-2 text-[12px]"
+          >
+            <div class="flex items-center justify-between gap-2">
+              <span class="truncate font-medium text-[#0A0A0A]">{{ row.title }}</span>
+              <span class="shrink-0 rounded-[999px] border px-2 py-0.5" :class="diagnosticsStatusTagClass(row.status)">{{ row.status }}</span>
+            </div>
+            <div class="mt-1 truncate text-[#717182]" :title="row.detail">{{ row.provider }} · {{ row.category }} · {{ row.detail }}</div>
+            <div v-if="row.missingFields.length" class="mt-1 text-[#A16207]">缺少: {{ row.missingFields.join('、') }}</div>
+          </div>
+          <div v-if="!diagnosticsLoading && externalDiagnostics.checks.length === 0" class="rounded-[8px] border border-black/10 bg-white px-3 py-2 text-[12px] text-[#717182]">
+            暂无统一联调检查项
+          </div>
+        </div>
+        <div v-if="externalDiagnostics.issueLinks.length" class="mt-3 flex flex-wrap gap-2 text-[12px]">
+          <span class="text-[#717182]">Issue 回链</span>
+          <span v-for="item in externalDiagnostics.issueLinks" :key="item.provider" class="rounded-[999px] border border-black/10 bg-white px-2 py-1 text-[#0A0A0A]">
+            {{ item.provider }}: {{ item.total }}
+          </span>
+        </div>
+        <div v-if="externalDiagnostics.nextActions.length" class="mt-3 flex flex-wrap gap-2 text-[12px]">
+          <span class="text-[#717182]">下一步</span>
+          <span v-for="item in externalDiagnostics.nextActions" :key="item" class="rounded-[999px] border border-black/10 bg-white px-2 py-1 text-[#0A0A0A]">
+            {{ item }}
+          </span>
+        </div>
       </div>
       <div class="mt-3 flex flex-wrap items-center gap-2 text-[12px] text-[#0A0A0A]">
         <span class="rounded-[999px] border px-2 py-1" :class="diagnosticsStatusTagClass(diagnostics.summary.status)">{{ diagnostics.summary.status }}</span>

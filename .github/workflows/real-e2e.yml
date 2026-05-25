@@ -48,7 +48,7 @@ jobs:
         image: postgres:16
         env:
           POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
+          POSTGRES_PASSWORD: 123456
           POSTGRES_DB: ai_test_platform_e2e
         ports:
           - 5432:5432
@@ -59,8 +59,8 @@ jobs:
           --health-retries 5
 
     env:
-      TEST_DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/ai_test_platform_e2e
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/ai_test_platform_e2e
+      TEST_DATABASE_URL: postgresql+asyncpg://postgres:123456@localhost:5432/ai_test_platform_e2e
+      DATABASE_URL: postgresql+asyncpg://postgres:123456@localhost:5432/ai_test_platform_e2e
       PYTHONPATH: .
       WEITESTING_GITHUB_TOKEN: ${{ github.token }}
       WEITESTING_GITHUB_REPOSITORY: ${{ github.repository }}
@@ -173,6 +173,7 @@ jobs:
             $env:PYTHONPATH = "."
             $env:TEST_DATABASE_URL = $dbUrl
             $env:DATABASE_URL = $dbUrl
+            $env:JWT_SECRET_KEY = "real_e2e_secret_change_me_please_32chars_min_123456"
             python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
           } -ArgumentList $backendDir, $env:TEST_DATABASE_URL
 

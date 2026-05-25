@@ -51,22 +51,22 @@
 
 ## 一键验证
 
-本地 focused 验证：
+本地一键门禁：
 
 ```powershell
-.\scripts\verify-local.ps1
+.\scripts\verify_real_e2e.ps1
 ```
 
-完整后端验证：
+只跑真实后端 E2E：
 
 ```powershell
-.\scripts\verify-local.ps1 -FullBackend
+.\scripts\verify_real_e2e.ps1 -BackendE2EOnly
 ```
 
-包含真实数据库和前端 E2E：
+包含前端真实 E2E：
 
 ```powershell
-.\scripts\verify-local.ps1 -IncludeE2E
+.\scripts\verify_real_e2e.ps1 -WithFrontendRealE2E
 ```
 
 ## 生产项状态
