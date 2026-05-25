@@ -12,7 +12,7 @@ import {
   type RunDetailData
 } from '@/lib/aiTestingPlatformApi'
 import { createRunRetrospectiveDraft } from '@/lib/api/knowledge'
-import { createIntegrationIssue, type IntegrationIssueProvider } from '@/lib/api/integrationIssues'
+import { createIntegrationIssue, listIntegrationIssues, type IntegrationIssueItem, type IntegrationIssueProvider } from '@/lib/api/integrationIssues'
 
 const route = useRoute()
 const router = useRouter()
@@ -40,6 +40,9 @@ const reportError = ref('')
 const creatingIssue = ref(false)
 const createIssueError = ref('')
 const createIssueSuccess = ref('')
+const issueLinks = ref<IntegrationIssueItem[]>([])
+const issueLinksLoading = ref(false)
+const issueLinksError = ref('')
 const issueProvider = ref<IntegrationIssueProvider>('JIRA')
 const issueTitle = ref('')
 const issueDescription = ref('')
@@ -197,7 +200,7 @@ async function loadRunDetail() {
       fetchProjectEnvironments(pid)
     ])
     caseRunPage.value = 1
-    await loadCaseRuns()
+    await Promise.all([loadCaseRuns(), loadIssueLinks()])
     suiteName.value = suites.items.find((item) => item.id === detail.suiteId)?.name || detail.suiteId || '-'
     envName.value = detail.envId ? environments.find((item) => item.id === detail.envId)?.name || detail.envId : '-'
     try {
@@ -218,6 +221,25 @@ async function loadRunDetail() {
     loadError.value = error instanceof Error ? error.message : '加载运行详情失败'
   } finally {
     isLoading.value = false
+  }
+}
+
+async function loadIssueLinks() {
+  const pid = projectId.value
+  const rid = runId.value
+  if (!pid || !rid) {
+    issueLinks.value = []
+    return
+  }
+  issueLinksLoading.value = true
+  issueLinksError.value = ''
+  try {
+    issueLinks.value = await listIntegrationIssues(pid, { runId: rid })
+  } catch (error) {
+    issueLinks.value = []
+    issueLinksError.value = error instanceof Error ? error.message : '加载外部 Issue 失败'
+  } finally {
+    issueLinksLoading.value = false
   }
 }
 
@@ -387,6 +409,7 @@ async function handleCreateIntegrationIssue() {
   try {
     await createIntegrationIssue(pid, payload)
     createIssueSuccess.value = 'Issue 创建请求已提交'
+    await loadIssueLinks()
     showToast(createIssueSuccess.value)
   } catch (error) {
     createIssueError.value = error instanceof Error ? error.message : 'Issue 创建失败'
@@ -598,6 +621,34 @@ watch(
             </button>
             <span v-if="createIssueSuccess" class="text-[12px] leading-[16px] text-[#008236]">{{ createIssueSuccess }}</span>
             <span v-if="createIssueError" class="text-[12px] leading-[16px] text-[#E7000B]">{{ createIssueError }}</span>
+          </div>
+
+          <div class="mt-[10px] overflow-hidden rounded-[8px] border border-black/10">
+            <div class="flex items-center justify-between border-b border-black/10 bg-[rgba(236,236,240,0.35)] px-3 py-2">
+              <div class="text-[12px] font-medium leading-[16px] text-[#0A0A0A]">已关联 Issue</div>
+              <button
+                type="button"
+                class="h-[24px] rounded-[6px] border border-black/10 bg-white px-2 text-[11px] leading-[14px] text-[#4A5565] disabled:cursor-not-allowed disabled:opacity-60"
+                :disabled="issueLinksLoading"
+                @click="loadIssueLinks"
+              >
+                {{ issueLinksLoading ? '刷新中...' : '刷新' }}
+              </button>
+            </div>
+            <div v-if="issueLinksError" class="px-3 py-2 text-[12px] leading-[16px] text-[#E7000B]">{{ issueLinksError }}</div>
+            <div v-else-if="issueLinksLoading" class="px-3 py-2 text-[12px] leading-[16px] text-[#717182]">加载中...</div>
+            <div v-else-if="issueLinks.length === 0" class="px-3 py-2 text-[12px] leading-[16px] text-[#717182]">暂无关联 Issue</div>
+            <div v-else class="divide-y divide-black/10">
+              <div v-for="item in issueLinks" :key="item.id" class="grid grid-cols-[72px_minmax(0,1fr)_120px] gap-2 px-3 py-2 text-[12px] leading-[16px]">
+                <div class="font-medium text-[#0A0A0A]">{{ item.provider }}</div>
+                <div class="min-w-0">
+                  <a v-if="item.url" :href="item.url" target="_blank" rel="noreferrer" class="truncate text-[#155DFC] underline">{{ item.issueKey || item.id }}</a>
+                  <div v-else class="truncate text-[#0A0A0A]">{{ item.issueKey || item.id }}</div>
+                  <div class="truncate text-[11px] text-[#717182]">run: {{ item.runId }}</div>
+                </div>
+                <div class="text-right text-[11px] text-[#717182]">{{ formatDateTime(item.createdAt) }}</div>
+              </div>
+            </div>
           </div>
         </div>
 

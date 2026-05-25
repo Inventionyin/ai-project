@@ -58,6 +58,7 @@ const actionError = ref('')
 const creatingCollection = ref(false)
 const creatingFolder = ref(false)
 const creatingRequest = ref(false)
+const importGuideOpen = ref(false)
 
 const contextMenu = ref<{
   isOpen: boolean
@@ -210,6 +211,16 @@ function selectEndpoint(collection: CollectionNode, endpoint: ApiEndpoint) {
   activeEndpointId.value = endpoint.id
   if (!projectId.value) return
   void router.push(`/projects/${projectId.value}/assets/apis/${collection.id}?requestId=${encodeURIComponent(endpoint.id)}`)
+}
+
+function openImportGuide() {
+  importGuideOpen.value = !importGuideOpen.value
+}
+
+function goActiveCollectionDebug() {
+  const target = activeCollectionId.value || collections.value[0]?.id || ''
+  if (!target || !projectId.value) return
+  void router.push(`/projects/${projectId.value}/assets/apis/${target}`)
 }
 
 function findCollection(collectionId: string) {
@@ -412,11 +423,26 @@ watch(projectId, () => {
       <div class="flex flex-col gap-[8px] border-b-[0.6667px] border-black/10 px-[12px] pt-[12px] pb-[0.67px]">
         <div class="flex items-center justify-between">
           <div class="h-[16px] w-[48px] text-[12px] font-semibold leading-[16px] text-[#717182]">接口集合</div>
-          <button type="button" class="relative h-[16px] w-[39px]">
+          <button type="button" class="relative h-[16px] w-[39px]" aria-label="导入接口集合" @click="openImportGuide">
             <img :src="apiImport" alt="" class="absolute left-0 top-[2.5px] h-[11px] w-[11px]" />
             <span class="absolute left-[13px] top-0 h-[16px] w-[28px] text-center text-[12px] font-medium leading-[16px] text-[#155DFC]">
               导入
             </span>
+          </button>
+        </div>
+
+        <div v-if="importGuideOpen" class="rounded-[8px] border border-[#BEDBFF] bg-white p-[8px]">
+          <div class="text-[12px] font-semibold leading-[16px] text-[#0A0A0A]">Postman / Swagger / OpenAPI</div>
+          <div class="mt-[4px] text-[11px] leading-[16px] text-[#717182]">
+            导入后进入集合详情页进行单请求运行、保存、导出和绑定用例
+          </div>
+          <button
+            type="button"
+            class="mt-[8px] h-[28px] w-full rounded-[8px] bg-[#155DFC] text-[12px] font-medium text-white disabled:opacity-50"
+            :disabled="!activeCollectionId && collections.length === 0"
+            @click="goActiveCollectionDebug"
+          >
+            去当前集合调试
           </button>
         </div>
 

@@ -247,6 +247,14 @@ test.describe('plugins 管理页冒烟', () => {
         await route.continue()
         return
       }
+      if (path === '/api/auth/me' || path === '/auth/me') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ code: 0, data: { id: 'u1', username: 'qa', roles: ['Admin'] } })
+        })
+        return
+      }
       if (path.startsWith('/api/plugins')) {
         await route.fulfill({
           status: 500,
@@ -261,6 +269,10 @@ test.describe('plugins 管理页冒烟', () => {
           contentType: 'application/json',
           body: JSON.stringify({ code: 0, data: { page: 1, pageSize: 20, total: 0, items: [] } })
         })
+        return
+      }
+      if (path.startsWith('/api/') || path.startsWith('/auth/')) {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ code: 0, data: {} }) })
         return
       }
       await route.continue()

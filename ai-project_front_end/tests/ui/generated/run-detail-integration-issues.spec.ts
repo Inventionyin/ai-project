@@ -1,4 +1,12 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
+
+async function seedAuth(page: Page) {
+  await page.goto('/login', { waitUntil: 'domcontentloaded' })
+  await page.evaluate(() => {
+    localStorage.setItem('accessToken', 'e2e-smoke-token')
+    localStorage.setItem('accessTokenExpiresAt', String(Date.now() + 60 * 60 * 1000))
+  })
+}
 
 test.describe('run detail integration issues', () => {
   test('JIRA 与 ZENTAO 创建入口提交正确 payload', async ({ page }) => {
@@ -11,6 +19,14 @@ test.describe('run detail integration issues', () => {
       const isApiLike = req.resourceType() !== 'document'
       if (!isApiLike) {
         await route.continue()
+        return
+      }
+      if (path === '/api/auth/me' || path === '/auth/me') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ code: 0, data: { id: 'u1', username: 'qa', roles: ['Admin'] } })
+        })
         return
       }
 
@@ -62,7 +78,25 @@ test.describe('run detail integration issues', () => {
         await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ code: 0, data: [] }) })
         return
       }
-      if (path === '/api/projects/1/integrations/issues' || path === '/projects/1/integrations/issues') {
+      if ((path === '/api/projects/1/integrations/issues' || path === '/projects/1/integrations/issues') && req.method() === 'GET') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            code: 0,
+            data: issuePayloads.map((payload, index) => ({
+              id: `issue-${index + 1}`,
+              runId: 'run-1',
+              provider: String(payload.provider || 'JIRA'),
+              issueKey: `${String(payload.provider || 'JIRA')}-${index + 1}`,
+              url: String(payload.url || 'https://issue.example.com'),
+              createdAt: 1710000000 + index
+            }))
+          })
+        })
+        return
+      }
+      if ((path === '/api/projects/1/integrations/issues' || path === '/projects/1/integrations/issues') && req.method() === 'POST') {
         issuePayloads.push((req.postDataJSON() || {}) as Record<string, unknown>)
         await route.fulfill({
           status: 200,
@@ -74,6 +108,10 @@ test.describe('run detail integration issues', () => {
         })
         return
       }
+      if (path.startsWith('/api/') || path.startsWith('/auth/')) {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ code: 0, data: {} }) })
+        return
+      }
       await route.continue()
     })
 
@@ -82,6 +120,7 @@ test.describe('run detail integration issues', () => {
       localStorage.setItem('accessTokenExpiresAt', String(Date.now() + 60 * 60 * 1000))
     })
 
+    await seedAuth(page)
     await page.goto('/projects/1/runs/run-1', { waitUntil: 'domcontentloaded' })
     await expect(page.locator('div').filter({ hasText: /^外部 Issue$/ }).first()).toBeVisible()
 
@@ -95,6 +134,7 @@ test.describe('run detail integration issues', () => {
     await page.getByLabel('真实创建外部缺陷').check()
     await page.getByRole('button', { name: '创建外部 Issue' }).click()
     await expect(page.getByText('Issue 创建请求已提交').first()).toBeVisible()
+    await expect(page.getByText('JIRA-1')).toBeVisible()
 
     await page.locator('label:has-text("provider") select').selectOption('ZENTAO')
     await page.locator('label:has-text("title") input').fill('Run failed - Zentao bug')
@@ -107,6 +147,7 @@ test.describe('run detail integration issues', () => {
     await page.locator('label:has-text("zentao token") input').fill('zentao-token-placeholder')
     await page.getByRole('button', { name: '创建外部 Issue' }).click()
     await expect(page.getByText('Issue 创建请求已提交').first()).toBeVisible()
+    await expect(page.getByText('ZENTAO-2')).toBeVisible()
 
     expect(issuePayloads).toHaveLength(2)
 
@@ -159,6 +200,14 @@ test.describe('run detail integration issues', () => {
         await route.continue()
         return
       }
+      if (path === '/api/auth/me' || path === '/auth/me') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ code: 0, data: { id: 'u1', username: 'qa', roles: ['Admin'] } })
+        })
+        return
+      }
 
       if (path === '/api/runs/run-1' || path === '/runs/run-1') {
         await route.fulfill({
@@ -208,9 +257,17 @@ test.describe('run detail integration issues', () => {
         await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ code: 0, data: [] }) })
         return
       }
-      if (path === '/api/projects/1/integrations/issues' || path === '/projects/1/integrations/issues') {
+      if ((path === '/api/projects/1/integrations/issues' || path === '/projects/1/integrations/issues') && req.method() === 'GET') {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ code: 0, data: [] }) })
+        return
+      }
+      if ((path === '/api/projects/1/integrations/issues' || path === '/projects/1/integrations/issues') && req.method() === 'POST') {
         issueCreateAttempted = true
         await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ code: 1, message: 'should not be called' }) })
+        return
+      }
+      if (path.startsWith('/api/') || path.startsWith('/auth/')) {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ code: 0, data: {} }) })
         return
       }
       await route.continue()
@@ -221,6 +278,7 @@ test.describe('run detail integration issues', () => {
       localStorage.setItem('accessTokenExpiresAt', String(Date.now() + 60 * 60 * 1000))
     })
 
+    await seedAuth(page)
     await page.goto('/projects/1/runs/run-1', { waitUntil: 'domcontentloaded' })
     await page.locator('label:has-text("title") input').fill('Missing jira fields')
     await page.locator('label:has-text("description") textarea').fill('validation should block submit')
@@ -239,6 +297,14 @@ test.describe('run detail integration issues', () => {
         await route.continue()
         return
       }
+      if (path === '/api/auth/me' || path === '/auth/me') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ code: 0, data: { id: 'u1', username: 'qa', roles: ['Admin'] } })
+        })
+        return
+      }
 
       if (path === '/api/runs/run-1' || path === '/runs/run-1') {
         await route.fulfill({
@@ -288,12 +354,20 @@ test.describe('run detail integration issues', () => {
         await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ code: 0, data: [] }) })
         return
       }
-      if (path === '/api/projects/1/integrations/issues' || path === '/projects/1/integrations/issues') {
+      if ((path === '/api/projects/1/integrations/issues' || path === '/projects/1/integrations/issues') && req.method() === 'GET') {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ code: 0, data: [] }) })
+        return
+      }
+      if ((path === '/api/projects/1/integrations/issues' || path === '/projects/1/integrations/issues') && req.method() === 'POST') {
         await route.fulfill({
           status: 500,
           contentType: 'application/json',
           body: JSON.stringify({ code: 1, message: 'integration backend unavailable' })
         })
+        return
+      }
+      if (path.startsWith('/api/') || path.startsWith('/auth/')) {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ code: 0, data: {} }) })
         return
       }
       await route.continue()
@@ -304,6 +378,7 @@ test.describe('run detail integration issues', () => {
       localStorage.setItem('accessTokenExpiresAt', String(Date.now() + 60 * 60 * 1000))
     })
 
+    await seedAuth(page)
     await page.goto('/projects/1/runs/run-1', { waitUntil: 'domcontentloaded' })
     await page.locator('label:has-text("title") input').fill('Run failed - Jira issue')
     await page.locator('label:has-text("description") textarea').fill('Need triage for failed run in Jira.')

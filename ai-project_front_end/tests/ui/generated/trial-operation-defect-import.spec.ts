@@ -65,7 +65,19 @@ test.describe('trial operation defect import preview', () => {
     })
 
     await page.goto('/projects/1/trial-operation', { waitUntil: 'domcontentloaded' })
-    await page.getByRole('button', { name: '缺陷数据' }).click()
+    await expect(page.getByRole('button', { name: '演示概览' })).toBeVisible()
+    await expect(page.getByRole('button', { name: '数据导入' })).toBeVisible()
+    await expect(page.getByText('验收汇报稿', { exact: true })).toBeVisible()
+    await expect(page.getByText('用例库治理')).not.toBeVisible()
+    await expect(page.getByLabel('选择导入类型')).not.toBeVisible()
+
+    await page.getByRole('button', { name: '数据导入' }).click()
+    await expect(page.getByLabel('选择导入类型')).toBeVisible()
+    await page.getByLabel('选择导入类型').selectOption('defects')
+    await expect(page.getByRole('button', { name: '更多' })).toBeVisible()
+    await page.getByRole('button', { name: '更多' }).click()
+    await expect(page.getByRole('button', { name: '重置本次导入' })).toBeVisible()
+    await expect(page.getByRole('button', { name: /确认导入/ })).toBeVisible()
 
     const markdown = [
       '# Teambition 缺陷分析',

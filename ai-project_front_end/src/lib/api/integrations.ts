@@ -210,6 +210,42 @@ export type IntegrationDiagnostics = {
   providerReadiness: IntegrationDiagnosticsProviderReadiness[]
 }
 
+export type ExternalIntegrationDiagnosticsStatus = 'BLOCKED' | 'WARN' | 'READY'
+
+export type ExternalIntegrationDiagnosticsSummary = {
+  status: ExternalIntegrationDiagnosticsStatus
+  totalChecks: number
+  blocking: number
+  warnings: number
+  ready: number
+}
+
+export type ExternalIntegrationDiagnosticItem = {
+  id: string
+  category: string
+  provider: string
+  status: ExternalIntegrationDiagnosticsStatus
+  title: string
+  detail: string
+  recommendation: string
+  configured?: boolean | null
+  missingFields: string[]
+  lastVerifiedAt?: string | number | null
+}
+
+export type ExternalIntegrationIssueProviderStats = {
+  provider: string
+  total: number
+}
+
+export type ExternalIntegrationDiagnostics = {
+  generatedAt?: string | number | null
+  summary: ExternalIntegrationDiagnosticsSummary
+  checks: ExternalIntegrationDiagnosticItem[]
+  issueLinks: ExternalIntegrationIssueProviderStats[]
+  nextActions: string[]
+}
+
 function normalizeList<T>(data: T[] | { items?: T[] }) {
   if (Array.isArray(data)) return data
   return Array.isArray(data?.items) ? data.items : []
@@ -347,6 +383,57 @@ function normalizeDiagnostics(payload: unknown): IntegrationDiagnostics {
     checks: normalizeDiagnosticsChecks(data.checks),
     recentFailures: normalizeDiagnosticsRecentFailures(data.recentFailures ?? data.recent_failures),
     providerReadiness: normalizeDiagnosticsProviderReadiness(data.providerReadiness ?? data.provider_readiness)
+  }
+}
+
+function normalizeExternalDiagnosticItem(value: unknown, index: number): ExternalIntegrationDiagnosticItem {
+  const record = value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
+  const missingFields = Array.isArray(record.missingFields ?? record.missing_fields)
+    ? ((record.missingFields ?? record.missing_fields) as unknown[]).map((item) => normalizeDiagnosticsText(item)).filter(Boolean)
+    : []
+  return {
+    id: normalizeDiagnosticsText(record.id) || `external-check-${index + 1}`,
+    category: normalizeDiagnosticsText(record.category) || 'external',
+    provider: normalizeDiagnosticsText(record.provider) || '-',
+    status: normalizeDiagnosticsStatus(record.status),
+    title: normalizeDiagnosticsText(record.title) || '-',
+    detail: normalizeDiagnosticsText(record.detail) || '-',
+    recommendation: normalizeDiagnosticsText(record.recommendation) || '-',
+    configured: record.configured === undefined ? null : normalizeDiagnosticsBool(record.configured),
+    missingFields,
+    lastVerifiedAt: (record.lastVerifiedAt ?? record.last_verified_at ?? null) as string | number | null
+  }
+}
+
+function normalizeExternalIssueStats(value: unknown): ExternalIntegrationIssueProviderStats[] {
+  if (!Array.isArray(value)) return []
+  return value.map((item) => {
+    const record = item && typeof item === 'object' && !Array.isArray(item) ? (item as Record<string, unknown>) : {}
+    return {
+      provider: normalizeDiagnosticsText(record.provider) || '-',
+      total: normalizeDiagnosticsInt(record.total)
+    }
+  })
+}
+
+function normalizeExternalDiagnostics(payload: unknown): ExternalIntegrationDiagnostics {
+  const data = payload && typeof payload === 'object' && !Array.isArray(payload) ? (payload as Record<string, unknown>) : {}
+  const summary = data.summary && typeof data.summary === 'object' && !Array.isArray(data.summary) ? (data.summary as Record<string, unknown>) : {}
+  const rawTotal = summary.totalChecks ?? summary.total_checks ?? summary.total
+  return {
+    generatedAt: (data.generatedAt ?? data.generated_at ?? null) as string | number | null,
+    summary: {
+      status: normalizeDiagnosticsStatus(summary.status),
+      totalChecks: normalizeDiagnosticsInt(rawTotal),
+      blocking: normalizeDiagnosticsInt(summary.blocking),
+      warnings: normalizeDiagnosticsInt(summary.warnings),
+      ready: normalizeDiagnosticsInt(summary.ready)
+    },
+    checks: Array.isArray(data.checks) ? data.checks.map((item, index) => normalizeExternalDiagnosticItem(item, index)) : [],
+    issueLinks: normalizeExternalIssueStats(data.issueLinks ?? data.issue_links),
+    nextActions: Array.isArray(data.nextActions ?? data.next_actions)
+      ? ((data.nextActions ?? data.next_actions) as unknown[]).map((item) => normalizeDiagnosticsText(item)).filter(Boolean)
+      : []
   }
 }
 
@@ -911,4 +998,14 @@ export async function getNotificationDiagnostics(projectId: string) {
     headers: authHeader()
   })
   return normalizeDiagnostics(data)
+}
+
+export async function getExternalIntegrationDiagnostics(projectId: string) {
+  const pid = String(projectId || '').trim()
+  if (!pid) return normalizeExternalDiagnostics({})
+  const data = await requestJson<unknown>(`/api/projects/${encodeURIComponent(pid)}/integrations/diagnostics`, {
+    method: 'GET',
+    headers: authHeader()
+  })
+  return normalizeExternalDiagnostics(data)
 }

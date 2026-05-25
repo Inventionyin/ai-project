@@ -238,6 +238,47 @@ const displayRows = computed(() => {
   return rows.value.filter((row) => selectedPriorities.value.includes(row.priority))
 })
 
+function escapeCsvCell(value: unknown) {
+  const raw = String(value ?? '')
+  const safe = /^[=+\-@]/.test(raw) ? `'${raw}` : raw
+  return `"${safe.replace(/"/g, '""')}"`
+}
+
+function exportCurrentListCsv() {
+  const exportRows = displayRows.value
+  if (!exportRows.length) {
+    showToast('暂无可导出数据', 'error')
+    return
+  }
+  const headers = ['测试用例ID', '模块', '标题', '类型', '优先级', '状态', '方法', '接口地址', '负责人', '最近执行', '更新时间']
+  const lines = [
+    headers.map(escapeCsvCell).join(','),
+    ...exportRows.map((row) => [
+      row.testCaseId,
+      row.module,
+      row.title,
+      row.type,
+      row.priority,
+      row.status,
+      row.method,
+      row.interfaceUrl,
+      row.owner,
+      row.lastRun,
+      row.updatedAt
+    ].map(escapeCsvCell).join(','))
+  ]
+  const blob = new Blob([`\uFEFF${lines.join('\r\n')}`], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const date = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+  const projectId = String(route.params.projectId || 'project').trim() || 'project'
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `testcases_${projectId}_${date}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+  showToast(`已导出 ${exportRows.length} 条用例`)
+}
+
 const selectedCount = computed(() => selectedCaseIds.value.length)
 const casesCount = computed(() => displayRows.value.length)
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
@@ -932,6 +973,13 @@ watch(() => route.params.projectId, () => {
             @click="openUploadCases"
           >
             上传用例
+          </button>
+          <button
+            type="button"
+            class="h-[32px] rounded-[10px] border border-[#BEDBFF] bg-white px-[14px] text-[14px] font-medium leading-[20px] text-[#155DFC]"
+            @click="exportCurrentListCsv"
+          >
+            导出CSV
           </button>
           <button
             type="button"

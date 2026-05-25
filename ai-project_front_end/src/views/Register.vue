@@ -1,22 +1,16 @@
-<template>
-  <div class="min-h-screen flex items-center justify-center bg-brand-dark py-12 px-4 sm:px-6 lg:px-8">
-    <AuthCard initial-tab="register" @register-success="handleRegisterSuccess" @login-success="handleLoginSuccess" />
-  </div>
-</template>
-
 <script setup lang="ts">
+import { onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import AuthCard from '@/components/AuthCard.vue'
 
 const router = useRouter()
 
-const handleRegisterSuccess = () => {
-  console.log('Register successful')
-  // AuthCard switches to login tab automatically on register success,
-  // so we might not need to do anything, or we can show a toast.
-}
-
-const handleLoginSuccess = () => {
-  router.push('/projects')
-}
+onMounted(() => {
+  router.replace('/login')
+})
 </script>
+
+<template>
+  <div class="min-h-screen flex items-center justify-center bg-brand-dark py-12 px-4 text-sm text-[#90A1B9]">
+    正在跳转到登录页...
+  </div>
+</template>

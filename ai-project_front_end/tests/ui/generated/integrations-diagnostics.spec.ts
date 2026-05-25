@@ -90,6 +90,44 @@ test.describe('integrations diagnostics smoke', () => {
         })
         return
       }
+      if (path.endsWith('/integrations/diagnostics')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            code: 0,
+            data: {
+              generatedAt: '2026-05-25T10:00:00Z',
+              summary: { status: 'WARN', totalChecks: 4, blocking: 0, warnings: 2, ready: 2 },
+              checks: [
+                {
+                  id: 'external.jenkins.1',
+                  category: 'devops',
+                  provider: 'JENKINS',
+                  status: 'WARN',
+                  title: 'JENKINS 联调状态',
+                  detail: '流水线已配置，尚需真实构建回执。',
+                  recommendation: '补齐配置后触发一次真实构建并确认回执。',
+                  configured: true,
+                  missingFields: []
+                },
+                {
+                  id: 'issues.linked-providers',
+                  category: 'issue',
+                  provider: 'ISSUE_TRACKING',
+                  status: 'READY',
+                  title: 'Issue 关联记录',
+                  detail: '已关联 2 条外部 Issue。',
+                  recommendation: '保持 Jira/禅道缺陷创建与回链的抽样检查。'
+                }
+              ],
+              issueLinks: [{ provider: 'JIRA', total: 2 }],
+              nextActions: ['补齐 Jenkins 触发配置后再跑真实流水线 smoke']
+            }
+          })
+        })
+        return
+      }
       await route.continue()
     })
 
@@ -107,6 +145,11 @@ test.describe('integrations diagnostics smoke', () => {
     await expect(page.getByText('Webhook Secret Missing')).toBeVisible()
     await expect(page.getByText('MISSING_SECRET')).toBeVisible()
     await expect(page.getByRole('cell', { name: 'timeout' })).toBeVisible()
+    await expect(page.getByText('统一联调总览')).toBeVisible()
+    await expect(page.getByText('总项: 4')).toBeVisible()
+    await expect(page.getByText('JENKINS 联调状态')).toBeVisible()
+    await expect(page.getByText('JIRA: 2')).toBeVisible()
+    await expect(page.getByText('补齐 Jenkins 触发配置后再跑真实流水线 smoke')).toBeVisible()
   })
 
   test('联调诊断接口失败时展示错误信息', async ({ page }) => {
@@ -161,6 +204,22 @@ test.describe('integrations diagnostics smoke', () => {
           status: 500,
           contentType: 'application/json',
           body: JSON.stringify({ code: 1, message: 'diagnostics service unavailable' })
+        })
+        return
+      }
+      if (path.endsWith('/integrations/diagnostics')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            code: 0,
+            data: {
+              summary: { status: 'READY', totalChecks: 0, blocking: 0, warnings: 0, ready: 0 },
+              checks: [],
+              issueLinks: [],
+              nextActions: []
+            }
+          })
         })
         return
       }
@@ -234,6 +293,22 @@ test.describe('integrations diagnostics smoke', () => {
               checks: [],
               providerReadiness: [],
               recentFailures: []
+            }
+          })
+        })
+        return
+      }
+      if (path.endsWith('/integrations/diagnostics')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            code: 0,
+            data: {
+              summary: { status: 'READY', totalChecks: 0, blocking: 0, warnings: 0, ready: 0 },
+              checks: [],
+              issueLinks: [],
+              nextActions: []
             }
           })
         })
