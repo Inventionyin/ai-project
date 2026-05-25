@@ -6,26 +6,18 @@ const apiBaseUrl = process.env.WEITESTING_API_BASE_URL || 'http://127.0.0.1:8000
 test.describe('real backend auth and project flow', () => {
   test.skip(!runRealE2E, 'Set WEITESTING_REAL_E2E=1 and start the backend to run real integration E2E.')
 
-  test('registers, logs in, creates a project, and opens its dashboard', async ({ page, request }) => {
+  test('logs in with an existing internal account, creates a project, and opens its dashboard', async ({ page, request }) => {
     const health = await request.get(`${apiBaseUrl}/health`)
     expect(health.ok(), `Backend health check failed at ${apiBaseUrl}/health`).toBeTruthy()
 
     const suffix = `${Date.now()}${Math.floor(Math.random() * 1000)}`.slice(-10)
-    const username = `real_e2e_${suffix}`
-    const phone = `13${suffix.slice(0, 9)}`
-    const password = 'RealE2e123'
+    const username = process.env.WEITESTING_E2E_USERNAME || process.env.WEITESTING_E2E_EMAIL || 'qa@example.com'
+    const password = process.env.WEITESTING_E2E_PASSWORD || '123456'
     const projectName = `真实联调项目 ${suffix}`
 
-    await page.goto('/login?tab=register')
-    await page.getByPlaceholder('请输入用户名').fill(username)
-    await page.getByPlaceholder('请输入手机号').fill(phone)
-    await page.getByPlaceholder('请输入验证码').fill('123456')
-    await page.getByPlaceholder('请设置密码（至少 8 位，含字母和数字）').fill(password)
-    await page.getByPlaceholder('请再次输入密码').fill(password)
-    await page.getByRole('button', { name: '注 册' }).click()
-
-    await expect(page.getByRole('button', { name: '登 录' })).toBeVisible()
-    await page.getByPlaceholder('请输入用户名').fill(username)
+    await page.goto('/login')
+    await expect(page.getByRole('button', { name: '注册账号' })).toHaveCount(0)
+    await page.getByPlaceholder('请输入邮箱').fill(username)
     await page.getByPlaceholder('请输入密码').fill(password)
     await page.getByRole('button', { name: '登 录' }).click()
 

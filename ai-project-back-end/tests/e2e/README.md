@@ -6,7 +6,7 @@ Run from `ai-project-back-end`:
 
 ```powershell
 $env:PYTHONPATH='.'
-$env:TEST_DATABASE_URL='postgresql+asyncpg://postgres:postgres@localhost:5432/ai_test_platform_e2e'
+$env:TEST_DATABASE_URL='postgresql+asyncpg://postgres:123456@localhost:5432/ai_test_platform_e2e'
 python scripts/setup_test_db.py --reset
 pytest tests/e2e -v
 ```

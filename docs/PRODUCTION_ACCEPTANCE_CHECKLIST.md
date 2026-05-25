@@ -12,8 +12,8 @@
 - 支持验收报告快照归档、历史查看、复制、下载。
 - 支持验收汇报稿自动生成、复制、下载。
 - 生产服务已部署到 `https://app.evanshine.me` 和 `https://api.evanshine.me`。
-- 已补本地一键验证脚本：`scripts/verify-local.ps1`。
-- 本地全量后端验证默认跳过真实数据库 E2E，避免缺少本机 PostgreSQL 时误报；需要 E2E 时显式加 `-IncludeE2E`。
+- 已补本地一键门禁脚本：`scripts/verify_real_e2e.ps1`。
+- 本地一键门禁会创建/迁移测试库，并运行后端 pytest、前端生产构建、generated Playwright E2E。
 - 已补生产公开健康检查脚本：`scripts/check-production.ps1`。
 - 已补 PostgreSQL 生产备份脚本：`scripts/backup-production-postgres.sh`。
 - 已补 PostgreSQL 备份可读性验证脚本：`scripts/verify-production-backup.sh`。
@@ -36,25 +36,25 @@
 ## 本地验收命令
 
 ```powershell
-.\scripts\verify-local.ps1
+.\scripts\verify_real_e2e.ps1
 ```
 
-完整后端测试：
+只跑真实数据库后端 E2E：
 
 ```powershell
-.\scripts\verify-local.ps1 -FullBackend
+.\scripts\verify_real_e2e.ps1 -BackendE2EOnly
 ```
 
-包含真实数据库后端 E2E 和前端 E2E：
+包含前端真实 E2E：
 
 ```powershell
-.\scripts\verify-local.ps1 -IncludeE2E
+.\scripts\verify_real_e2e.ps1 -WithFrontendRealE2E
 ```
 
-`-IncludeE2E` 前需本机 PostgreSQL 可连接，默认测试库连接串为：
+默认测试库连接串为：
 
 ```text
-postgresql+asyncpg://postgres:123456@localhost:5432/ai_test_e2e
+postgresql+asyncpg://postgres:123456@localhost:5432/ai_test_platform_e2e
 ```
 
 ## 生产公开检查
