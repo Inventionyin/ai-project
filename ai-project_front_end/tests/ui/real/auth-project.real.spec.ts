@@ -48,4 +48,4 @@ test.describe('real backend auth and project flow', () => {
     await expect(page).toHaveURL(/\/projects\/[^/]+\/dashboard/)
     await expect(page.getByText('仪表盘')).toBeVisible()
   })
-}
+})
