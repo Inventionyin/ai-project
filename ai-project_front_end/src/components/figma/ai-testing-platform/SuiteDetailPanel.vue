@@ -163,7 +163,7 @@ async function runSuite() {
     })
     const rid = String(run?.id || '').trim()
     if (!rid) throw new Error('运行创建成功但未返回 runId')
-    showToast('运行已触发')
+    showToast(`运行已触发：${rid}`)
     await router.push(`/projects/${encodeURIComponent(projectId.value)}/runs/${encodeURIComponent(rid)}`)
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : '运行触发失败，请稍后重试'

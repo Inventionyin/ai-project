@@ -16,6 +16,7 @@ export type SuiteCardData = {
   timeout: string
   retry: string
   environment: string
+  defaultEnvId?: string | null
   lastRunAt: string
   metaRowHeight?: 16 | 32
 }
