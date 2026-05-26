@@ -11,6 +11,7 @@ Current acceptance baseline:
 - Grafana: `https://grafana.evanshine.me`
 - Jenkins: `https://jenkins.evanshine.me`
 - Final signoff evidence: `docs/final-signoff-evidence-index-20260525.md`
+- Short weekly checklist: `docs/ops-weekly-checklist.md`
 
 Cloudflare Access is not a blocker for the internal acceptance release. Add it before inviting external users to Jenkins, Grafana, or production administration pages.
 
@@ -261,4 +262,3 @@ https://github.com/Inventionyin/ai-project/actions
 - Restore drill failure: treat as production readiness blocker.
 - External smoke failure: check token expiry, VPN, base URL, and permissions before blaming platform code.
 - Cloudflare Access request from stakeholders: enable it before external exposure, but do not retroactively block the internal acceptance release.
-
