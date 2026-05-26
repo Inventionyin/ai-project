@@ -50,7 +50,9 @@ mkdir -p "$DRILL_DIR" "$(dirname "$OUTPUT_PATH")"
 RUN_DIR="$DRILL_DIR/restore-$(date -u +%Y%m%d-%H%M%S)"
 mkdir -p "$RUN_DIR"
 
-tar -tzf "$LATEST_BACKUP" >/tmp/weitesting-jenkins-restore-drill-listing.txt
+LISTING_FILE="$(mktemp "${TMPDIR:-/tmp}/weitesting-jenkins-restore-drill-listing.XXXXXX")"
+trap 'rm -f "$LISTING_FILE"' EXIT
+tar -tzf "$LATEST_BACKUP" >"$LISTING_FILE"
 tar -xzf "$LATEST_BACKUP" -C "$RUN_DIR"
 
 status="READY"

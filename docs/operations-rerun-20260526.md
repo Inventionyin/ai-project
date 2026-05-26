@@ -106,8 +106,9 @@ For a live local smoke, inject the required environment variables in the current
 
 ## Follow-Up
 
-- Run production readiness from the server when validating Prometheus targets and Jenkins backup age.
-- Run another performance baseline after server/network conditions settle.
+- Server-side production readiness was rerun after the local workstation check. Result: `READY`, `8 READY / 0 WARN / 0 BLOCKED`, output `/opt/weitesting/artifacts/production-readiness/readiness-20260526-server.json`.
+- Server-side Jenkins restore drill was rerun. Result: `READY`, output `/opt/weitesting/artifacts/jenkins-restore-drill/latest-20260526.json`.
+- Server-side performance baseline was rerun. Result: `READY`, backend p95 `714.3ms`, frontend p95 `737.86ms`, `/health` p95 `694.72ms`, `/metrics` p95 `775.41ms`, output `/opt/weitesting/artifacts/performance-baseline/baseline-20260526-server.json`.
+- The restore drill script was hardened to use a unique `mktemp` listing file instead of a fixed `/tmp/weitesting-jenkins-restore-drill-listing.txt` path.
 - Use GitHub Actions or a prepared local shell for external integration smoke.
 - Continue importing real data through the UI and save acceptance snapshots per batch.
-
