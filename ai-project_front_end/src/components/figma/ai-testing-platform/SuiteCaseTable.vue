@@ -140,14 +140,13 @@ function onDrop(i: number, e: DragEvent) {
       </div>
     </div>
 
-    <button
-      type="button"
+    <div
       class="flex h-[44px] w-full items-center gap-[8px] border-l-[0.6667px] border-black/10 bg-white px-[16px]"
     >
       <img :src="suiteDetailConfig" alt="" class="h-[14px] w-[14px]" />
       <span class="text-[14px] font-medium leading-[20px] text-[#0A0A0A]">套件配置</span>
       <span class="flex-1" />
       <img :src="suiteDetailChevron" alt="" class="h-[14px] w-[14px]" />
-    </button>
+    </div>
   </section>
 </template>

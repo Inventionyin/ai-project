@@ -3,6 +3,10 @@ import { computed, ref } from 'vue'
 import failuresIcon from '@/assets/figma/ai-testing-platform/reports-single-failures.svg'
 import ReportsSingleFailureRow from '@/components/figma/ai-testing-platform/ReportsSingleFailureRow.vue'
 
+defineEmits<{
+  createDefect: [payload: { title: string; message: string; tag: string }]
+}>()
+
 const rows = [
   {
     title: '支付-微信支付回调验签',
@@ -73,7 +77,7 @@ const visibleRows = computed(() => (isExpanded.value ? rows : rows.slice(0, 3)))
     </div>
 
     <div class="mt-[12px] flex flex-col gap-[8px]">
-      <ReportsSingleFailureRow v-for="item in visibleRows" :key="item.title" v-bind="item" />
+      <ReportsSingleFailureRow v-for="item in visibleRows" :key="item.title" v-bind="item" @create-defect="$emit('createDefect', $event)" />
     </div>
 
     <button

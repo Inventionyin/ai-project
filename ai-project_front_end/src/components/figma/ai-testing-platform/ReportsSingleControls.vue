@@ -5,6 +5,10 @@ import reportsSingleDetail from '@/assets/figma/ai-testing-platform/reports-sing
 
 const selectedReport = ref('R-002')
 
+defineEmits<{
+  viewDetail: []
+}>()
+
 const options = [
   { label: 'R-001 测试报告', value: 'R-001' },
   { label: 'R-002 测试报告', value: 'R-002' },
@@ -26,7 +30,11 @@ const options = [
       <img :src="chevronDownSmall" alt="" class="pointer-events-none absolute right-[12px] top-1/2 h-[13px] w-[13px] -translate-y-1/2" />
     </div>
 
-    <button type="button" class="flex h-[32px] items-center gap-[6px] rounded-[10px] border border-black/10 bg-white px-[12px]">
+    <button
+      type="button"
+      class="flex h-[32px] items-center gap-[6px] rounded-[10px] border border-black/10 bg-white px-[12px] hover:bg-[#F8FAFC] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#155DFC]"
+      @click="$emit('viewDetail')"
+    >
       <img :src="reportsSingleDetail" alt="" class="h-[13px] w-[13px]" />
       <span class="text-[14px] font-medium leading-[20px] text-[#717182]">查看详情</span>
     </button>

@@ -37,4 +37,24 @@ test.describe('reports single failure expansion', () => {
     await expect(page.getByText('优惠券叠加-互斥规则')).not.toBeVisible()
     await expect(page.getByRole('button', { name: '查看全部 11 条失败' })).toBeVisible()
   })
+
+  test('报告中心关键操作不是静态按钮', async ({ page }) => {
+    await page.goto('/projects/1/reports?tab=single', { waitUntil: 'domcontentloaded' })
+
+    const downloadPromise = page.waitForEvent('download')
+    await page.getByRole('button', { name: '导出报告' }).click()
+    const download = await downloadPromise
+    expect(download.suggestedFilename()).toContain('R-002')
+
+    await page.getByRole('button', { name: '查看详情' }).click()
+    await expect(page.getByText('已定位到 R-002 测试报告详情')).toBeVisible()
+
+    await page.getByRole('button', { name: '分享链接' }).click()
+    await expect(page.getByText('分享链接已复制')).toBeVisible()
+
+    await page.getByRole('button', { name: '创建缺陷' }).first().click()
+    await expect(page).toHaveURL(/\/projects\/1\/defects\?/)
+    await expect(page.getByPlaceholder('缺陷标题（必填）')).toHaveValue('失败用例缺陷：支付-微信支付回调验签')
+    await expect(page.getByPlaceholder('错误信息（可选）')).toHaveValue('statusCode expected 200 but got 500')
+  })
 })

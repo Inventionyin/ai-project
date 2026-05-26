@@ -72,6 +72,10 @@ function toggleSettings() {
   activeExpandedGroup.value = activeExpandedGroup.value === '设置' ? '' : '设置'
 }
 
+function openProjectSwitcher() {
+  router.push('/projects')
+}
+
 const projectId = computed(() => {
   const id = route.params.projectId
   return typeof id === 'string' && id.length > 0 ? id : '1'
@@ -236,8 +240,10 @@ watch(
     <div class="h-[48.67px] border-b border-[#E5E5E5] px-[12px] pt-[8px] pb-[0.67px]">
       <button
         type="button"
-        class="flex h-[32px] w-full items-center gap-[8px] rounded-[10px] bg-[#F5F5F5] px-[8px]"
+        class="flex h-[32px] w-full items-center gap-[8px] rounded-[10px] bg-[#F5F5F5] px-[8px] hover:bg-[#ECECF0]"
         :class="isCollapsed ? 'justify-center' : ''"
+        aria-label="切换项目"
+        @click="openProjectSwitcher"
       >
         <span class="flex h-[20px] w-[20px] items-center justify-center rounded-[4px] bg-[#DBEAFE] flex-shrink-0">
           <img :src="projectIcon" alt="" class="h-[12px] w-[12px]" />

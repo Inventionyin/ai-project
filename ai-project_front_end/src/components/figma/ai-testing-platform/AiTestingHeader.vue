@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { inject } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, inject } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import UserProfile from '@/components/UserProfile.vue'
 import headerMenu from '@/assets/figma/ai-testing-platform/header-menu.svg'
 import headerProjectChevron from '@/assets/figma/ai-testing-platform/header-project-chevron.svg'
@@ -17,10 +17,16 @@ const { projectName = '项目' } = defineProps<{
 }>()
 
 const router = useRouter()
+const route = useRoute()
 const openCreateRun = inject<() => void>('aiTestingPlatformOpenCreateRun', () => {})
+const projectId = computed(() => String(route.params.projectId || '1'))
 
 function goHome() {
   router.push('/projects')
+}
+
+function openNotifications() {
+  router.push(`/projects/${encodeURIComponent(projectId.value)}/settings/ops-health`)
 }
 </script>
 
@@ -54,7 +60,7 @@ function goHome() {
           </span>
         </button>
 
-        <button class="relative h-[29px] w-[29px] shrink-0 rounded-[4px]" type="button">
+        <button class="relative h-[29px] w-[29px] shrink-0 rounded-[4px] hover:bg-[#F5F5F5]" type="button" aria-label="打开通知与告警" @click="openNotifications">
           <img :src="headerBell" alt="" class="absolute left-[6px] top-[6px] h-[17px] w-[17px]" />
           <span class="absolute left-[19px] top-[2px] h-[8px] w-[8px] rounded-full bg-[#FB2C36]" />
         </button>
@@ -93,7 +99,7 @@ function goHome() {
           </span>
         </button>
 
-        <button class="relative h-[29px] w-[29px] rounded-[4px]" type="button">
+        <button class="relative h-[29px] w-[29px] rounded-[4px] hover:bg-[#F5F5F5]" type="button" aria-label="打开通知与告警" @click="openNotifications">
           <img :src="headerBell" alt="" class="absolute left-[6px] top-[6px] h-[17px] w-[17px]" />
           <span class="absolute left-[19px] top-[2px] h-[8px] w-[8px] rounded-full bg-[#FB2C36]" />
         </button>

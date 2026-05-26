@@ -6,6 +6,10 @@ defineProps<{
   message: string
   tag: string
 }>()
+
+defineEmits<{
+  createDefect: [payload: { title: string; message: string; tag: string }]
+}>()
 </script>
 
 <template>
@@ -23,7 +27,11 @@ defineProps<{
       <div class="h-[20px] rounded-[4px] bg-[#FFE2E2] px-[8px] text-[12px] leading-[16px] text-[#E7000B]">
         {{ tag }}
       </div>
-      <button type="button" class="h-[24px] rounded-[4px] border border-[#FFA2A2] px-[8px] text-[12px] font-medium leading-[24px] text-[#E7000B]">
+      <button
+        type="button"
+        class="h-[24px] rounded-[4px] border border-[#FFA2A2] px-[8px] text-[12px] font-medium leading-[24px] text-[#E7000B] hover:bg-[#FEE2E2] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#E7000B]"
+        @click="$emit('createDefect', { title, message, tag })"
+      >
         创建缺陷
       </button>
     </div>

@@ -117,7 +117,7 @@ function getActionsTop() {
         </span>
       </button>
 
-      <button type="button" class="h-[32px] w-[32px]">
+      <button type="button" class="h-[32px] w-[32px]" aria-label="配置套件" @click="emit('arrange')">
         <img :src="suiteAction1" alt="" class="h-full w-full" />
       </button>
 

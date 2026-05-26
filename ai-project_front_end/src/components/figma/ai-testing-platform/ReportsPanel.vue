@@ -24,6 +24,12 @@ import {
   type UiTestReportListItem
 } from '@/lib/aiTestingPlatformApi'
 
+type FailurePayload = {
+  title: string
+  message: string
+  tag: string
+}
+
 const route = useRoute()
 const router = useRouter()
 const projectId = computed(() => String(route.params.projectId || ''))
@@ -40,6 +46,78 @@ const uiReportDetail = ref<UiTestReportDetail | null>(null)
 const uiReportLoading = ref(false)
 const uiReportDetailLoading = ref(false)
 const uiReportErrorText = ref('')
+const actionMessage = ref('')
+
+function setActionMessage(message: string) {
+  actionMessage.value = message
+}
+
+function buildSingleReportExport() {
+  return [
+    '# R-002 测试报告',
+    '',
+    '- 结果：失败',
+    '- 范围：订单全量回归',
+    '- 环境：development',
+    '- 触发：CI/CD 触发',
+    '',
+    '## 失败摘要',
+    '',
+    '- 支付-微信支付回调验签：statusCode expected 200 but got 500',
+    '- 取消订单-超时自动取消：Request timeout after 10000ms',
+    '- 商品库存扣减-并发场景：inventory count expected 98 but got 102'
+  ].join('\n')
+}
+
+function exportSingleReport() {
+  const blob = new Blob([buildSingleReportExport()], { type: 'text/markdown;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = 'R-002-test-report.md'
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+  setActionMessage('R-002 测试报告已导出')
+}
+
+function viewSingleReportDetail() {
+  document.getElementById('single-report-detail')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  setActionMessage('已定位到 R-002 测试报告详情')
+}
+
+async function shareSingleReport() {
+  const shareUrl = `${window.location.origin}${router.resolve({ path: route.path, query: { ...route.query, tab: 'single', reportId: 'R-002' } }).href}`
+  try {
+    await navigator.clipboard?.writeText(shareUrl)
+    setActionMessage('分享链接已复制')
+  } catch {
+    const textarea = document.createElement('textarea')
+    textarea.value = shareUrl
+    textarea.setAttribute('readonly', 'true')
+    textarea.style.position = 'fixed'
+    textarea.style.left = '-9999px'
+    document.body.appendChild(textarea)
+    textarea.select()
+    const copied = document.execCommand('copy')
+    textarea.remove()
+    setActionMessage(copied ? '分享链接已复制' : `分享链接：${shareUrl}`)
+  }
+}
+
+function createDefectFromFailure(payload: FailurePayload) {
+  void router.push({
+    path: `/projects/${encodeURIComponent(projectId.value)}/defects`,
+    query: {
+      title: `失败用例缺陷：${payload.title}`,
+      description: `报告 R-002 中发现失败用例：${payload.title}\n错误信息：${payload.message}\n失败类型：${payload.tag}`,
+      errorMessage: payload.message,
+      severity: payload.tag === 'TIMEOUT' ? 'P1' : 'P2',
+      sourceReportId: 'R-002'
+    }
+  })
+}
 
 function resolveTabFromRoute(raw: unknown): ReportsViewTab {
   const tab = String(raw || '').trim().toLowerCase()
@@ -193,7 +271,14 @@ watch(
 <template>
   <div class="w-full bg-[rgba(236,236,240,0.3)] md:pr-[16.67px]">
     <div class="flex flex-col gap-[16px] px-[16px] pt-[16px] md:px-[24px] md:pt-[24px]">
-      <ReportsToolbar />
+      <ReportsToolbar @export="exportSingleReport" />
+      <div
+        v-if="actionMessage"
+        role="status"
+        class="rounded-[8px] border border-[#BFDBFE] bg-[#EFF6FF] px-[12px] py-[8px] text-[13px] leading-[18px] text-[#155DFC]"
+      >
+        {{ actionMessage }}
+      </div>
       <ReportsViewTabs v-model="activeView" />
 
       <div v-if="activeView === 'trend'" class="flex flex-col gap-[16px]">
@@ -207,8 +292,10 @@ watch(
       </div>
 
       <div v-else-if="activeView === 'single'" class="flex flex-col gap-[16px]">
-        <ReportsSingleControls />
-        <ReportsSingleReportCard />
+        <ReportsSingleControls @view-detail="viewSingleReportDetail" />
+        <div id="single-report-detail">
+          <ReportsSingleReportCard @share="shareSingleReport" @create-defect="createDefectFromFailure" />
+        </div>
       </div>
 
       <div v-else-if="activeView === 'performance'" class="flex flex-col gap-[16px]">

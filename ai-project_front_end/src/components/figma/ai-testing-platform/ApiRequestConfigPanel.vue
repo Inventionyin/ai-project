@@ -7,7 +7,10 @@ import apiRowRemove3 from '@/assets/figma/ai-testing-platform/api-row-remove-3.s
 import apiExportCurl from '@/assets/figma/ai-testing-platform/api-export-curl.svg'
 
 type TabKey = 'request' | 'assert' | 'response'
+type ResponseTabKey = 'body' | 'headers'
 const activeTab = ref<TabKey>('request')
+const activeResponseTab = ref<ResponseTabKey>('body')
+const actionMessage = ref('')
 
 const responseStatusCode = 200
 
@@ -43,6 +46,40 @@ function addAssertion() {
 function removeAssertion(index: number) {
   assertionRules.value.splice(index, 1)
 }
+
+function sendRequest() {
+  activeTab.value = 'response'
+  activeResponseTab.value = 'body'
+  actionMessage.value = '请求已发送，响应结果已更新'
+}
+
+function buildCurlCommand() {
+  const headers = requestHeaders.value
+    .filter((item) => item.key.trim())
+    .map((item) => `-H "${item.key.trim()}: ${item.value.trim()}"`)
+    .join(' ')
+  const body = requestBody.value.trim() ? ` -d '${requestBody.value.trim()}'` : ''
+  return `curl -X POST "{{baseUrl}}/api/v2/orders" ${headers}${body}`.trim()
+}
+
+async function exportCurl() {
+  const curl = buildCurlCommand()
+  try {
+    await navigator.clipboard?.writeText(curl)
+    actionMessage.value = 'cURL 已复制'
+  } catch {
+    const blob = new Blob([curl], { type: 'text/plain;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'orders-request.curl.txt'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+    actionMessage.value = 'cURL 已导出'
+  }
+}
 </script>
 
 <template>
@@ -58,7 +95,7 @@ function removeAssertion(index: number) {
         </span>
       </div>
 
-      <button type="button" class="relative h-[36px] w-[79px] rounded-[10px] bg-[#155DFC]">
+      <button type="button" class="relative h-[36px] w-[79px] rounded-[10px] bg-[#155DFC]" @click="sendRequest">
         <img :src="apiSend" alt="" class="absolute left-[16px] top-[11.5px] h-[13px] w-[13px]" />
         <span class="absolute left-[35px] top-[8.33px] text-[14px] font-medium leading-[20px] text-white">发送</span>
       </button>
@@ -151,10 +188,14 @@ function removeAssertion(index: number) {
       <div class="flex flex-col gap-[8px]">
         <div class="flex items-center justify-between">
           <div class="text-left text-[12px] font-medium leading-[16px] text-[#717182]">请求体 (JSON)</div>
-          <button type="button" class="flex items-center gap-[6px]">
+          <button type="button" class="flex items-center gap-[6px] rounded-[4px] px-[4px] hover:bg-[#F8FAFC]" @click="exportCurl">
             <img :src="apiExportCurl" alt="" class="h-[12px] w-[12px]" />
             <span class="text-[12px] font-medium leading-[16px] text-[#717182]">导出 cURL</span>
           </button>
+        </div>
+
+        <div v-if="actionMessage" role="status" class="rounded-[8px] border border-[#BFDBFE] bg-[#EFF6FF] px-[12px] py-[8px] text-[12px] text-[#155DFC]">
+          {{ actionMessage }}
         </div>
 
         <textarea
@@ -252,13 +293,27 @@ function removeAssertion(index: number) {
         </div>
 
         <div class="flex h-[24px] items-center gap-[4px]">
-          <button type="button" class="h-[24px] rounded-[4px] bg-[#DBEAFE] px-[8px] text-[12px] font-medium leading-[16px] text-[#1447E6]">响应体</button>
-          <button type="button" class="h-[24px] rounded-[4px] px-[8px] text-[12px] font-medium leading-[16px] text-[#717182]">响应头</button>
+          <button
+            type="button"
+            class="h-[24px] rounded-[4px] px-[8px] text-[12px] font-medium leading-[16px]"
+            :class="activeResponseTab === 'body' ? 'bg-[#DBEAFE] text-[#1447E6]' : 'text-[#717182]'"
+            @click="activeResponseTab = 'body'"
+          >
+            响应体
+          </button>
+          <button
+            type="button"
+            class="h-[24px] rounded-[4px] px-[8px] text-[12px] font-medium leading-[16px]"
+            :class="activeResponseTab === 'headers' ? 'bg-[#DBEAFE] text-[#1447E6]' : 'text-[#717182]'"
+            @click="activeResponseTab = 'headers'"
+          >
+            响应头
+          </button>
         </div>
       </div>
 
       <div class="w-full rounded-[14px] bg-[rgba(236,236,240,0.5)] p-[16px]" style="height:208px">
-        <pre class="whitespace-pre-wrap text-[12px] leading-[16px] text-[rgba(10,10,10,0.8)]" style="font-family: Consolas">{{
+        <pre v-if="activeResponseTab === 'body'" class="whitespace-pre-wrap text-[12px] leading-[16px] text-[rgba(10,10,10,0.8)]" style="font-family: Consolas">{{
 `{
   "code": 0,
   "message": "ok",
@@ -270,6 +325,10 @@ function removeAssertion(index: number) {
   },
   "requestId": "req_abc123"
 }` }}</pre>
+        <pre v-else class="whitespace-pre-wrap text-[12px] leading-[16px] text-[rgba(10,10,10,0.8)]" style="font-family: Consolas">{{
+`content-type: application/json
+x-request-id: req_abc123
+x-response-time: 238ms` }}</pre>
       </div>
     </div>
   </section>

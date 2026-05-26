@@ -164,7 +164,7 @@ const rowMinHeight = '104.67px'
           </div>
 
           <div class="flex items-center px-[16px] py-[12.33px]">
-            <button type="button" class="h-[28px] w-[92px] shrink-0">
+            <button type="button" class="h-[28px] w-[92px] shrink-0" :aria-label="`查看运行详情 ${row.runId}`" @click="emit('open-run', row.runId)">
               <img :src="runsRowActions" alt="" class="h-full w-full" />
             </button>
           </div>

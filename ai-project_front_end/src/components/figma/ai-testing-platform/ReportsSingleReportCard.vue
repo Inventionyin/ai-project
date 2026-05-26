@@ -2,6 +2,11 @@
 import reportsSingleShare from '@/assets/figma/ai-testing-platform/reports-single-share.svg'
 import ReportsSingleStatsRow from '@/components/figma/ai-testing-platform/ReportsSingleStatsRow.vue'
 import ReportsSingleFailuresList from '@/components/figma/ai-testing-platform/ReportsSingleFailuresList.vue'
+
+defineEmits<{
+  share: []
+  createDefect: [payload: { title: string; message: string; tag: string }]
+}>()
 </script>
 
 <template>
@@ -17,7 +22,11 @@ import ReportsSingleFailuresList from '@/components/figma/ai-testing-platform/Re
         </div>
       </div>
 
-      <button type="button" class="flex h-[24px] items-center gap-[4px]">
+      <button
+        type="button"
+        class="flex h-[24px] items-center gap-[4px] rounded-[4px] px-[4px] hover:bg-[#EFF6FF] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#155DFC]"
+        @click="$emit('share')"
+      >
         <img :src="reportsSingleShare" alt="" class="h-[12px] w-[12px]" />
         <span class="text-[12px] font-medium leading-[16px] text-[#155DFC]">分享链接</span>
       </button>
@@ -28,7 +37,7 @@ import ReportsSingleFailuresList from '@/components/figma/ai-testing-platform/Re
     </div>
 
     <div class="mt-[20px]">
-      <ReportsSingleFailuresList />
+      <ReportsSingleFailuresList @create-defect="$emit('createDefect', $event)" />
     </div>
   </section>
 </template>

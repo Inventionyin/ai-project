@@ -97,10 +97,22 @@ function syncCreatePrefillFromQuery() {
   const caseRunId = String(route.query.caseRunId || '').trim()
   const testcaseId = String(route.query.testcaseId || '').trim()
   const errorMessage = String(route.query.errorMessage || '').trim()
+  const title = String(route.query.title || '').trim()
+  const description = String(route.query.description || '').trim()
+  const severity = String(route.query.severity || '').trim().toUpperCase()
   createForm.value.runId = runId
   createForm.value.caseRunId = caseRunId
   createForm.value.testcaseId = testcaseId
   createForm.value.errorMessage = errorMessage
+  if (title) {
+    createForm.value.title = title
+  }
+  if (description) {
+    createForm.value.description = description
+  }
+  if (['P0', 'P1', 'P2', 'P3'].includes(severity)) {
+    createForm.value.severity = severity
+  }
   if (!createForm.value.title && errorMessage) {
     createForm.value.title = `失败用例缺陷：${errorMessage.slice(0, 60)}`
   }
@@ -145,7 +157,17 @@ function openDetail(item: DefectListItem) {
 }
 
 watch(
-  () => [projectId.value, route.query.status, route.query.runId, route.query.caseRunId, route.query.testcaseId, route.query.errorMessage],
+  () => [
+    projectId.value,
+    route.query.status,
+    route.query.runId,
+    route.query.caseRunId,
+    route.query.testcaseId,
+    route.query.errorMessage,
+    route.query.title,
+    route.query.description,
+    route.query.severity
+  ],
   () => {
     syncCreatePrefillFromQuery()
     page.value = 1
