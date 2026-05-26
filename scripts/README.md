@@ -2,6 +2,35 @@
 
 Run from the repository root.
 
+## Unified operations entry point
+
+For daily development, acceptance checks, and handover operations, prefer the
+wrapper below. It keeps the individual scripts available while giving operators
+one command surface:
+
+```powershell
+.\scripts\operate.ps1 -Action help
+```
+
+Common actions:
+
+```powershell
+.\scripts\operate.ps1 -Action start
+.\scripts\operate.ps1 -Action stop
+.\scripts\operate.ps1 -Action local-gate
+.\scripts\operate.ps1 -Action backend-e2e
+.\scripts\operate.ps1 -Action frontend-build
+.\scripts\operate.ps1 -Action performance
+.\scripts\operate.ps1 -Action production
+.\scripts\operate.ps1 -Action external -ExternalTargets Jira,Zentao,Jenkins,DingTalk
+.\scripts\operate.ps1 -Action delivery-check
+.\scripts\operate.ps1 -Action all-dry-run
+```
+
+Use `delivery-check` before a handover or demo. It checks the delivery evidence
+documents and runs non-invasive dry-runs for production readiness, external
+integration diagnostics, and performance baseline wiring.
+
 ## One-click local startup
 
 ```bat

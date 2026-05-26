@@ -22,6 +22,49 @@
       <div v-if="loading" class="py-8 text-center text-[12px] text-[#717182]">加载中...</div>
       <div v-else-if="error" class="rounded border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-700">{{ error }}</div>
       <div v-else class="space-y-4">
+        <div class="rounded border border-blue-100 bg-[#F8FBFF] p-3">
+          <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div class="min-w-0">
+              <div class="text-[13px] font-medium text-[#0A0A0A]">验收演示路线</div>
+              <div class="mt-1 text-[12px] leading-5 text-[#4B5563]">
+                登录后按仪表盘、资产中心、AI治理、接口调试、测试套件、运行详情、验收报告的顺序演示。
+              </div>
+            </div>
+            <div class="flex flex-wrap gap-2 text-[11px]">
+              <RouterLink
+                class="rounded border border-blue-200 bg-white px-2 py-1 font-medium text-blue-700 hover:bg-blue-50"
+                :to="dashboardUrl"
+              >
+                仪表盘
+              </RouterLink>
+              <RouterLink
+                class="rounded border border-blue-200 bg-white px-2 py-1 font-medium text-blue-700 hover:bg-blue-50"
+                :to="assetsUrl"
+              >
+                资产中心
+              </RouterLink>
+              <RouterLink
+                class="rounded border border-blue-200 bg-white px-2 py-1 font-medium text-blue-700 hover:bg-blue-50"
+                :to="apiCollectionsUrl"
+              >
+                接口管理
+              </RouterLink>
+              <RouterLink
+                class="rounded border border-blue-200 bg-white px-2 py-1 font-medium text-blue-700 hover:bg-blue-50"
+                :to="suitesUrl"
+              >
+                测试套件
+              </RouterLink>
+            </div>
+          </div>
+          <ol class="mt-3 grid grid-cols-1 gap-2 text-[12px] leading-5 text-[#374151] md:grid-cols-2 xl:grid-cols-4">
+            <li v-for="item in demoRouteSteps" :key="item.title" class="rounded border border-black/5 bg-white px-3 py-2">
+              <div class="font-medium text-[#0A0A0A]">{{ item.title }}</div>
+              <div class="mt-0.5 text-[#717182]">{{ item.detail }}</div>
+            </li>
+          </ol>
+        </div>
+
         <div>
           <div class="mb-2 text-[13px] font-medium text-[#0A0A0A]">检查项</div>
           <table v-if="summary.checks.length" class="w-full table-fixed text-[12px]">
@@ -209,9 +252,19 @@ const decisionClass = computed(() => {
 })
 const defectsUrl = computed(() => `/projects/${encodeURIComponent(projectId.value)}/defects?status=OPEN`)
 const trialOperationUrl = computed(() => `/projects/${encodeURIComponent(projectId.value)}/trial-operation`)
+const dashboardUrl = computed(() => `/projects/${encodeURIComponent(projectId.value)}/dashboard`)
+const assetsUrl = computed(() => `/projects/${encodeURIComponent(projectId.value)}/assets`)
+const apiCollectionsUrl = computed(() => `/projects/${encodeURIComponent(projectId.value)}/assets/apis`)
+const suitesUrl = computed(() => `/projects/${encodeURIComponent(projectId.value)}/assets/suites`)
 const integrationDiagnosticsUrl = computed(
   () => `/projects/${encodeURIComponent(projectId.value)}/settings/integrations#integration-diagnostics`
 )
+const demoRouteSteps = [
+  { title: '1 仪表盘', detail: '看趋势、质量门禁、失败Top和最近运行。' },
+  { title: '2 资产治理', detail: '看需求、用例、接口和缺陷治理结果。' },
+  { title: '3 执行闭环', detail: '接口调试后加入套件，并触发Run结果。' },
+  { title: '4 验收汇报', detail: '复制汇报口径，下载验收报告。' },
+]
 const hiddenAssetMetricKeys = new Set(['requirementDocs', 'testcases', 'defectClusters'])
 const acceptanceMetrics = computed(() => summary.metrics.filter((item) => !hiddenAssetMetricKeys.has(item.key)))
 const blockingMetricCards = computed(() => [

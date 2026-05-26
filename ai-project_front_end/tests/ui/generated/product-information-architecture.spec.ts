@@ -477,6 +477,9 @@ test.describe('产品信息架构收敛', () => {
     await page.goto('/projects/1/settings/acceptance', { waitUntil: 'domcontentloaded' })
 
     await expect(page.getByText('生产验收中心')).toBeVisible()
+    await expect(page.getByText('验收演示路线')).toBeVisible()
+    await expect(page.getByText('接口调试后加入套件，并触发Run结果。')).toBeVisible()
+    await expect(page.getByRole('link', { name: '测试套件' })).toHaveAttribute('href', '/projects/1/assets/suites')
     await expect(page.getByText('阻塞治理概览')).toBeVisible()
     await expect(page.getByText('未关闭缺陷', { exact: true })).toBeVisible()
     await expect(page.getByText('风险提示', { exact: true })).toBeVisible()

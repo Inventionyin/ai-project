@@ -84,19 +84,29 @@ npm run build
 ## 验收与生产检查
 
 ```powershell
+# 统一运营入口：查看所有可用动作
+.\scripts\operate.ps1 -Action help
+
 # 本地一键门禁：测试库迁移 + 后端 pytest + 前端构建 + generated Playwright E2E
-.\scripts\verify_real_e2e.ps1
+.\scripts\operate.ps1 -Action local-gate
 
 # 只跑真实后端 E2E
-.\scripts\verify_real_e2e.ps1 -BackendE2EOnly
+.\scripts\operate.ps1 -Action backend-e2e
 
 # 生产公开可达性检查
-.\scripts\check-production.ps1
+.\scripts\operate.ps1 -Action production
+
+# 验收交付材料与非侵入式 dry-run 检查
+.\scripts\operate.ps1 -Action delivery-check
 ```
 
 生产备份与恢复演练脚本见 `scripts/backup-production-postgres.sh` 和
 `scripts/verify-production-backup.sh`，完整交付清单见
 `docs/PRODUCTION_ACCEPTANCE_CHECKLIST.md`。
+
+当前验收版本交付包见 `docs/final-delivery-package-20260526.md`，现场演示路线见
+`docs/demo-script-20260526.md`，外部系统与生产复跑证据见
+`docs/operations-rerun-20260526.md`。
 
 ## 开发规范
 
