@@ -39,6 +39,7 @@ const isBatchRunDrawerOpen = ref(false)
 const batchRunDrawerState = ref<'closed' | 'preview' | 'executing' | 'completed'>('closed')
 const batchRunRunId = ref('')
 const batchRunEnvId = ref('')
+const batchRunRunnerType = ref<'NEWMAN' | 'PYTEST_ALLURE'>('NEWMAN')
 const batchRunEnvironments = ref<Array<{ id: string; name: string; baseUrl: string }>>([])
 const isLoadingBatchRunEnvironments = ref(false)
 let batchRunPollingTimer = 0
@@ -604,7 +605,7 @@ async function executeBatchRunFromDrawer(options?: { onStart?: () => void }) {
       projectId,
       envId,
       triggerType: 'MANUAL',
-      meta: { source: 'cases_panel_drawer', runnerType: 'PYTEST_ALLURE' },
+      meta: { source: 'cases_panel_drawer', runnerType: batchRunRunnerType.value },
       concurrency: 5,
       stopOnFailure: false,
       items
@@ -1223,11 +1224,13 @@ watch(() => route.params.projectId, () => {
     :is-open="isBatchRunDrawerOpen"
     :rows="selectedRows"
     :env-id="batchRunEnvId"
+    :runner-type="batchRunRunnerType"
     :environments="batchRunEnvironments"
     :state="batchRunDrawerState === 'closed' ? 'preview' : batchRunDrawerState"
     :run-id="batchRunRunId"
     @close="closeBatchRunDrawer"
     @update:env-id="batchRunEnvId = $event"
+    @update:runner-type="batchRunRunnerType = $event"
     @execute="handleBatchRunDrawerExecute"
   />
 </template>

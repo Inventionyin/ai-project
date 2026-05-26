@@ -22,6 +22,11 @@ from app.schemas.collection import (
     GroupUpdateRequest,
     GroupsReorderRequest,
     ImportCollectionRequest,
+    PostmanCloudCollectionListData,
+    PostmanCloudCollectionListItem,
+    PostmanCloudListRequest,
+    PostmanCloudSyncData,
+    PostmanCloudSyncRequest,
     RunApiRequestRequest,
     RunCollectionRequest,
 )
@@ -39,9 +44,11 @@ from app.services.collection import (
     import_collection,
     list_collections,
     list_groups_and_requests,
+    list_postman_cloud_collections,
     reorder_groups,
     run_collection_quick,
     run_request_quick,
+    sync_postman_cloud_collection,
     update_collection,
     update_group,
     update_request,
@@ -161,6 +168,54 @@ async def _build_detail(
         groups=group_items,
         requests=ungrouped,
         updatedAt=to_unix_ts(collection.updated_at),
+    )
+
+
+@router.post("/postman/cloud/list", response_model=ApiResponse[PostmanCloudCollectionListData])
+async def postman_cloud_list(
+    payload: PostmanCloudListRequest,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    request_id: str = Depends(get_request_id),
+) -> ApiResponse[PostmanCloudCollectionListData]:
+    items = await list_postman_cloud_collections(
+        db,
+        user=user,
+        project_id=uuid.UUID(payload.projectId),
+        api_key=payload.apiKey,
+        workspace_id=payload.workspaceId,
+    )
+    return ApiResponse(
+        data=PostmanCloudCollectionListData(items=[PostmanCloudCollectionListItem(**item) for item in items]),
+        requestId=request_id,
+    )
+
+
+@router.post("/postman/cloud/sync", response_model=ApiResponse[PostmanCloudSyncData])
+async def postman_cloud_sync(
+    payload: PostmanCloudSyncRequest,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    request_id: str = Depends(get_request_id),
+) -> ApiResponse[PostmanCloudSyncData]:
+    try:
+        collection = await sync_postman_cloud_collection(
+            db,
+            user=user,
+            project_id=uuid.UUID(payload.projectId),
+            collection_uid=payload.collectionUid,
+            api_key=payload.apiKey,
+            workspace_id=payload.workspaceId,
+        )
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    groups, reqs = await list_groups_and_requests(db, user=user, collection_id=collection.id)
+    detail = await _build_detail(db, user=user, collection_id=collection.id, groups=groups, reqs=reqs)
+    return ApiResponse(
+        data=PostmanCloudSyncData(postmanUid=payload.collectionUid, collection=detail),
+        requestId=request_id,
     )
 
 

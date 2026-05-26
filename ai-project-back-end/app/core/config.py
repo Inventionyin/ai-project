@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     runner_python_executable: str = "python"
     runner_allure_command: str = "allure"
     runner_allure_runs_root: str = ""
+    runner_newman_command: str = "newman"
+    postman_api_key: str = ""
+    postman_workspace_id: str = ""
+    postman_api_base_url: str = "https://api.getpostman.com"
 
     # LLM Configuration
     llm_provider: str = "deepseek"

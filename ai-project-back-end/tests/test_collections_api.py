@@ -299,6 +299,57 @@ def test_import_collection_returns_new_detail(monkeypatch: pytest.MonkeyPatch) -
     assert data["groups"][0]["requests"][0]["collectionId"] == str(IMPORTED_COLLECTION_ID)
 
 
+def test_postman_cloud_list_and_sync_endpoints(monkeypatch: pytest.MonkeyPatch) -> None:
+    imported = _collection(
+        id=IMPORTED_COLLECTION_ID,
+        name="云端 Postman 集合",
+        variables_json={"_postmanSync": {"uid": "123-abc"}},
+    )
+    imported_request = _request(collection_id=IMPORTED_COLLECTION_ID, group_id=None)
+
+    async def _fake_list_postman_cloud_collections(db, *, user, project_id, api_key, workspace_id):
+        assert project_id == PROJECT_ID
+        assert api_key == "pm_key"
+        assert workspace_id == "ws-1"
+        return [{"id": "local-id", "uid": "123-abc", "name": "云端 Postman 集合", "updatedAt": "2026-05-26T08:00:00Z"}]
+
+    async def _fake_sync_postman_cloud_collection(db, *, user, project_id, collection_uid, api_key, workspace_id):
+        assert project_id == PROJECT_ID
+        assert collection_uid == "123-abc"
+        assert api_key == "pm_key"
+        assert workspace_id == "ws-1"
+        return imported
+
+    async def _fake_list_groups_and_requests(db, *, user, collection_id):
+        assert collection_id == IMPORTED_COLLECTION_ID
+        return [], [imported_request]
+
+    async def _fake_get_collection(db, *, user, collection_id):
+        assert collection_id == IMPORTED_COLLECTION_ID
+        return imported
+
+    monkeypatch.setattr(collections_endpoint, "list_postman_cloud_collections", _fake_list_postman_cloud_collections)
+    monkeypatch.setattr(collections_endpoint, "sync_postman_cloud_collection", _fake_sync_postman_cloud_collection)
+    monkeypatch.setattr(collections_endpoint, "list_groups_and_requests", _fake_list_groups_and_requests)
+    monkeypatch.setattr(collections_endpoint, "get_collection", _fake_get_collection)
+
+    client = TestClient(_build_app())
+    listed = client.post(
+        "/api/collections/postman/cloud/list",
+        json={"projectId": str(PROJECT_ID), "apiKey": "pm_key", "workspaceId": "ws-1"},
+    )
+    assert listed.status_code == 200
+    assert listed.json()["data"]["items"][0]["uid"] == "123-abc"
+
+    synced = client.post(
+        "/api/collections/postman/cloud/sync",
+        json={"projectId": str(PROJECT_ID), "apiKey": "pm_key", "workspaceId": "ws-1", "collectionUid": "123-abc"},
+    )
+    assert synced.status_code == 200
+    assert synced.json()["data"]["postmanUid"] == "123-abc"
+    assert synced.json()["data"]["collection"]["id"] == str(IMPORTED_COLLECTION_ID)
+
+
 def test_run_collection_and_group_reorder_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _fake_run_collection_quick(db, *, user, collection_id, env_id, concurrency, iterations):
         assert collection_id == COLLECTION_ID

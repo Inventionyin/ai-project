@@ -40,6 +40,13 @@ export type CollectionDetail = {
   updatedAt?: number
 }
 
+export type PostmanCloudCollection = {
+  id?: string | null
+  uid: string
+  name: string
+  updatedAt?: string | null
+}
+
 export type ApiAssetBinding = {
   id: string
   projectId: string
@@ -238,5 +245,36 @@ export async function importCollection(payload: { projectId: string; format: 'po
       'Content-Type': 'application/json'
     },
     body: JSON.stringify(payload)
+  })
+}
+
+export async function fetchPostmanCloudCollections(payload: { projectId: string; apiKey?: string; workspaceId?: string }) {
+  return requestJson<{ items: PostmanCloudCollection[] }>('/api/collections/postman/cloud/list', {
+    method: 'POST',
+    headers: {
+      ...authHeader(),
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      projectId: payload.projectId,
+      apiKey: payload.apiKey?.trim() || undefined,
+      workspaceId: payload.workspaceId?.trim() || undefined
+    })
+  })
+}
+
+export async function syncPostmanCloudCollection(payload: { projectId: string; collectionUid: string; apiKey?: string; workspaceId?: string }) {
+  return requestJson<{ postmanUid: string; collection: CollectionDetail }>('/api/collections/postman/cloud/sync', {
+    method: 'POST',
+    headers: {
+      ...authHeader(),
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      projectId: payload.projectId,
+      collectionUid: payload.collectionUid,
+      apiKey: payload.apiKey?.trim() || undefined,
+      workspaceId: payload.workspaceId?.trim() || undefined
+    })
   })
 }

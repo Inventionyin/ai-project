@@ -35,7 +35,8 @@ _WORKER_CAPABILITIES = {"API", "UI", "PERF"}
 _TERMINAL_CASE_STATUS = {CaseRunStatus.PASSED, CaseRunStatus.FAILED, CaseRunStatus.SKIPPED}
 _RUNNER_TYPE_DEFAULT = "DEFAULT"
 _RUNNER_TYPE_PYTEST_ALLURE = "PYTEST_ALLURE"
-_RUNNER_TYPES = {_RUNNER_TYPE_DEFAULT, _RUNNER_TYPE_PYTEST_ALLURE}
+_RUNNER_TYPE_NEWMAN = "NEWMAN"
+_RUNNER_TYPES = {_RUNNER_TYPE_DEFAULT, _RUNNER_TYPE_PYTEST_ALLURE, _RUNNER_TYPE_NEWMAN}
 _RUN_LEVEL_ARTIFACT_KINDS = {"EXECUTION_LOG", "ALLURE_RESULTS", "ALLURE_REPORT"}
 _RUN_LEVEL_ARTIFACT_KEY = "__run__"
 
@@ -111,6 +112,15 @@ def _resolve_runner_type(meta: dict[str, object]) -> str:
 
 def _build_execution_spec(meta: dict[str, object]) -> JobExecution:
     runner_type = _resolve_runner_type(meta)
+    if runner_type == _RUNNER_TYPE_NEWMAN:
+        return JobExecution(
+            runnerType=_RUNNER_TYPE_NEWMAN,
+            artifactSpec=[
+                JobArtifactSpec(key="newmanReport", fileName="newman-report.json", required=True),
+                JobArtifactSpec(key="executionLog", fileName="execution.log", required=True),
+                JobArtifactSpec(key="requestResponseSnapshot", fileName="request-response.json", optional=True),
+            ],
+        )
     if runner_type != _RUNNER_TYPE_PYTEST_ALLURE:
         return JobExecution(runnerType=_RUNNER_TYPE_DEFAULT, artifactSpec=[])
     return JobExecution(

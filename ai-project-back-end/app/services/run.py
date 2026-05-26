@@ -115,7 +115,8 @@ def _normalize_ci_token_name(name: str | None) -> str:
 
 _RUNNER_TYPE_DEFAULT = "DEFAULT"
 _RUNNER_TYPE_PYTEST_ALLURE = "PYTEST_ALLURE"
-_SUPPORTED_RUNNER_TYPES = {_RUNNER_TYPE_DEFAULT, _RUNNER_TYPE_PYTEST_ALLURE}
+_RUNNER_TYPE_NEWMAN = "NEWMAN"
+_SUPPORTED_RUNNER_TYPES = {_RUNNER_TYPE_DEFAULT, _RUNNER_TYPE_PYTEST_ALLURE, _RUNNER_TYPE_NEWMAN}
 
 
 class CiTokenPolicyDenied(HTTPException):
@@ -501,6 +502,15 @@ def _extract_testcase_postconditions(ai_meta_json: object) -> str | None:
 
 
 def _build_execution_spec(runner_type: str) -> JobExecution:
+    if runner_type == _RUNNER_TYPE_NEWMAN:
+        return JobExecution(
+            runnerType=_RUNNER_TYPE_NEWMAN,
+            artifactSpec=[
+                JobArtifactSpec(key="newmanReport", fileName="newman-report.json", required=True),
+                JobArtifactSpec(key="executionLog", fileName="execution.log", required=True),
+                JobArtifactSpec(key="requestResponseSnapshot", fileName="request-response.json", required=False, optional=True),
+            ],
+        )
     if runner_type != _RUNNER_TYPE_PYTEST_ALLURE:
         return JobExecution(runnerType=_RUNNER_TYPE_DEFAULT, artifactSpec=[])
     return JobExecution(
@@ -643,7 +653,7 @@ async def _execute_inline_pytest_allure_job(
                 )
         job.status = output.job_status
         job.end_at = datetime.utcnow()
-        meta_json["executor"] = "INLINE_PYTEST_ALLURE"
+        meta_json["executor"] = f"INLINE_{runner_type}"
         meta_json["workspace"] = str(output.workspace)
         job.meta_json = meta_json
         failed_count = sum(1 for item in case_runs if item.status == CaseRunStatus.FAILED)
@@ -674,7 +684,7 @@ async def _execute_inline_pytest_allure_job(
                 case_run.error_message = error_message
         job.status = JobStatus.FAILED
         job.end_at = now
-        meta_json["executor"] = "INLINE_PYTEST_ALLURE"
+        meta_json["executor"] = f"INLINE_{runner_type}"
         meta_json["inlineError"] = error_message
         job.meta_json = meta_json
         run.status = RunStatus.FAILED
@@ -1475,7 +1485,7 @@ async def create_run_from_testcases_http(
     )
     db.add(job)
     await db.flush()
-    if runner_type == _RUNNER_TYPE_PYTEST_ALLURE:
+    if runner_type in {_RUNNER_TYPE_PYTEST_ALLURE, _RUNNER_TYPE_NEWMAN}:
         await _execute_inline_pytest_allure_job(
             db,
             user=user,

@@ -46,7 +46,7 @@
       <div class="mt-5 grid gap-3 md:grid-cols-4">
         <label class="grid gap-1 text-[12px]">
           <span class="text-[#717182]">允许 RunnerType</span>
-          <input v-model="runnerTypesText" placeholder="DEFAULT,PYTEST_ALLURE" class="h-8 rounded-[8px] border border-black/10 px-2" />
+          <input v-model="runnerTypesText" placeholder="DEFAULT,PYTEST_ALLURE,NEWMAN" class="h-8 rounded-[8px] border border-black/10 px-2" />
         </label>
         <label class="grid gap-1 text-[12px]">
           <span class="text-[#717182]">允许 TestCaseId</span>

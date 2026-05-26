@@ -93,7 +93,8 @@ export type {
   CollectionListItem,
   CollectionRequest,
   CollectionGroup,
-  CollectionDetail
+  CollectionDetail,
+  PostmanCloudCollection
 } from '@/lib/api/collections'
 
 export {
@@ -102,8 +103,10 @@ export {
   createCollection,
   createCollectionGroup,
   createCollectionRequest,
+  fetchPostmanCloudCollections,
   fetchCollectionBindings,
-  fetchRequestBindings
+  fetchRequestBindings,
+  syncPostmanCloudCollection
 } from '@/lib/api/collections'
 
 export type TestcaseBinding = {

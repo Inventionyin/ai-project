@@ -12,7 +12,7 @@ from app.schemas.run import CaseRunResult
 from app.schemas.types import IdStr, NameStr, UrlStr, VersionStr
 
 WorkerCapability = Literal["API", "UI", "PERF"]
-RunnerType = Literal["DEFAULT", "PYTEST_ALLURE"]
+RunnerType = Literal["DEFAULT", "PYTEST_ALLURE", "NEWMAN"]
 
 
 class WorkerRegisterRequest(BaseSchema):

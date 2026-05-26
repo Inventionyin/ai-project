@@ -15,10 +15,12 @@ from sqlalchemy import delete, desc, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser
+from app.core.config import get_settings
 from app.models.api import ApiCollection, ApiCollectionGroup, ApiRequest
 from app.models.environment import Environment
 from app.models.enums import ProjectRole
 from app.models.project import Project, ProjectMember
+from app.services.postman_cloud import PostmanCloudClient
 from app.services.platform_record import create_audit_log
 
 
@@ -704,6 +706,7 @@ async def import_collection(
     project_id: uuid.UUID,
     format: str,
     content: str,
+    sync_metadata: dict[str, Any] | None = None,
 ) -> ApiCollection:
     project = await _get_project(db, user=user, project_id=project_id)
     await _require_project_write(db, user=user, project=project)
@@ -772,13 +775,33 @@ async def import_collection(
         else:
             raise HTTPException(status_code=400, detail="Invalid content")
 
-    collection = ApiCollection(
-        tenant_id=user.tenant_id,
-        project_id=project_id,
-        name=collection_name,
-        variables_json=variables,
-    )
-    db.add(collection)
+    sync_meta = dict(sync_metadata or {})
+    if sync_meta:
+        variables["_postmanSync"] = sync_meta
+
+    collection = await _find_synced_collection(db, user=user, project_id=project_id, sync_metadata=sync_meta)
+    audit_action = "IMPORT_COLLECTION"
+    if collection is not None:
+        await db.execute(
+            delete(ApiRequest).where(ApiRequest.tenant_id == user.tenant_id, ApiRequest.collection_id == collection.id)
+        )
+        await db.execute(
+            delete(ApiCollectionGroup).where(
+                ApiCollectionGroup.tenant_id == user.tenant_id,
+                ApiCollectionGroup.collection_id == collection.id,
+            )
+        )
+        collection.name = collection_name
+        collection.variables_json = variables
+        audit_action = "SYNC_POSTMAN_COLLECTION"
+    else:
+        collection = ApiCollection(
+            tenant_id=user.tenant_id,
+            project_id=project_id,
+            name=collection_name,
+            variables_json=variables,
+        )
+        db.add(collection)
     await db.flush()
 
     group_id_by_name: dict[str, uuid.UUID] = {}
@@ -835,13 +858,111 @@ async def import_collection(
         db,
         user=user,
         project_id=project_id,
-        action="IMPORT_COLLECTION",
+        action=audit_action,
         resource_type="api_collection",
         resource_id=str(collection.id),
         summary=collection.name,
-        detail={"format": fmt, "groupCount": len(groups), "requestCount": request_count},
+        detail={"format": fmt, "groupCount": len(groups), "requestCount": request_count, "sync": sync_meta},
     )
     return collection
+
+
+async def _find_synced_collection(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+    sync_metadata: dict[str, Any],
+) -> ApiCollection | None:
+    uid = str(sync_metadata.get("uid") or "").strip()
+    if not uid:
+        return None
+    rows = (
+        await db.execute(
+            select(ApiCollection).where(
+                ApiCollection.tenant_id == user.tenant_id,
+                ApiCollection.project_id == project_id,
+            )
+        )
+    ).scalars().all()
+    for collection in rows:
+        variables = dict(collection.variables_json or {})
+        meta = variables.get("_postmanSync")
+        if isinstance(meta, dict) and str(meta.get("uid") or "").strip() == uid:
+            return collection
+    return None
+
+
+def _resolve_postman_api_key(api_key: str | None) -> str:
+    key = str(api_key or "").strip()
+    if key:
+        return key
+    settings = get_settings()
+    key = str(settings.postman_api_key or "").strip()
+    if key:
+        return key
+    raise HTTPException(status_code=400, detail="postman_api_key_required")
+
+
+def _resolve_postman_workspace_id(workspace_id: str | None) -> str:
+    value = str(workspace_id or "").strip()
+    if value:
+        return value
+    settings = get_settings()
+    return str(settings.postman_workspace_id or "").strip()
+
+
+def _postman_client(*, api_key: str | None, workspace_id: str | None) -> PostmanCloudClient:
+    settings = get_settings()
+    return PostmanCloudClient(
+        api_key=_resolve_postman_api_key(api_key),
+        workspace_id=_resolve_postman_workspace_id(workspace_id),
+        base_url=settings.postman_api_base_url,
+    )
+
+
+async def list_postman_cloud_collections(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+    api_key: str | None,
+    workspace_id: str | None,
+) -> list[dict[str, str | None]]:
+    project = await _get_project(db, user=user, project_id=project_id)
+    await _require_project_read(db, user=user, project=project)
+    client = _postman_client(api_key=api_key, workspace_id=workspace_id)
+    return await asyncio.to_thread(client.list_collections)
+
+
+async def sync_postman_cloud_collection(
+    db: AsyncSession,
+    *,
+    user: CurrentUser,
+    project_id: uuid.UUID,
+    collection_uid: str,
+    api_key: str | None,
+    workspace_id: str | None,
+) -> ApiCollection:
+    project = await _get_project(db, user=user, project_id=project_id)
+    await _require_project_write(db, user=user, project=project)
+    resolved_workspace_id = _resolve_postman_workspace_id(workspace_id)
+    client = _postman_client(api_key=api_key, workspace_id=resolved_workspace_id)
+    postman_collection = await asyncio.to_thread(client.get_collection, collection_uid)
+    sync_meta = {
+        "provider": "POSTMAN",
+        "uid": str(collection_uid).strip(),
+        "workspaceId": resolved_workspace_id,
+        "syncedAt": int(time.time()),
+    }
+    return await import_collection(
+        db,
+        user=user,
+        project_id=project_id,
+        format="postman",
+        content=json.dumps(postman_collection, ensure_ascii=False),
+        sync_metadata=sync_meta,
+    )
 
 
 def export_collection_postman(

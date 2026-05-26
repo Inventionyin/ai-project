@@ -18,8 +18,11 @@ import {
   createCollectionRequest,
   fetchCollectionDetail,
   fetchCollections,
+  fetchPostmanCloudCollections,
+  syncPostmanCloudCollection,
   type CollectionDetail,
-  type CollectionRequest
+  type CollectionRequest,
+  type PostmanCloudCollection
 } from '@/lib/aiTestingPlatformApi'
 
 type ApiMethod = 'POST' | 'GET' | 'PUT' | 'PATCH' | 'DELETE'
@@ -59,6 +62,13 @@ const creatingCollection = ref(false)
 const creatingFolder = ref(false)
 const creatingRequest = ref(false)
 const importGuideOpen = ref(false)
+const postmanCloudApiKey = ref('')
+const postmanCloudWorkspaceId = ref('')
+const postmanCloudCollections = ref<PostmanCloudCollection[]>([])
+const postmanCloudSelectedUid = ref('')
+const postmanCloudLoading = ref(false)
+const postmanCloudSyncing = ref(false)
+const postmanCloudMessage = ref('')
 
 const contextMenu = ref<{
   isOpen: boolean
@@ -221,6 +231,59 @@ function goActiveCollectionDebug() {
   const target = activeCollectionId.value || collections.value[0]?.id || ''
   if (!target || !projectId.value) return
   void router.push(`/projects/${projectId.value}/assets/apis/${target}`)
+}
+
+async function loadPostmanCloudCollections() {
+  if (!projectId.value) return
+  actionError.value = ''
+  postmanCloudMessage.value = ''
+  postmanCloudLoading.value = true
+  try {
+    const data = await fetchPostmanCloudCollections({
+      projectId: projectId.value,
+      apiKey: postmanCloudApiKey.value,
+      workspaceId: postmanCloudWorkspaceId.value
+    })
+    postmanCloudCollections.value = Array.isArray(data.items) ? data.items : []
+    postmanCloudSelectedUid.value = postmanCloudCollections.value[0]?.uid || ''
+    postmanCloudMessage.value = postmanCloudCollections.value.length ? `已读取 ${postmanCloudCollections.value.length} 个云端集合` : '云端暂无集合'
+  } catch (error) {
+    postmanCloudCollections.value = []
+    postmanCloudSelectedUid.value = ''
+    actionError.value = error instanceof Error ? error.message : '读取 Postman 云端集合失败'
+  } finally {
+    postmanCloudLoading.value = false
+  }
+}
+
+async function syncSelectedPostmanCloudCollection() {
+  if (!projectId.value || !postmanCloudSelectedUid.value) return
+  actionError.value = ''
+  postmanCloudMessage.value = ''
+  postmanCloudSyncing.value = true
+  try {
+    const data = await syncPostmanCloudCollection({
+      projectId: projectId.value,
+      collectionUid: postmanCloudSelectedUid.value,
+      apiKey: postmanCloudApiKey.value,
+      workspaceId: postmanCloudWorkspaceId.value
+    })
+    const node = toCollectionNode(data.collection, collections.value.length)
+    const existingIndex = collections.value.findIndex((item) => item.id === node.id)
+    node.expanded = true
+    if (existingIndex >= 0) {
+      collections.value.splice(existingIndex, 1, node)
+    } else {
+      collections.value.push(node)
+    }
+    activeCollectionId.value = node.id
+    activeEndpointId.value = node.folders[0]?.endpoints[0]?.id ?? ''
+    postmanCloudMessage.value = '同步完成'
+  } catch (error) {
+    actionError.value = error instanceof Error ? error.message : '同步 Postman 集合失败'
+  } finally {
+    postmanCloudSyncing.value = false
+  }
 }
 
 function findCollection(collectionId: string) {
@@ -435,6 +498,47 @@ watch(projectId, () => {
           <div class="text-[12px] font-semibold leading-[16px] text-[#0A0A0A]">Postman / Swagger / OpenAPI</div>
           <div class="mt-[4px] text-[11px] leading-[16px] text-[#717182]">
             导入后进入集合详情页进行单请求运行、保存、导出和绑定用例
+          </div>
+          <div class="mt-[8px] grid gap-[6px]">
+            <input
+              v-model="postmanCloudApiKey"
+              type="password"
+              autocomplete="off"
+              class="h-[28px] w-full rounded-[8px] border border-black/10 px-[8px] text-[12px] leading-[16px] outline-none focus:border-[#155DFC]"
+              placeholder="Postman API Key"
+            />
+            <input
+              v-model="postmanCloudWorkspaceId"
+              class="h-[28px] w-full rounded-[8px] border border-black/10 px-[8px] text-[12px] leading-[16px] outline-none focus:border-[#155DFC]"
+              placeholder="Workspace ID"
+            />
+            <button
+              type="button"
+              class="h-[28px] w-full rounded-[8px] border border-[#155DFC]/30 bg-white text-[12px] font-medium text-[#155DFC] disabled:opacity-50"
+              :disabled="postmanCloudLoading || !projectId"
+              @click="loadPostmanCloudCollections"
+            >
+              {{ postmanCloudLoading ? '读取中...' : '读取云端集合' }}
+            </button>
+            <select
+              v-if="postmanCloudCollections.length"
+              v-model="postmanCloudSelectedUid"
+              class="h-[28px] w-full rounded-[8px] border border-black/10 bg-white px-[8px] text-[12px] leading-[16px] outline-none focus:border-[#155DFC]"
+            >
+              <option v-for="item in postmanCloudCollections" :key="item.uid" :value="item.uid">
+                {{ item.name }}
+              </option>
+            </select>
+            <button
+              v-if="postmanCloudCollections.length"
+              type="button"
+              class="h-[28px] w-full rounded-[8px] bg-[#155DFC] text-[12px] font-medium text-white disabled:opacity-50"
+              :disabled="postmanCloudSyncing || !postmanCloudSelectedUid"
+              @click="syncSelectedPostmanCloudCollection"
+            >
+              {{ postmanCloudSyncing ? '同步中...' : '同步到平台' }}
+            </button>
+            <div v-if="postmanCloudMessage" class="text-[11px] leading-[16px] text-[#717182]">{{ postmanCloudMessage }}</div>
           </div>
           <button
             type="button"

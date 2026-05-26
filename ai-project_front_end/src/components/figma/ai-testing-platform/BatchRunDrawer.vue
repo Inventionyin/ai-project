@@ -7,6 +7,7 @@ const props = defineProps<{
   isOpen: boolean
   rows: Row[]
   envId: string
+  runnerType: 'NEWMAN' | 'PYTEST_ALLURE'
   environments: BatchRunEnvironmentOption[]
   state: 'preview' | 'executing' | 'completed'
   runId: string
@@ -15,10 +16,15 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'close'): void
   (e: 'update:envId', value: string): void
+  (e: 'update:runnerType', value: 'NEWMAN' | 'PYTEST_ALLURE'): void
   (e: 'execute'): void
 }>()
 
 const executeButtonLabel = computed(() => (props.state === 'executing' ? '执行中...' : '执行'))
+const runnerOptions = [
+  { value: 'NEWMAN', label: 'Postman / Newman' },
+  { value: 'PYTEST_ALLURE', label: 'Pytest / Allure' },
+] as const
 
 function formatApiParams(apiParams: Row['apiParams']) {
   if (!apiParams || typeof apiParams !== 'object' || Array.isArray(apiParams)) return '-'
@@ -53,12 +59,25 @@ function formatExpectedResult(expectedResult: Row['expectedResult']) {
         </div>
 
         <div class="min-h-0 flex-1 overflow-auto px-[20px] py-[16px]">
-          <div class="mb-[16px]">
+          <div class="mb-[16px] grid gap-[12px] md:grid-cols-[minmax(0,1fr)_220px]">
             <BatchRunEnvironmentSelect
               :value="envId"
               :options="environments"
               @update:value="emit('update:envId', $event)"
             />
+            <label class="block">
+              <span class="mb-[6px] block text-[12px] font-medium leading-[16px] text-[#717182]">执行器</span>
+              <select
+                class="h-[36px] w-full rounded-[10px] border border-black/10 bg-white px-[10px] text-[13px] leading-[18px] text-[#0A0A0A] outline-none focus:border-[#155DFC]"
+                :value="runnerType"
+                :disabled="state === 'executing'"
+                @change="emit('update:runnerType', ($event.target as HTMLSelectElement).value as 'NEWMAN' | 'PYTEST_ALLURE')"
+              >
+                <option v-for="item in runnerOptions" :key="item.value" :value="item.value">
+                  {{ item.label }}
+                </option>
+              </select>
+            </label>
           </div>
           <div class="w-full overflow-x-auto rounded-[12px] border border-black/10">
             <div class="min-w-[1320px]">

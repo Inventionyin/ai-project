@@ -99,6 +99,32 @@ class ImportCollectionRequest(BaseSchema):
     content: str = Field(min_length=1)
 
 
+class PostmanCloudListRequest(BaseSchema):
+    projectId: IdStr
+    apiKey: str | None = Field(default=None, max_length=512)
+    workspaceId: str | None = Field(default=None, max_length=128)
+
+
+class PostmanCloudSyncRequest(PostmanCloudListRequest):
+    collectionUid: str = Field(min_length=1, max_length=255)
+
+
+class PostmanCloudCollectionListItem(BaseSchema):
+    id: str | None = None
+    uid: str
+    name: str
+    updatedAt: str | None = None
+
+
+class PostmanCloudCollectionListData(BaseSchema):
+    items: list[PostmanCloudCollectionListItem] = Field(default_factory=list)
+
+
+class PostmanCloudSyncData(BaseSchema):
+    postmanUid: str
+    collection: ApiCollectionDetail
+
+
 class ExportCollectionData(BaseSchema):
     format: str = Field(min_length=1, max_length=32)
     content: str = Field(min_length=1)
