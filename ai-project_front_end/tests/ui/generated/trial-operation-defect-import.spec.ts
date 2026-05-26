@@ -41,7 +41,14 @@ test.describe('trial operation defect import preview', () => {
           body: JSON.stringify({
             code: 0,
             data: {
-              metrics: {},
+              metrics: {
+                requirementDocs: 31,
+                testcases: 5899,
+                defects: 460,
+                defectClusters: 242,
+                riskHints: 354,
+                executedCaseRuns: 27
+              },
               testcasePriorityDistribution: {},
               testcaseStatusDistribution: {},
               testcaseTypeDistribution: {},
@@ -67,6 +74,16 @@ test.describe('trial operation defect import preview', () => {
     await page.goto('/projects/1/trial-operation', { waitUntil: 'domcontentloaded' })
     await expect(page.getByRole('button', { name: '演示概览' })).toBeVisible()
     await expect(page.getByRole('button', { name: '数据导入' })).toBeVisible()
+    await expect(page.getByText('资产基线', { exact: true })).toBeVisible()
+    await expect(page.getByRole('link', { name: '进入资产中心' })).toHaveAttribute('href', '/projects/1/assets')
+    await expect(page.getByText('需求文档', { exact: true })).toBeVisible()
+    await expect(page.getByText('5899', { exact: true })).toBeVisible()
+    await expect(page.getByText('风险基线', { exact: true })).toBeVisible()
+    const assetBox = await page.getByText('资产基线', { exact: true }).boundingBox()
+    const deliveryBox = await page.getByText('验收汇报稿', { exact: true }).boundingBox()
+    expect(assetBox).not.toBeNull()
+    expect(deliveryBox).not.toBeNull()
+    expect(assetBox!.y).toBeLessThan(deliveryBox!.y)
     await expect(page.getByText('验收汇报稿', { exact: true })).toBeVisible()
     await expect(page.getByText('用例库治理')).not.toBeVisible()
     await expect(page.getByLabel('选择导入类型')).not.toBeVisible()

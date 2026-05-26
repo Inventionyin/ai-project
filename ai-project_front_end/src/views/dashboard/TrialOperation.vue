@@ -212,6 +212,8 @@ const metricCards = computed(() => [
   { label: '缺陷聚类', value: metrics.value.defectClusters || 0, icon: GitBranch, tone: 'bg-[#FFF7ED] text-[#C2410C]' },
   { label: '风险提示', value: metrics.value.riskHints || 0, icon: ShieldAlert, tone: 'bg-[#FDF2F8] text-[#BE185D]' }
 ])
+const assetBaselineCards = computed(() => metricCards.value.slice(0, 3))
+const riskBaselineCards = computed(() => metricCards.value.slice(3))
 
 const dimensionOptions: Array<{ key: DimensionKey; label: string; accent: string }> = [
   { key: 'testcasePriorityDistribution', label: '用例优先级', accent: '#155DFC' },
@@ -366,7 +368,7 @@ const metricLabelMap: Record<string, string> = {
 
 const topLimitOptions = [5, 10, 16, 24]
 const trialViewOptions: Array<{ key: TrialView; label: string; description: string }> = [
-  { key: 'overview', label: '演示概览', description: '验收结论、汇报稿、快照和核心指标' },
+  { key: 'overview', label: '演示概览', description: '资产基线、验收结论、汇报稿和快照' },
   { key: 'import', label: '数据导入', description: '选择文件、字段映射、多文件导入' },
   { key: 'governance', label: '治理分析', description: '用例治理、AI建议、执行结果接入' },
   { key: 'details', label: '缺陷明细', description: '图表、缺陷聚类、风险提示和样例用例' }
@@ -1291,6 +1293,50 @@ onMounted(() => {
       </div>
     </section>
 
+    <section v-if="activeView === 'overview'" class="mb-[16px] grid grid-cols-1 gap-[12px] xl:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
+      <div class="rounded-[8px] border border-black/10 bg-white p-[14px]">
+        <div class="flex flex-col gap-[4px] sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <div class="text-[14px] font-semibold leading-[20px] text-[#0A0A0A]">资产基线</div>
+            <div class="mt-[2px] text-[12px] leading-[16px] text-[#717182]">需求、用例和缺陷是本轮验收的数据资产入口。</div>
+          </div>
+          <RouterLink
+            :to="`/projects/${projectId}/assets`"
+            class="text-[12px] font-medium text-[#155DFC] hover:underline"
+          >
+            进入资产中心
+          </RouterLink>
+        </div>
+        <div class="mt-[12px] grid grid-cols-1 gap-[10px] sm:grid-cols-3">
+          <div v-for="card in assetBaselineCards" :key="card.label" class="rounded-[8px] border border-black/10 bg-[#FAFBFC] p-[12px]">
+            <div class="flex items-center justify-between">
+              <div class="text-[12px] leading-[16px] text-[#717182]">{{ card.label }}</div>
+              <div class="flex h-[28px] w-[28px] items-center justify-center rounded-[8px]" :class="card.tone">
+                <component :is="card.icon" class="h-[14px] w-[14px]" />
+              </div>
+            </div>
+            <div class="mt-[10px] text-[22px] font-semibold leading-[30px] text-[#0A0A0A]">{{ card.value }}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="rounded-[8px] border border-black/10 bg-white p-[14px]">
+        <div class="text-[14px] font-semibold leading-[20px] text-[#0A0A0A]">风险基线</div>
+        <div class="mt-[2px] text-[12px] leading-[16px] text-[#717182]">聚类和风险提示用于验收判断，不再和资产入口混在页面底部。</div>
+        <div class="mt-[12px] grid grid-cols-1 gap-[10px] sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+          <div v-for="card in riskBaselineCards" :key="card.label" class="rounded-[8px] border border-black/10 bg-[#FAFBFC] p-[12px]">
+            <div class="flex items-center justify-between">
+              <div class="text-[12px] leading-[16px] text-[#717182]">{{ card.label }}</div>
+              <div class="flex h-[28px] w-[28px] items-center justify-center rounded-[8px]" :class="card.tone">
+                <component :is="card.icon" class="h-[14px] w-[14px]" />
+              </div>
+            </div>
+            <div class="mt-[10px] text-[22px] font-semibold leading-[30px] text-[#0A0A0A]">{{ card.value }}</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <section v-if="activeView === 'overview'" class="mb-[16px] rounded-[8px] border border-black/10 bg-white p-[14px] md:p-[16px]">
       <div class="grid grid-cols-1 gap-[14px] xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.55fr)] xl:items-start">
         <div class="min-w-0">
@@ -1473,18 +1519,6 @@ onMounted(() => {
         <div class="px-[12px] py-[10px]">
           <pre class="max-h-[220px] overflow-auto whitespace-pre-wrap break-words rounded-[8px] bg-white p-[10px] text-[12px] leading-[18px] text-[#334155]">{{ deliveryNoteMarkdown }}</pre>
         </div>
-      </div>
-    </section>
-
-    <section v-if="activeView === 'overview'" class="grid grid-cols-1 gap-[12px] sm:grid-cols-2 xl:grid-cols-5">
-      <div v-for="card in metricCards" :key="card.label" class="rounded-[8px] border border-black/10 bg-white p-[16px]">
-        <div class="flex items-center justify-between">
-          <div class="text-[12px] leading-[16px] text-[#717182]">{{ card.label }}</div>
-          <div class="flex h-[30px] w-[30px] items-center justify-center rounded-[8px]" :class="card.tone">
-            <component :is="card.icon" class="h-[15px] w-[15px]" />
-          </div>
-        </div>
-        <div class="mt-[12px] text-[24px] font-semibold leading-[32px] text-[#0A0A0A]">{{ card.value }}</div>
       </div>
     </section>
 
