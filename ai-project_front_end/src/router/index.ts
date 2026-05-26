@@ -2,8 +2,6 @@ import { defineAsyncComponent, defineComponent, h } from 'vue'
 import { createRouter, createWebHistory, useRoute } from 'vue-router'
 import AiTestingPlatformShell from '@/components/figma/ai-testing-platform/AiTestingPlatformShell.vue'
 
-const Login = defineAsyncComponent(() => import('../views/Login.vue'))
-const Home = defineAsyncComponent(() => import('../views/Home.vue'))
 const Overview = defineAsyncComponent(() => import('../views/dashboard/Overview.vue'))
 const TrialOperation = defineAsyncComponent(() => import('../views/dashboard/TrialOperation.vue'))
 const CasesPanel = defineAsyncComponent(() => import('@/components/figma/ai-testing-platform/CasesPanel.vue'))
@@ -17,11 +15,9 @@ const AllureReportPanel = defineAsyncComponent(() => import('@/components/figma/
 const TestCaseDetailPanel = defineAsyncComponent(() => import('@/components/figma/ai-testing-platform/TestCaseDetailPanel.vue'))
 const AiAssistantPanel = defineAsyncComponent(() => import('@/components/figma/ai-testing-platform/AiAssistantPanel.vue'))
 const RunDetail = defineAsyncComponent(() => import('@/views/runs/RunDetail.vue'))
-const AiTestingPlatform16_3 = defineAsyncComponent(() => import('@/views/figma/AiTestingPlatform16_3.vue'))
 const Environments = defineAsyncComponent(() => import('@/views/settings/Environments.vue'))
 const PlatformRecords = defineAsyncComponent(() => import('@/views/settings/PlatformRecords.vue'))
 const Integrations = defineAsyncComponent(() => import('@/views/settings/Integrations.vue'))
-const CollectionDetail = defineAsyncComponent(() => import('@/views/collections/CollectionDetail.vue'))
 const RequirementDocs = defineAsyncComponent(() => import('@/views/requirements/RequirementDocs.vue'))
 const RequirementDocDetail = defineAsyncComponent(() => import('@/views/requirements/RequirementDocDetail.vue'))
 const RequirementAnalysisDetail = defineAsyncComponent(() => import('@/views/requirements/RequirementAnalysisDetail.vue'))
@@ -38,8 +34,13 @@ const CiTokenGovernance = defineAsyncComponent(() => import('@/views/settings/Ci
 const AiCapabilities = defineAsyncComponent(() => import('@/views/settings/AiCapabilities.vue'))
 const OpsHealth = defineAsyncComponent(() => import('@/views/settings/OpsHealth.vue'))
 const AcceptanceCenter = defineAsyncComponent(() => import('@/views/settings/AcceptanceCenter.vue'))
-const Rbac = defineAsyncComponent(() => import('@/views/settings/Rbac.vue'))
 const WorkspaceSectionHome = defineAsyncComponent(() => import('@/views/workspace/WorkspaceSectionHome.vue'))
+
+const LoginRoute = () => import('../views/Login.vue')
+const HomeRoute = () => import('../views/Home.vue')
+const CollectionDetailRoute = () => import('@/views/collections/CollectionDetail.vue')
+const RbacRoute = () => import('@/views/settings/Rbac.vue')
+const AiTestingPlatform16_3Route = () => import('@/views/figma/AiTestingPlatform16_3.vue')
 
 function createProjectShellPage(activeAssetChild: string, Content: Parameters<typeof h>[0]) {
   return defineComponent({
@@ -128,7 +129,7 @@ const router = createRouter({
     {
       path: '/login',
       name: 'Login',
-      component: Login
+      component: LoginRoute
     },
     {
       path: '/register',
@@ -137,7 +138,7 @@ const router = createRouter({
     {
       path: '/projects',
       name: 'Projects',
-      component: Home
+      component: HomeRoute
     },
     {
       path: '/home',
@@ -181,7 +182,7 @@ const router = createRouter({
     },
     {
       path: '/projects/:projectId/assets/apis/:id',
-      component: CollectionDetail
+      component: CollectionDetailRoute
     },
     {
       path: '/projects/:projectId/assets/data',
@@ -333,7 +334,7 @@ const router = createRouter({
     },
     {
       path: '/settings/rbac',
-      component: Rbac
+      component: RbacRoute
     },
     {
       path: '/settings/audit',
@@ -377,7 +378,7 @@ const router = createRouter({
     },
     {
       path: '/figma/ai-testing-platform-16-3',
-      component: AiTestingPlatform16_3
+      component: AiTestingPlatform16_3Route
     }
   ]
 })
