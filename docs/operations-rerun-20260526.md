@@ -110,5 +110,17 @@ For a live local smoke, inject the required environment variables in the current
 - Server-side Jenkins restore drill was rerun. Result: `READY`, output `/opt/weitesting/artifacts/jenkins-restore-drill/latest-20260526.json`.
 - Server-side performance baseline was rerun. Result: `READY`, backend p95 `714.3ms`, frontend p95 `737.86ms`, `/health` p95 `694.72ms`, `/metrics` p95 `775.41ms`, output `/opt/weitesting/artifacts/performance-baseline/baseline-20260526-server.json`.
 - The restore drill script was hardened to use a unique `mktemp` listing file instead of a fixed `/tmp/weitesting-jenkins-restore-drill-listing.txt` path.
+- Recurring operations cron was reinstalled on the Oracle Ubuntu server at `/etc/cron.d/weitesting-ops`.
+- The Jenkins restore drill cron now writes temporary restore drills under `/opt/weitesting/artifacts/jenkins-restore-drill/drills`, avoiding the previous non-writable `/opt/weitesting/restore-drills/jenkins` path.
+- The cron installer now makes the log and artifact directories writable by the configured runtime user when installed as root.
+- Cron log write access was verified for user `ubuntu` under `/var/log/weitesting`.
+- GitHub Actions external integration smoke was rerun against repository secrets. Run `26436370005` completed successfully with DingTalk, Jenkins, Jira, and Zentao all `READY`.
+- GitHub Actions external business closure was rerun with `includeExternalBusinessClosure=true`. Run `26436722263` completed successfully:
+  - DingTalk, Jenkins, Jira, and Zentao configuration checks were all `READY`.
+  - DingTalk accepted the webhook smoke message.
+  - Jenkins accepted the reversible build trigger.
+  - Jira created and deleted test issue `AIT-17`.
+  - Zentao created and deleted test bug `11`.
+  - Final result: `[OK] External integration configuration is READY.`
 - Use GitHub Actions or a prepared local shell for external integration smoke.
 - Continue importing real data through the UI and save acceptance snapshots per batch.

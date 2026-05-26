@@ -47,6 +47,10 @@ done
 
 mkdir -p "$LOG_DIR" "$ARTIFACT_DIR/performance-baseline" "$ARTIFACT_DIR/production-readiness" "$ARTIFACT_DIR/jenkins-restore-drill"
 
+if [[ "$EUID" -eq 0 ]]; then
+  chown "$USER_NAME:$USER_NAME" "$LOG_DIR" "$ARTIFACT_DIR/performance-baseline" "$ARTIFACT_DIR/production-readiness" "$ARTIFACT_DIR/jenkins-restore-drill"
+fi
+
 if [[ ! -d "$REPO_DIR" ]]; then
   echo "Repository directory does not exist: $REPO_DIR" >&2
   exit 2
@@ -59,7 +63,7 @@ fi
 
 restore_line=""
 if [[ "$RESTORE_DRILL_ENABLED" == "true" ]]; then
-  restore_line="47 3 * * * $USER_NAME cd $REPO_DIR && bash deploy/jenkins/restore_drill_jenkins.sh --backup-dir /opt/weitesting/backups/jenkins --drill-dir /opt/weitesting/restore-drills/jenkins --output-path $ARTIFACT_DIR/jenkins-restore-drill/latest.json >>$LOG_DIR/jenkins-restore-drill.log 2>&1"
+  restore_line="47 3 * * * $USER_NAME cd $REPO_DIR && bash deploy/jenkins/restore_drill_jenkins.sh --backup-dir /opt/weitesting/backups/jenkins --drill-dir $ARTIFACT_DIR/jenkins-restore-drill/drills --output-path $ARTIFACT_DIR/jenkins-restore-drill/latest.json >>$LOG_DIR/jenkins-restore-drill.log 2>&1"
 fi
 
 cat >"$CRON_FILE" <<EOF
