@@ -122,5 +122,34 @@ For a live local smoke, inject the required environment variables in the current
   - Jira created and deleted test issue `AIT-17`.
   - Zentao created and deleted test bug `11`.
   - Final result: `[OK] External integration configuration is READY.`
+- A later GitHub Actions real customer environment rerun was triggered after final data confirmation. Run `26447416031` / run number `#115` completed successfully:
+  - Workflow URL: <https://github.com/Inventionyin/ai-project/actions/runs/26447416031>.
+  - DingTalk, Jenkins, Jira, and Zentao configuration checks were all `READY`.
+  - DingTalk accepted the webhook smoke message.
+  - Jenkins accepted the reversible build trigger.
+  - Jira created and deleted test issue `AIT-18`.
+  - Zentao created and deleted test bug `12`.
+  - Final result: `[OK] External integration configuration is READY.`
+- Local workstation production readiness was rerun at `2026-05-26 18:38`:
+  - Output: `artifacts/production-readiness/readiness-20260526-183857.json`.
+  - Result: `WARN`, with `7 READY / 2 WARN / 0 BLOCKED`.
+  - Public HTTPS endpoints for app, API, Grafana, and Jenkins were all reachable.
+  - The WARN items are workstation visibility limits for server-local Prometheus and Jenkins backup paths; server-side readiness below remains the authoritative production result.
+- Local workstation performance baseline was rerun at `2026-05-26 18:38`:
+  - Output: `artifacts/performance-baseline/baseline-20260526-183858.json`.
+  - Result: `WARN`, with `100%` success and `0` errors across app/API business paths.
+  - Backend p95 `1282.87ms`, frontend p95 `984.43ms`, `/health` p95 `988.6ms`, `/metrics` p95 `830.98ms`.
+  - Keep the workstation WARN as a trend observation; server-side baseline remains `READY`.
+- Server-side PostgreSQL formal backup restore drill was executed on Oracle Ubuntu:
+  - Output: `artifacts/server-verification/postgres-restore-drill-20260526.json`.
+  - Source backup: `/opt/weitesting/backups/postgres/weitesting-20260526T021501Z.dump.gz`.
+  - Result: `READY`, restored into disposable database `weitesting_restore_drill_20260526T104810Z`.
+  - Validation: `tableCount=56`, `schemaCount=1`.
+  - Cleanup verified: disposable restore database count is `0`; production database was not modified.
+- Final acceptance data status: product owner / upstream confirmed the current imported dataset is the final acceptance dataset.
+- Access strategy remains unchanged for this acceptance pass:
+  - Formal domain and HTTPS are enabled on `app.evanshine.me`, `api.evanshine.me`, `jenkins.evanshine.me`, and `grafana.evanshine.me`.
+  - Jenkins and Grafana stay behind their own login controls.
+  - Cloudflare Access is not a mandatory gate for this internal acceptance pass; enable it before wider external exposure if required by the launch policy.
 - Use GitHub Actions or a prepared local shell for external integration smoke.
 - Continue importing real data through the UI and save acceptance snapshots per batch.
