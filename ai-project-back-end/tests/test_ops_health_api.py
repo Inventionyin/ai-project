@@ -13,7 +13,7 @@ from app.api.deps import CurrentUser, get_current_user
 from app.api.v1.endpoints import ops as ops_endpoint
 from app.core.database import get_db
 from app.schemas.ops import OpsHealthCheck, OpsHealthSummaryData
-from app.services.ops_health import _ci_tokens_check, _workers_check, build_ops_health_summary
+from app.services.ops_health import _ci_tokens_check, _job_queue_check, _workers_check, build_ops_health_summary
 
 
 @dataclass
@@ -110,10 +110,11 @@ async def _assert_build_ops_health_summary_warn_and_blocked() -> None:
     # 1 db ping
     # 2 outbox failed, 3 outbox queued
     # 4 workers stale, 5 workers total
-    # 6 devops pending
-    # 7 plugins installed
-    # 8 legacy ci active, 9 named ci active projects
-    db = _FakeDb(results=[1, 2, 5, 1, 3, 1, 0, 0, 0], fail_on_calls={6})
+    # 6 stuck queued jobs, 7 queued jobs, 8 running jobs
+    # 9 devops pending
+    # 10 plugins installed
+    # 11 legacy ci active, 12 named ci active projects
+    db = _FakeDb(results=[1, 2, 5, 1, 3, 1, 1, 0, 99, 0, 0, 0], fail_on_calls={9})
     user = CurrentUser(
         id=uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
         tenant_id=uuid.UUID("11111111-1111-1111-1111-111111111111"),
@@ -128,6 +129,7 @@ async def _assert_build_ops_health_summary_warn_and_blocked() -> None:
     assert checks_by_key["notificationOutbox"].status == "WARN"
     assert checks_by_key["notificationOutbox"].metric["failedCount"] == 2
     assert checks_by_key["workers"].status == "WARN"
+    assert checks_by_key["executionQueue"].status == "WARN"
     assert checks_by_key["devopsRuns"].status == "BLOCKED"
     assert checks_by_key["plugins"].status == "WARN"
     assert checks_by_key["ciTokens"].status == "WARN"
@@ -173,3 +175,18 @@ async def _assert_ci_tokens_check_counts_named_active_token_projects() -> None:
 
     assert check.status == "READY"
     assert check.metric["activeProjectCount"] == 2
+
+
+def test_job_queue_check_warns_on_stuck_jobs() -> None:
+    asyncio.run(_assert_job_queue_check_warns_on_stuck_jobs())
+
+
+async def _assert_job_queue_check_warns_on_stuck_jobs() -> None:
+    db = _FakeDb(results=[2, 3, 1])
+
+    check = await _job_queue_check(db, uuid.UUID("11111111-1111-1111-1111-111111111111"))
+
+    assert check.status == "WARN"
+    assert check.metric["stuckQueuedCount"] == 2
+    assert check.metric["queuedCount"] == 3
+    assert check.metric["runningCount"] == 1

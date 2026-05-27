@@ -84,14 +84,19 @@ async def create_executor(
     row = Executor(
         tenant_id=user.tenant_id, project_id=project_id, name=name,
         executor_type=executor_type, description=description,
-        config_json=config, version=version, created_by=user.id,
+        config_json=config, enabled=True, version=version, created_by=user.id,
     )
     db.add(row)
     await db.flush()
     await create_audit_log(
-        db, user=user, project_id=project_id,
-        action="CREATE_EXECUTOR", resource_type="executor",
-        resource_id=str(row.id), summary=f"创建执行器: {name} ({executor_type})",
+        db,
+        user=user,
+        project_id=project_id,
+        module="EXECUTOR",
+        action="CREATE_EXECUTOR",
+        resource_type="executor",
+        resource_id=str(row.id),
+        summary=f"创建执行器: {name} ({executor_type})",
     )
     return _to_detail(row)
 

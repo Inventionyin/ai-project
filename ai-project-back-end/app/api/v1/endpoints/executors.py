@@ -28,11 +28,21 @@ async def create_executor_endpoint(
     user: CurrentUser = Depends(get_current_user),
     request_id: str = Depends(get_request_id),
 ) -> ApiResponse[ExecutorDetail]:
-    result = await create_executor(
-        db, user=user, project_id=projectId,
-        name=body.name, executor_type=body.executorType,
-        description=body.description, config=body.config, version=body.version,
-    )
+    try:
+        result = await create_executor(
+            db,
+            user=user,
+            project_id=projectId,
+            name=body.name,
+            executor_type=body.executorType,
+            description=body.description,
+            config=body.config,
+            version=body.version,
+        )
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
     return ApiResponse(data=result, requestId=request_id)
 
 
@@ -70,11 +80,22 @@ async def update_executor_endpoint(
     user: CurrentUser = Depends(get_current_user),
     request_id: str = Depends(get_request_id),
 ) -> ApiResponse[ExecutorDetail]:
-    result = await update_executor(
-        db, user=user, project_id=projectId, executor_id=executorId,
-        name=body.name, description=body.description,
-        config=body.config, enabled=body.enabled, version=body.version,
-    )
+    try:
+        result = await update_executor(
+            db,
+            user=user,
+            project_id=projectId,
+            executor_id=executorId,
+            name=body.name,
+            description=body.description,
+            config=body.config,
+            enabled=body.enabled,
+            version=body.version,
+        )
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
     return ApiResponse(data=result, requestId=request_id)
 
 
@@ -86,5 +107,10 @@ async def delete_executor_endpoint(
     user: CurrentUser = Depends(get_current_user),
     request_id: str = Depends(get_request_id),
 ) -> ApiResponse:
-    await delete_executor(db, user=user, project_id=projectId, executor_id=executorId)
+    try:
+        await delete_executor(db, user=user, project_id=projectId, executor_id=executorId)
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
     return ApiResponse(requestId=request_id)

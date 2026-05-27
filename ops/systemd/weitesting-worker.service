@@ -1,0 +1,20 @@
+[Unit]
+Description=WeiTesting API worker
+After=weitesting-api.service
+Wants=weitesting-api.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/weitesting/current/ai-project-back-end
+EnvironmentFile=/opt/weitesting/backend/.env
+Environment=PYTHONPATH=/opt/weitesting/current/ai-project-back-end
+ExecStart=/opt/weitesting/backend/venv/bin/python /opt/weitesting/current/ai-project-back-end/scripts/run_api_worker.py
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

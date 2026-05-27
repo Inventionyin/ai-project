@@ -1068,7 +1068,10 @@ def _execute_http(
 ) -> _ExecResult:
     start = time.perf_counter()
     try:
-        req = Request(url=url, method=method.upper(), headers=headers, data=body_bytes)
+        request_headers = {str(k): str(v) for k, v in (headers or {}).items()}
+        if not any(str(key).lower() == "user-agent" for key in request_headers):
+            request_headers["User-Agent"] = "weitesting-api-debug/1.0"
+        req = Request(url=url, method=method.upper(), headers=request_headers, data=body_bytes)
         with urlopen(req, timeout=timeout_sec) as resp:
             raw = resp.read(50_000)
             try:

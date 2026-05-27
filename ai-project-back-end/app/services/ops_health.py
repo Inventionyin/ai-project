@@ -7,9 +7,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser
 from app.models.devops_pipeline import DevOpsRun
+from app.models.enums import JobStatus
 from app.models.integration import NotificationOutbox
 from app.models.plugin import PluginInstallation
 from app.models.project import Project, ProjectCiToken
+from app.models.run import Job
 from app.models.worker import Worker
 from app.schemas.ops import OpsHealthCheck, OpsHealthSummaryData
 
@@ -117,6 +119,58 @@ async def _workers_check(db: AsyncSession, tenant_id) -> OpsHealthCheck:
     )
 
 
+async def _job_queue_check(db: AsyncSession, tenant_id) -> OpsHealthCheck:
+    try:
+        stuck_before = datetime.utcnow() - timedelta(seconds=60)
+        stuck_queued_count = int(
+            (
+                await db.scalar(
+                    select(func.count(Job.id)).where(
+                        Job.tenant_id == tenant_id,
+                        Job.status == JobStatus.QUEUED,
+                        Job.created_at < stuck_before,
+                    )
+                )
+            )
+            or 0
+        )
+        queued_count = int(
+            (await db.scalar(select(func.count(Job.id)).where(Job.tenant_id == tenant_id, Job.status == JobStatus.QUEUED)))
+            or 0
+        )
+        running_count = int(
+            (await db.scalar(select(func.count(Job.id)).where(Job.tenant_id == tenant_id, Job.status == JobStatus.RUNNING)))
+            or 0
+        )
+    except Exception as exc:
+        return _blocked_check(
+            "executionQueue",
+            "Execution Queue",
+            f"Unable to query queued execution jobs: {exc.__class__.__name__}",
+            {},
+            "Check jobs table access and worker dispatch telemetry.",
+        )
+    status = "READY"
+    if stuck_queued_count > 0 or queued_count > 20:
+        status = "WARN"
+    return OpsHealthCheck(
+        key="executionQueue",
+        label="Execution Queue",
+        status=status,
+        detail="Queued execution jobs and dispatch backlog.",
+        metric={
+            "stuckQueuedCount": stuck_queued_count,
+            "queuedCount": queued_count,
+            "runningCount": running_count,
+        },
+        recommendation=(
+            "Investigate /api/workers/poll consumption, worker capabilities, and runner dispatch."
+            if status == "WARN"
+            else "No action required."
+        ),
+    )
+
+
 async def _devops_runs_check(db: AsyncSession, tenant_id) -> OpsHealthCheck:
     try:
         pending_count = int(
@@ -221,6 +275,7 @@ async def build_ops_health_summary(db: AsyncSession, user: CurrentUser) -> OpsHe
         await _database_check(db),
         await _notification_outbox_check(db, user.tenant_id),
         await _workers_check(db, user.tenant_id),
+        await _job_queue_check(db, user.tenant_id),
         await _devops_runs_check(db, user.tenant_id),
         await _plugins_check(db, user.tenant_id),
         await _ci_tokens_check(db, user.tenant_id),

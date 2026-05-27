@@ -30,6 +30,14 @@ from app.schemas.worker import (
 )
 from app.services.environment import get_secret_keys
 from app.services.integration_delivery import dispatch_run_terminal_notification
+from app.services.run import (
+    _extract_testcase_api_headers,
+    _extract_testcase_api_params,
+    _extract_testcase_expected_result,
+    _extract_testcase_expected_status_code,
+    _extract_testcase_postconditions,
+    _extract_testcase_preconditions,
+)
 
 _WORKER_CAPABILITIES = {"API", "UI", "PERF"}
 _TERMINAL_CASE_STATUS = {CaseRunStatus.PASSED, CaseRunStatus.FAILED, CaseRunStatus.SKIPPED}
@@ -317,13 +325,36 @@ async def poll_job(
 
     testcase_rows = (
         await db.execute(
-            select(TestCase.id, TestCase.content_md).where(
+            select(
+                TestCase.id,
+                TestCase.content_md,
+                TestCase.test_case_id,
+                TestCase.type,
+                TestCase.api_method,
+                TestCase.api_url,
+                TestCase.ai_meta_json,
+            ).where(
                 TestCase.tenant_id == worker.tenant_id,
                 TestCase.id.in_(set(testcase_ids)),
             )
         )
     ).all()
-    testcase_content_map: dict[uuid.UUID, str] = {row[0]: row[1] for row in testcase_rows}
+    testcase_payload_map: dict[uuid.UUID, dict[str, object]] = {
+        row[0]: {
+            "contentMd": row[1],
+            "testCaseId": row[2],
+            "type": row[3],
+            "apiMethod": row[4],
+            "apiUrl": row[5],
+            "params": _extract_testcase_api_params(row[6]),
+            "headers": _extract_testcase_api_headers(row[6]),
+            "expectedResult": _extract_testcase_expected_result(row[6]),
+            "expectedStatusCode": _extract_testcase_expected_status_code(row[6]),
+            "preconditions": _extract_testcase_preconditions(row[6]),
+            "postconditions": _extract_testcase_postconditions(row[6]),
+        }
+        for row in testcase_rows
+    }
 
     env_id = run.env_id
     if isinstance(meta.get("envId"), str):
@@ -350,20 +381,33 @@ async def poll_job(
         if not isinstance(row, dict):
             continue
         testcase_id = uuid.UUID(str(row["testcaseId"]))
+        testcase_payload = testcase_payload_map.get(testcase_id) or {}
+        merged_params = dict(testcase_payload.get("params") or {})
+        merged_params.update(dict(row.get("params") or {}))
+        merged_headers = dict(testcase_payload.get("headers") or {})
+        merged_headers.update({str(k): str(v) for k, v in dict(row.get("headers") or {}).items()})
+        testcase_type = row.get("type") or testcase_payload.get("type")
         payload_items.append(
             JobItem(
                 caseRunId=str(row["caseRunId"]),
                 testcaseId=str(testcase_id),
-                type=row["type"],
-                contentMd=testcase_content_map.get(testcase_id) or " ",
-                apiMethod=str(row.get("apiMethod") or "").strip().upper() or None,
-                apiUrl=str(row.get("apiUrl") or "").strip() or None,
-                params=dict(row.get("params") or {}),
-                headers={str(k): str(v) for k, v in dict(row.get("headers") or {}).items()},
-                expectedResult=str(row.get("expectedResult") or "").strip() or None,
-                expectedStatusCode=row.get("expectedStatusCode") if isinstance(row.get("expectedStatusCode"), int) else None,
-                preconditions=str(row.get("preconditions") or "").strip() or None,
-                postconditions=str(row.get("postconditions") or "").strip() or None,
+                testCaseId=str(row.get("testCaseId") or testcase_payload.get("testCaseId") or "").strip() or None,
+                type=testcase_type,
+                contentMd=str(testcase_payload.get("contentMd") or " "),
+                apiMethod=str(row.get("apiMethod") or testcase_payload.get("apiMethod") or "").strip().upper() or None,
+                apiUrl=str(row.get("apiUrl") or testcase_payload.get("apiUrl") or "").strip() or None,
+                params=merged_params,
+                headers=merged_headers,
+                expectedResult=str(row.get("expectedResult") or testcase_payload.get("expectedResult") or "").strip() or None,
+                expectedStatusCode=(
+                    row.get("expectedStatusCode")
+                    if isinstance(row.get("expectedStatusCode"), int)
+                    else testcase_payload.get("expectedStatusCode")
+                    if isinstance(testcase_payload.get("expectedStatusCode"), int)
+                    else None
+                ),
+                preconditions=str(row.get("preconditions") or testcase_payload.get("preconditions") or "").strip() or None,
+                postconditions=str(row.get("postconditions") or testcase_payload.get("postconditions") or "").strip() or None,
             )
         )
 
