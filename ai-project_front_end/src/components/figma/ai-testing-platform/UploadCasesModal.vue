@@ -72,7 +72,7 @@ async function handleImport() {
       emit('close')
     }
   } catch (e) {
-    const msg = e instanceof Error ? e.message : '上传失败'
+    const msg = e instanceof Error ? e.message : '导入失败'
     showToast(msg, 'error')
   } finally {
     isUploading.value = false
@@ -86,7 +86,7 @@ async function handleImport() {
 
     <div class="absolute inset-y-0 right-0 z-10 flex h-full w-full max-w-[560px] flex-col bg-white px-[24px] pb-[24px] pt-[24px] shadow-[-10px_0_30px_-12px_rgba(0,0,0,0.3)]">
       <div class="flex items-center justify-between">
-        <div class="text-[14px] font-semibold leading-[20px] text-[#0A0A0A]">上传用例</div>
+        <div class="text-[14px] font-semibold leading-[20px] text-[#0A0A0A]">导入用例</div>
         <button type="button" class="h-[18px] w-[18px]" aria-label="Close" @click="emit('close')">
           <img :src="modalClose" alt="" class="h-full w-full" />
         </button>
@@ -140,7 +140,7 @@ async function handleImport() {
           :disabled="isUploading"
           @click="handleImport"
         >
-          {{ isUploading ? '上传中...' : '确定' }}
+          {{ isUploading ? '导入中...' : '确定' }}
         </button>
       </div>
     </div>

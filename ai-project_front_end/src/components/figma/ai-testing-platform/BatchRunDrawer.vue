@@ -84,9 +84,9 @@ function formatExpectedResult(expectedResult: Row['expectedResult']) {
               <div class="grid grid-cols-[160px_minmax(200px,1fr)_100px_260px_300px_300px] border-b border-black/10 bg-[rgba(236,236,240,0.3)]">
                 <div class="px-[12px] py-[10px] text-[12px] font-medium leading-[16px] text-[#717182]">功能模块</div>
                 <div class="px-[12px] py-[10px] text-[12px] font-medium leading-[16px] text-[#717182]">标题</div>
-                <div class="px-[12px] py-[10px] text-[12px] font-medium leading-[16px] text-[#717182]">调用方式</div>
-                <div class="px-[12px] py-[10px] text-[12px] font-medium leading-[16px] text-[#717182]">interfaceUrl</div>
-                <div class="px-[12px] py-[10px] text-[12px] font-medium leading-[16px] text-[#717182]">接口参数</div>
+                <div class="px-[12px] py-[10px] text-[12px] font-medium leading-[16px] text-[#717182]">请求方法</div>
+                <div class="px-[12px] py-[10px] text-[12px] font-medium leading-[16px] text-[#717182]">接口地址</div>
+                <div class="px-[12px] py-[10px] text-[12px] font-medium leading-[16px] text-[#717182]">参数摘要</div>
                 <div class="px-[12px] py-[10px] text-[12px] font-medium leading-[16px] text-[#717182]">预期结果</div>
               </div>
               <div

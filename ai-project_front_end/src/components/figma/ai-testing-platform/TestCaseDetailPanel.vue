@@ -271,10 +271,10 @@ async function saveCase() {
   let apiParams: Record<string, unknown> = {}
   let apiHeaders: Record<string, string> = {}
   try {
-    apiParams = parseJsonObject(form.apiParamsInput, '接口参数', isGetMethod.value)
+    apiParams = parseJsonObject(form.apiParamsInput, '请求参数', isGetMethod.value)
     apiHeaders = parseHeaderObject(form.apiHeadersInput)
   } catch (error) {
-    showToast(error instanceof Error ? error.message : '接口参数校验失败', 'error')
+    showToast(error instanceof Error ? error.message : '请求参数校验失败', 'error')
     return
   }
   if (!feature) {
@@ -286,11 +286,11 @@ async function saveCase() {
     return
   }
   if (!apiMethod) {
-    showToast('调用方式不能为空', 'error')
+    showToast('请求方法不能为空', 'error')
     return
   }
   if (!apiUrl) {
-    showToast('interfaceUrl不能为空', 'error')
+    showToast('接口地址不能为空', 'error')
     return
   }
   if (!expectedResult) {
@@ -644,7 +644,7 @@ watch(() => route.query.tab, () => {
           </div>
 
           <div class="mt-[16px] flex flex-col gap-[6px]">
-            <label for="case-api-method" class="text-[14px] font-medium leading-[20px] text-[#0A0A0A]">调用方式 <span class="text-[#FB2C36]">*</span></label>
+            <label for="case-api-method" class="text-[14px] font-medium leading-[20px] text-[#0A0A0A]">请求方法 <span class="text-[#FB2C36]">*</span></label>
             <input
               id="case-api-method"
               v-model="form.apiMethod"
@@ -654,7 +654,7 @@ watch(() => route.query.tab, () => {
           </div>
 
           <div class="mt-[16px] flex flex-col gap-[6px]">
-            <label for="case-api-url" class="text-[14px] font-medium leading-[20px] text-[#0A0A0A]">interfaceUrl <span class="text-[#FB2C36]">*</span></label>
+            <label for="case-api-url" class="text-[14px] font-medium leading-[20px] text-[#0A0A0A]">接口地址 <span class="text-[#FB2C36]">*</span></label>
             <input
               id="case-api-url"
               v-model="form.apiUrl"
@@ -664,7 +664,7 @@ watch(() => route.query.tab, () => {
           </div>
 
           <div class="mt-[16px] flex flex-col gap-[6px]">
-            <label for="case-api-params" class="text-[14px] font-medium leading-[20px] text-[#0A0A0A]">接口参数 <span v-if="!isGetMethod" class="text-[#FB2C36]">*</span></label>
+            <label for="case-api-params" class="text-[14px] font-medium leading-[20px] text-[#0A0A0A]">请求参数 <span v-if="!isGetMethod" class="text-[#FB2C36]">*</span></label>
             <textarea
               id="case-api-params"
               v-model="form.apiParamsInput"

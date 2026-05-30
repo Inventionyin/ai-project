@@ -32,6 +32,7 @@ const page = ref(1)
 const pageSize = 20
 const selectedCaseIds = ref<string[]>([])
 const selectedCaseMap = ref<Record<string, Row>>({})
+const selectedQuickView = ref<QuickView>('ALL')
 const currentUserId = ref('')
 const currentUserName = ref('我')
 const ownerOptions = ref<Array<{ id: string; username: string }>>([])
@@ -150,6 +151,8 @@ type EditCasePayload = {
   ownerId: string
 }
 
+type QuickView = 'ALL' | 'P0' | 'FAILED' | 'DRAFT'
+
 const statusLabelMap: Record<TestCaseListItem['status'], Row['status']> = {
   DRAFT: '草稿',
   REVIEWED: '已评审',
@@ -236,8 +239,18 @@ const formatDateTime = (timestamp: number) => {
 }
 
 const displayRows = computed(() => {
-  if (!selectedPriorities.value.length) return rows.value
-  return rows.value.filter((row) => selectedPriorities.value.includes(row.priority))
+  let next = rows.value
+  if (selectedPriorities.value.length) {
+    next = next.filter((row) => selectedPriorities.value.includes(row.priority))
+  }
+  if (selectedQuickView.value === 'P0') {
+    next = next.filter((row) => row.priority === 'P0')
+  } else if (selectedQuickView.value === 'FAILED') {
+    next = next.filter((row) => row.lastRun === '失败')
+  } else if (selectedQuickView.value === 'DRAFT') {
+    next = next.filter((row) => row.status === '草稿')
+  }
+  return next
 })
 
 function escapeCsvCell(value: unknown) {
@@ -291,6 +304,41 @@ const selectedRows = computed(() => {
     .map((id) => selectedCaseMap.value[id])
     .filter((row): row is Row => Boolean(row))
 })
+const visibleP0Count = computed(() => displayRows.value.filter((row) => row.priority === 'P0').length)
+const visibleFailedCount = computed(() => displayRows.value.filter((row) => row.lastRun === '失败').length)
+const visibleReviewedCount = computed(() => displayRows.value.filter((row) => row.status === '已评审').length)
+const reviewedRateLabel = computed(() => {
+  if (!casesCount.value) return '0%'
+  return `${Math.round((visibleReviewedCount.value / casesCount.value) * 100)}%`
+})
+const selectedRiskSummary = computed(() => {
+  if (!selectedRows.value.length) return ''
+  const p0 = selectedRows.value.filter((row) => row.priority === 'P0').length
+  const failed = selectedRows.value.filter((row) => row.lastRun === '失败').length
+  return `P0 ${p0} · 失败 ${failed}`
+})
+const caseInsightCards = computed(() => [
+  {
+    label: '当前视图',
+    value: String(casesCount.value),
+    hint: total.value > casesCount.value ? `全库 ${total.value} 条` : '已按当前条件筛选'
+  },
+  {
+    label: 'P0 高优先级',
+    value: String(visibleP0Count.value),
+    hint: '优先用于冒烟与回归'
+  },
+  {
+    label: '失败待复核',
+    value: String(visibleFailedCount.value),
+    hint: '来自最近一次执行'
+  },
+  {
+    label: '评审完成率',
+    value: reviewedRateLabel.value,
+    hint: `${visibleReviewedCount.value}/${casesCount.value || 0} 已评审`
+  }
+])
 
 type PaginationItem = number | '...'
 
@@ -764,11 +812,11 @@ async function saveEditCase(payload: EditCasePayload) {
     return
   }
   if (!apiMethod) {
-    showToast('请输入调用方式', 'error')
+    showToast('请输入请求方法', 'error')
     return
   }
   if (!apiUrl) {
-    showToast('请输入interfaceUrl', 'error')
+    showToast('请输入接口地址', 'error')
     return
   }
   if (!expectedResult) {
@@ -869,12 +917,32 @@ const filterAreaRef = ref<HTMLElement | null>(null)
 const typeOptions = ['API', 'UI', 'PERF', 'MIX'] as const
 const statusOptions = ['草稿', '已评审', '已弃用'] as const
 const priorityOptions = ['P0', 'P1', 'P2', 'P3'] as const
+const quickViewOptions: Array<{ value: QuickView; label: string }> = [
+  { value: 'ALL', label: '全部' },
+  { value: 'P0', label: '只看 P0' },
+  { value: 'FAILED', label: '最近失败' },
+  { value: 'DRAFT', label: '待评审' }
+]
 
 const selectedTypes = ref<string[]>([])
 const selectedStatuses = ref<string[]>([])
 const selectedPriorities = ref<string[]>([])
 
 const selectedFiltersCount = computed(() => selectedTypes.value.length + selectedStatuses.value.length + selectedPriorities.value.length)
+const activeFilterLabels = computed(() => {
+  const labels: string[] = []
+  const query = searchQuery.value.trim()
+  if (query) labels.push(`搜索：${query}`)
+  if (selectedQuickView.value !== 'ALL') {
+    const quick = quickViewOptions.find((item) => item.value === selectedQuickView.value)
+    if (quick) labels.push(quick.label)
+  }
+  labels.push(...selectedTypes.value.map((item) => `类型：${item}`))
+  labels.push(...selectedStatuses.value.map((item) => `状态：${item}`))
+  labels.push(...selectedPriorities.value.map((item) => `优先级：${item}`))
+  return labels
+})
+const hasActiveFilters = computed(() => activeFilterLabels.value.length > 0)
 
 function toggleValue(list: string[], value: string) {
   const idx = list.indexOf(value)
@@ -885,6 +953,28 @@ function toggleValue(list: string[], value: string) {
 function pillClass(isActive: boolean) {
   if (isActive) return 'bg-[#EFF6FF] border-[#2B7FFF] text-[#155DFC]'
   return 'bg-white border-black/10 text-[#717182]'
+}
+
+function quickViewClass(value: QuickView) {
+  if (selectedQuickView.value === value) return 'border-[#155DFC] bg-[#155DFC] text-white'
+  return 'border-black/10 bg-white text-[#52525B] hover:border-[#BEDBFF] hover:text-[#155DFC]'
+}
+
+function setQuickView(value: QuickView) {
+  if (selectedQuickView.value === value) return
+  selectedQuickView.value = value
+  clearSelection()
+}
+
+function clearAllFilters() {
+  selectedQuickView.value = 'ALL'
+  searchQuery.value = ''
+  selectedTypes.value = []
+  selectedStatuses.value = []
+  selectedPriorities.value = []
+  page.value = 1
+  clearSelection()
+  void loadCases()
 }
 
 function toggleFilter() {
@@ -974,14 +1064,14 @@ watch(() => route.params.projectId, () => {
             class="h-[32px] rounded-[10px] border border-[#BEDBFF] bg-white px-[14px] text-[14px] font-medium leading-[20px] text-[#155DFC]"
             @click="openUploadCases"
           >
-            上传用例
+            导入文件
           </button>
           <button
             type="button"
             class="h-[32px] rounded-[10px] border border-[#BEDBFF] bg-white px-[14px] text-[14px] font-medium leading-[20px] text-[#155DFC]"
             @click="exportCurrentListCsv"
           >
-            导出CSV
+            导出当前视图
           </button>
           <button
             type="button"
@@ -989,7 +1079,7 @@ watch(() => route.params.projectId, () => {
             :disabled="selectedCount === 0"
             @click="openBatchRunDrawer"
           >
-            批量执行
+            执行所选
           </button>
           <button
             type="button"
@@ -1010,8 +1100,20 @@ watch(() => route.params.projectId, () => {
         </div>
       </div>
 
+      <div class="grid grid-cols-1 gap-[10px] md:grid-cols-4">
+        <div
+          v-for="item in caseInsightCards"
+          :key="item.label"
+          class="min-h-[76px] rounded-[12px] border border-black/10 bg-white px-[14px] py-[12px]"
+        >
+          <div class="text-[12px] font-medium leading-[16px] text-[#717182]">{{ item.label }}</div>
+          <div class="mt-[6px] text-[22px] font-semibold leading-[28px] text-[#0A0A0A]">{{ item.value }}</div>
+          <div class="mt-[2px] truncate text-[12px] leading-[16px] text-[#717182]">{{ item.hint }}</div>
+        </div>
+      </div>
+
       <div ref="filterAreaRef" class="w-full overflow-hidden rounded-[14px] border border-black/10 bg-white">
-        <div class="flex w-full items-center justify-between gap-[12px] px-[16.67px] py-[16.67px]">
+        <div class="flex w-full flex-wrap items-center justify-between gap-[12px] px-[16.67px] py-[16.67px]">
           <div class="relative h-[32px] w-[240px] shrink-0 rounded-[10px] bg-[#ECECF0] md:w-[260px]">
             <img :src="filterSearch" alt="" class="absolute left-[12px] top-[9px] h-[14px] w-[14px]" />
             <input
@@ -1022,26 +1124,60 @@ watch(() => route.params.projectId, () => {
             />
           </div>
 
-          <button
-            type="button"
-            class="relative h-[32px] w-[90.33px] shrink-0 rounded-[10px] border border-black/10 bg-white"
-            @click.stop="toggleFilter"
-          >
-            <img :src="filterIcon" alt="" class="absolute left-[12.67px] top-[9.5px] h-[13px] w-[13px]" />
-            <span class="absolute left-[31.67px] top-[6.33px] text-[14px] font-medium leading-[20px] text-[#717182]">筛选</span>
-            <span
-              v-if="selectedFiltersCount > 0"
-              class="absolute left-[54px] top-[2px] flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-[#155DFC] px-[4px] text-[12px] font-medium leading-[16px] text-white"
+          <div class="flex min-w-0 flex-1 flex-wrap items-center gap-[6px]">
+            <button
+              v-for="option in quickViewOptions"
+              :key="option.value"
+              type="button"
+              class="h-[28px] rounded-[9px] border px-[10px] text-[12px] font-medium leading-[16px] transition-colors"
+              :class="quickViewClass(option.value)"
+              @click="setQuickView(option.value)"
             >
-              {{ selectedFiltersCount }}
-            </span>
-            <img
-              :src="filterChevron"
-              alt=""
-              class="absolute left-[65.67px] top-[10px] h-[12px] w-[12px] transition-transform"
-              :class="isFilterOpen ? 'rotate-180' : ''"
-            />
-          </button>
+              {{ option.label }}
+            </button>
+          </div>
+
+          <div class="flex items-center gap-[8px]">
+            <button
+              v-if="hasActiveFilters"
+              type="button"
+              class="h-[32px] rounded-[10px] border border-transparent px-[10px] text-[12px] font-medium leading-[16px] text-[#717182] hover:bg-black/5"
+              @click="clearAllFilters"
+            >
+              清空筛选
+            </button>
+            <button
+              type="button"
+              class="relative h-[32px] w-[90.33px] shrink-0 rounded-[10px] border border-black/10 bg-white"
+              @click.stop="toggleFilter"
+            >
+              <img :src="filterIcon" alt="" class="absolute left-[12.67px] top-[9.5px] h-[13px] w-[13px]" />
+              <span class="absolute left-[31.67px] top-[6.33px] text-[14px] font-medium leading-[20px] text-[#717182]">筛选</span>
+              <span
+                v-if="selectedFiltersCount > 0"
+                class="absolute left-[54px] top-[2px] flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-[#155DFC] px-[4px] text-[12px] font-medium leading-[16px] text-white"
+              >
+                {{ selectedFiltersCount }}
+              </span>
+              <img
+                :src="filterChevron"
+                alt=""
+                class="absolute left-[65.67px] top-[10px] h-[12px] w-[12px] transition-transform"
+                :class="isFilterOpen ? 'rotate-180' : ''"
+              />
+            </button>
+          </div>
+        </div>
+
+        <div v-if="hasActiveFilters" class="flex flex-wrap items-center gap-[6px] border-t border-black/5 px-[16.67px] py-[10px]">
+          <span class="text-[12px] font-medium leading-[16px] text-[#717182]">当前条件</span>
+          <span
+            v-for="label in activeFilterLabels"
+            :key="label"
+            class="rounded-full bg-[#F4F4F5] px-[8px] py-[3px] text-[12px] leading-[16px] text-[#52525B]"
+          >
+            {{ label }}
+          </span>
         </div>
 
         <div v-if="isFilterOpen" class="border-t border-black/10 px-[16.67px] pt-[12.67px] pb-[16px]">
@@ -1099,9 +1235,12 @@ watch(() => route.params.projectId, () => {
 
       <div
         v-if="selectedCount > 0"
-        class="flex h-[37.33px] w-full items-center justify-between rounded-[10px] border border-[#BEDBFF] bg-[#EFF6FF] px-[16.67px]"
+        class="flex min-h-[46px] w-full items-center justify-between rounded-[10px] border border-[#BEDBFF] bg-[#EFF6FF] px-[16.67px] py-[6px]"
       >
-        <div class="text-[14px] leading-[20px] text-[#1447E6]">已选 {{ selectedCount }} 条</div>
+        <div class="flex flex-col">
+          <div class="text-[14px] leading-[20px] text-[#1447E6]">已选 {{ selectedCount }} 条</div>
+          <div class="text-[12px] leading-[16px] text-[#2B7FFF]">{{ selectedRiskSummary }}</div>
+        </div>
 
         <div class="flex items-center gap-[16px]">
           <button type="button" class="flex items-center gap-[6px]" @click="bulkTagSelected">
@@ -1133,9 +1272,17 @@ watch(() => route.params.projectId, () => {
         />
         <div
           v-else
-          class="flex h-[120px] items-center justify-center text-[14px] leading-[20px] text-[#717182]"
+          class="flex h-[150px] flex-col items-center justify-center gap-[10px] text-[14px] leading-[20px] text-[#717182]"
         >
-          {{ isLoadingCases ? '加载中...' : '暂无用例' }}
+          <div>{{ isLoadingCases ? '加载中...' : hasActiveFilters ? '当前条件下暂无匹配用例' : '暂无用例' }}</div>
+          <button
+            v-if="!isLoadingCases && hasActiveFilters"
+            type="button"
+            class="h-[30px] rounded-[9px] border border-[#BEDBFF] bg-white px-[12px] text-[12px] font-medium leading-[16px] text-[#155DFC]"
+            @click="clearAllFilters"
+          >
+            清空筛选
+          </button>
         </div>
       </div>
 

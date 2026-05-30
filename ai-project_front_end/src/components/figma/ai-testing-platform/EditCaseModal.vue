@@ -154,11 +154,11 @@ function handleSave() {
     return
   }
   if (!cleanApiMethod) {
-    showToast('请输入调用方式', 'error')
+    showToast('请输入请求方法', 'error')
     return
   }
   if (!cleanApiUrl) {
-    showToast('请输入interfaceUrl', 'error')
+    showToast('请输入接口地址', 'error')
     return
   }
   if (!cleanExpectedResult) {
@@ -174,16 +174,16 @@ function handleSave() {
     try {
       const parsed = JSON.parse(rawApiParams) as unknown
       if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
-        showToast('接口参数需为合法JSON对象', 'error')
+        showToast('请求参数需为合法 JSON 对象', 'error')
         return
       }
       parsedApiParams = parsed as Record<string, unknown>
     } catch {
-      showToast('接口参数需为合法JSON对象', 'error')
+      showToast('请求参数需为合法 JSON 对象', 'error')
       return
     }
   } else if (!isGetMethod.value) {
-    showToast('请输入接口参数', 'error')
+    showToast('请输入请求参数', 'error')
     return
   }
   let parsedApiHeaders: Record<string, string> = {}
@@ -288,25 +288,25 @@ function handleSave() {
 
         <div class="flex flex-col gap-[6px]">
           <div class="text-[12px] font-medium leading-[16px] text-[#0A0A0A]">
-            调用方式 <span class="text-[#FB2C36]">*</span>
+            请求方法 <span class="text-[#FB2C36]">*</span>
           </div>
           <input
             v-model="apiMethod"
             class="h-[36px] w-full rounded-[10px] border border-black/10 bg-white px-[12px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
             type="text"
-            placeholder="请输入调用方式,例如：post、get"
+            placeholder="例如：POST、GET"
           />
         </div>
 
         <div class="flex flex-col gap-[6px]">
           <div class="text-[12px] font-medium leading-[16px] text-[#0A0A0A]">
-            interfaceUrl <span class="text-[#FB2C36]">*</span>
+            接口地址 <span class="text-[#FB2C36]">*</span>
           </div>
           <input
             v-model="apiUrl"
             class="h-[36px] w-full rounded-[10px] border border-black/10 bg-white px-[12px] text-[14px] leading-[20px] text-[#0A0A0A] outline-none"
             type="text"
-            placeholder="请输入接口url"
+            placeholder="例如：/api/auth/login"
           />
         </div>
 
@@ -324,7 +324,7 @@ function handleSave() {
 
         <div class="flex flex-col gap-[6px]">
           <div class="text-[12px] font-medium leading-[16px] text-[#0A0A0A]">
-            接口参数 <span v-if="!isGetMethod" class="text-[#FB2C36]">*</span>
+            请求参数 <span v-if="!isGetMethod" class="text-[#FB2C36]">*</span>
           </div>
           <textarea
             v-model="apiParamsInput"

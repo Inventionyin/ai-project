@@ -108,7 +108,7 @@ const rowHeight = '56.67px'
 <template>
   <div class="w-full overflow-x-auto">
     <div class="min-w-[1620px]">
-      <div class="grid grid-cols-[45px_140px_160px_minmax(160px,260px)_70px_70px_70px_220px_90px_260px_90px_80px_110px_150px] bg-[rgba(236,236,240,0.3)] border-x border-b border-black/10 divide-x divide-black/10">
+      <div class="sticky top-0 z-[1] grid grid-cols-[45px_140px_160px_minmax(160px,260px)_70px_70px_70px_220px_90px_260px_90px_80px_110px_170px] bg-[rgba(236,236,240,0.96)] border-x border-b border-black/10 divide-x divide-black/10 backdrop-blur">
         <div class="flex h-[56.33px] items-center justify-center">
           <input
             type="checkbox"
@@ -125,9 +125,9 @@ const rowHeight = '56.67px'
         <div class="flex h-[56.33px] items-center px-[12px] text-[12px] font-medium leading-[16px] text-[#717182] whitespace-nowrap">类型</div>
         <div class="flex h-[56.33px] items-center px-[12px] text-[12px] font-medium leading-[16px] text-[#717182] whitespace-nowrap">优先级</div>
         <div class="flex h-[56.33px] items-center px-[12px] text-[12px] font-medium leading-[16px] text-[#717182] whitespace-nowrap">状态</div>
-        <div class="flex h-[56.33px] items-center px-[12px] text-[12px] font-medium leading-[16px] text-[#717182] whitespace-nowrap">interfaceUrl</div>
-        <div class="flex h-[56.33px] items-center px-[12px] text-[12px] font-medium leading-[16px] text-[#717182] whitespace-nowrap">调用方式</div>
-        <div class="flex h-[56.33px] items-center px-[12px] text-[12px] font-medium leading-[16px] text-[#717182] whitespace-nowrap">接口参数</div>
+        <div class="flex h-[56.33px] items-center px-[12px] text-[12px] font-medium leading-[16px] text-[#717182] whitespace-nowrap">接口地址</div>
+        <div class="flex h-[56.33px] items-center px-[12px] text-[12px] font-medium leading-[16px] text-[#717182] whitespace-nowrap">方法</div>
+        <div class="flex h-[56.33px] items-center px-[12px] text-[12px] font-medium leading-[16px] text-[#717182] whitespace-nowrap">参数摘要</div>
         <div class="flex h-[56.33px] items-center px-[12px] text-[12px] font-medium leading-[16px] text-[#717182] whitespace-nowrap">维护人</div>
         <div class="flex h-[56.33px] items-center px-[12px] text-[12px] font-medium leading-[16px] text-[#717182] whitespace-nowrap">最近运行</div>
         <div class="flex h-[56.33px] items-center px-[12px] text-[12px] font-medium leading-[16px] text-[#717182] whitespace-nowrap">更新时间</div>
@@ -138,7 +138,7 @@ const rowHeight = '56.67px'
         <div
           v-for="(row, index) in rows"
           :key="row.id"
-          class="grid grid-cols-[45px_140px_160px_minmax(160px,260px)_70px_70px_70px_220px_90px_260px_90px_80px_110px_150px] border-x border-b border-black/10 divide-x divide-black/10 last:border-b-0"
+          class="grid grid-cols-[45px_140px_160px_minmax(160px,260px)_70px_70px_70px_220px_90px_260px_90px_80px_110px_170px] border-x border-b border-black/10 divide-x divide-black/10 last:border-b-0 hover:bg-[#F8FAFC]"
           :style="{ height: rowHeight }"
         >
           <div class="relative h-full">
@@ -238,7 +238,14 @@ const rowHeight = '56.67px'
           </div>
 
           <div class="flex h-full items-center justify-center">
-            <div class="flex items-center gap-[12px]">
+            <div class="flex items-center gap-[10px]">
+              <button
+                type="button"
+                class="text-[12px] font-medium leading-[16px] text-[#155DFC] hover:underline"
+                @click.stop="openCaseDetail(row.id)"
+              >
+                查看
+              </button>
               <button
                 type="button"
                 class="text-[12px] font-medium leading-[16px] text-[#155DFC] hover:underline"

@@ -45,7 +45,7 @@ test.describe('资产中心操作闭环入口', () => {
             data: {
               page: 1,
               pageSize: 20,
-              total: 1,
+              total: 2,
               items: [
                 {
                   id: 'tc-1',
@@ -62,6 +62,23 @@ test.describe('资产中心操作闭环入口', () => {
                   apiMethod: 'POST',
                   apiUrl: '/api/login',
                   expectedResult: '返回 token',
+                  ownerId: 'u1',
+                },
+                {
+                  id: 'tc-2',
+                  testCaseId: 'TC-002',
+                  title: '支付失败提示',
+                  version: 'v1',
+                  type: 'API',
+                  priority: 'P1',
+                  status: 'DRAFT',
+                  lastRun: 'FAILED',
+                  updatedAt: 1710000300,
+                  tags: ['支付'],
+                  feature: '支付模块',
+                  apiMethod: 'POST',
+                  apiUrl: '/api/pay',
+                  expectedResult: '返回错误码',
                   ownerId: 'u1',
                 },
               ],
@@ -171,12 +188,33 @@ test.describe('资产中心操作闭环入口', () => {
     await page.goto('/projects/1/assets/testcases', { waitUntil: 'domcontentloaded' })
 
     await expect(page.getByText('登录成功')).toBeVisible()
-    await expect(page.getByRole('button', { name: '导出CSV' })).toBeVisible()
+    await expect(page.getByRole('button', { name: '导出当前视图' })).toBeVisible()
 
     const downloadPromise = page.waitForEvent('download')
-    await page.getByRole('button', { name: '导出CSV' }).click()
+    await page.getByRole('button', { name: '导出当前视图' }).click()
     const download = await downloadPromise
     expect(download.suggestedFilename()).toMatch(/testcases.*\.csv$/)
+  })
+
+  test('用例管理展示数据总览并支持快速视图筛选', async ({ page }) => {
+    await page.goto('/projects/1/assets/testcases', { waitUntil: 'domcontentloaded' })
+
+    await expect(page.getByText('当前视图', { exact: true })).toBeVisible()
+    await expect(page.getByText('P0 高优先级')).toBeVisible()
+    await expect(page.getByText('失败待复核')).toBeVisible()
+    await expect(page.getByText('评审完成率')).toBeVisible()
+
+    await expect(page.getByText('登录成功')).toBeVisible()
+    await expect(page.getByText('支付失败提示')).toBeVisible()
+
+    await page.getByRole('button', { name: '最近失败' }).click()
+    await expect(page.getByText('当前条件')).toBeVisible()
+    await expect(page.getByText('支付失败提示')).toBeVisible()
+    await expect(page.getByText('登录成功')).toBeHidden()
+
+    await page.getByRole('button', { name: '清空筛选' }).click()
+    await expect(page.getByText('登录成功')).toBeVisible()
+    await expect(page.getByText('支付失败提示')).toBeVisible()
   })
 
   test('用例管理表单校验使用页面提示而不是原生弹窗', async ({ page }) => {
@@ -193,7 +231,7 @@ test.describe('资产中心操作闭环入口', () => {
     await expect(page.getByText('请输入功能模块')).toBeVisible()
 
     await page.getByRole('button', { name: '取消' }).click()
-    await page.getByRole('button', { name: '上传用例' }).click()
+    await page.getByRole('button', { name: '导入文件' }).click()
     await page.getByRole('button', { name: '确定' }).click()
     await expect(page.getByText('请选择 CSV/XLSX 文件')).toBeVisible()
 
