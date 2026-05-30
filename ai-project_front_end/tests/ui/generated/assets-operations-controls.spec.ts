@@ -179,8 +179,33 @@ test.describe('资产中心操作闭环入口', () => {
     expect(download.suggestedFilename()).toMatch(/testcases.*\.csv$/)
   })
 
+  test('用例管理表单校验使用页面提示而不是原生弹窗', async ({ page }) => {
+    const dialogs: string[] = []
+    page.on('dialog', (dialog) => {
+      dialogs.push(dialog.message())
+      void dialog.dismiss()
+    })
+
+    await page.goto('/projects/1/assets/testcases', { waitUntil: 'domcontentloaded' })
+
+    await page.getByRole('button', { name: '新建用例' }).click()
+    await page.getByRole('button', { name: '保存' }).click()
+    await expect(page.getByText('请输入功能模块')).toBeVisible()
+
+    await page.getByRole('button', { name: '取消' }).click()
+    await page.getByRole('button', { name: '上传用例' }).click()
+    await page.getByRole('button', { name: '确定' }).click()
+    await expect(page.getByText('请选择 CSV/XLSX 文件')).toBeVisible()
+
+    expect(dialogs).toHaveLength(0)
+  })
+
   test('需求列表支持行级编辑和删除入口', async ({ page }) => {
-    page.on('dialog', (dialog) => dialog.accept())
+    const dialogs: string[] = []
+    page.on('dialog', (dialog) => {
+      dialogs.push(dialog.message())
+      void dialog.dismiss()
+    })
 
     await page.goto('/projects/1/requirements/docs', { waitUntil: 'domcontentloaded' })
 
@@ -192,7 +217,10 @@ test.describe('资产中心操作闭环入口', () => {
     await expect(page.getByText('更新成功：登录需求-已编辑')).toBeVisible()
 
     await page.getByRole('button', { name: '删除 登录需求' }).click()
+    await expect(page.getByText('确定删除需求文档？')).toBeVisible()
+    await page.getByRole('button', { name: '确认' }).click()
     await expect(page.getByText('删除成功：登录需求')).toBeVisible()
+    expect(dialogs).toHaveLength(0)
   })
 
   test('接口集合导入入口提供调试闭环引导', async ({ page }) => {

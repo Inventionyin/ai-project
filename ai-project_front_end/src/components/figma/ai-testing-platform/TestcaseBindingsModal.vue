@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import modalClose from '@/assets/figma/ai-testing-platform/modal-close.svg'
 import { createTestcaseBinding, deleteTestcaseBinding, fetchApiTargets, fetchTestcaseBindings, updateTestcaseBinding, type ApiTarget, type TestcaseBinding } from '@/lib/aiTestingPlatformApi'
+import { confirmAction } from '@/lib/ui/confirm'
 
 const props = defineProps<{
   isOpen: boolean
@@ -148,7 +149,7 @@ async function removeBinding(item: EditableBinding, index: number) {
     removeLocal(index)
     return
   }
-  if (!window.confirm(`确认删除绑定「${item.name}」吗？`)) return
+  if (!await confirmAction(`确认删除绑定「${item.name}」吗？`)) return
   item._isDeleting = true
   try {
     await deleteTestcaseBinding(item.id)

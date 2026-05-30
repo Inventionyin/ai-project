@@ -10,6 +10,7 @@ import {
   type RequirementDocStatus,
   type RequirementSourceType
 } from '@/lib/api/requirements'
+import { confirmAction } from '@/lib/ui/confirm'
 
 const route = useRoute()
 const router = useRouter()
@@ -171,7 +172,7 @@ async function saveInlineEdit(doc: RequirementDoc) {
 
 async function removeDoc(doc: RequirementDoc) {
   if (!projectId.value) return
-  if (!window.confirm(`确定删除需求文档？\n\n${doc.title}`)) return
+  if (!await confirmAction(`确定删除需求文档？\n\n${doc.title}`)) return
   error.value = ''
   success.value = ''
   try {

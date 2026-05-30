@@ -22,6 +22,7 @@ import {
   fetchRequirementChangeSets,
   type RequirementChangeSetDetail
 } from '@/lib/api/requirementChanges'
+import { confirmAction } from '@/lib/ui/confirm'
 
 const route = useRoute()
 const router = useRouter()
@@ -166,7 +167,7 @@ async function saveMeta() {
 
 async function removeDoc() {
   if (!projectId.value || !docId.value) return
-  if (!window.confirm('确认删除该文档吗？')) return
+  if (!await confirmAction('确认删除该文档吗？')) return
   deleting.value = true
   error.value = ''
   try {

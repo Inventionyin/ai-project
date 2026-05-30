@@ -16,6 +16,7 @@ import AiGenerateCaseModal from '@/components/figma/ai-testing-platform/AiGenera
 import UploadCasesModal from '@/components/figma/ai-testing-platform/UploadCasesModal.vue'
 import BatchRunDrawer from '@/components/figma/ai-testing-platform/BatchRunDrawer.vue'
 import { buildRunPayloadDirect, fetchProjectEnvironments, fetchRunCaseRuns, runFromTestcasesHttp, type BatchRunDirectFormItem, type BatchRunDirectFormState } from '@/lib/aiTestingPlatformApi'
+import { confirmAction } from '@/lib/ui/confirm'
 
 const route = useRoute()
 const isCreateCaseOpen = ref(false)
@@ -439,7 +440,7 @@ const loadCases = async () => {
 
 const loadCaseDetail = async (id: string) => {
   const authorization = resolveAuthHeader()
-  const detailResponse = await fetch(`${resolveApiBaseUrl()}/api/testcases/${id}`, {
+  const detailResponse = await fetch(`${resolveApiBaseUrl()}/api/testcases/${encodeURIComponent(id)}`, {
     method: 'GET',
     headers: {
       Authorization: authorization
@@ -690,7 +691,7 @@ async function saveCreateCase(payload: CreateCasePayload) {
     await loadCases()
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : '新增用例失败，请稍后重试'
-    window.alert(errorMessage)
+    showToast(errorMessage, 'error')
   }
 }
 
@@ -705,7 +706,7 @@ async function openEditCase(index: number) {
     isEditCaseOpen.value = true
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : '获取用例详情失败，请稍后重试'
-    window.alert(errorMessage)
+    showToast(errorMessage, 'error')
     editingCaseId.value = null
     editingCaseDetail.value = null
   }
@@ -720,10 +721,10 @@ function closeEditCase() {
 async function deleteCase(index: number) {
   const target = displayRows.value[index]
   if (!target) return
-  if (!window.confirm(`该用例存在执行记录，是否确定删除？\n\n用例名称：${target.title}`)) return
+  if (!await confirmAction(`该用例存在执行记录，是否确定删除？\n\n用例名称：${target.title}`)) return
   try {
     const authorization = resolveAuthHeader()
-    const response = await fetch(`${resolveApiBaseUrl()}/api/testcases/${target.id}`, {
+    const response = await fetch(`${resolveApiBaseUrl()}/api/testcases/${encodeURIComponent(target.id)}`, {
       method: 'DELETE',
       headers: {
         Authorization: authorization
@@ -742,7 +743,7 @@ async function deleteCase(index: number) {
     await loadCases()
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : '删除用例失败，请稍后重试'
-    window.alert(errorMessage)
+    showToast(errorMessage, 'error')
   }
 }
 
@@ -755,33 +756,33 @@ async function saveEditCase(payload: EditCasePayload) {
   const expectedResult = payload.expectedResult.trim()
   const contentMd = payload.contentMd.trim()
   if (!title) {
-    window.alert('请输入用例标题')
+    showToast('请输入用例标题', 'error')
     return
   }
   if (!feature) {
-    window.alert('请输入功能模块')
+    showToast('请输入功能模块', 'error')
     return
   }
   if (!apiMethod) {
-    window.alert('请输入调用方式')
+    showToast('请输入调用方式', 'error')
     return
   }
   if (!apiUrl) {
-    window.alert('请输入interfaceUrl')
+    showToast('请输入interfaceUrl', 'error')
     return
   }
   if (!expectedResult) {
-    window.alert('请输入预期结果')
+    showToast('请输入预期结果', 'error')
     return
   }
   if (!contentMd) {
-    window.alert('请输入用例内容')
+    showToast('请输入用例内容', 'error')
     return
   }
   try {
     const authorization = resolveAuthHeader()
     const ownerId = payload.ownerId.trim()
-    const response = await fetch(`${resolveApiBaseUrl()}/api/testcases/${editingCaseId.value}`, {
+    const response = await fetch(`${resolveApiBaseUrl()}/api/testcases/${encodeURIComponent(editingCaseId.value)}`, {
       method: 'PUT',
       headers: {
         Authorization: authorization,
@@ -816,7 +817,7 @@ async function saveEditCase(payload: EditCasePayload) {
     await loadCases()
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : '编辑用例失败，请稍后重试'
-    window.alert(errorMessage)
+    showToast(errorMessage, 'error')
   }
 }
 const editingInitialData = computed(() => {

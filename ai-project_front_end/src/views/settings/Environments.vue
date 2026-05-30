@@ -10,6 +10,7 @@ import {
   type EnvironmentUpsertPayload,
   type HealthCheckConfig
 } from '@/lib/api/environments'
+import { confirmAction } from '@/lib/ui/confirm'
 
 const route = useRoute()
 const projectId = computed(() => String(route.params.projectId || '').trim())
@@ -154,7 +155,7 @@ async function submit() {
 }
 
 async function removeEnv(env: EnvironmentPublic) {
-  const ok = window.confirm(`确认删除环境「${env.name}」吗？`)
+  const ok = await confirmAction(`确认删除环境「${env.name}」吗？`)
   if (!ok) return
   saveError.value = ''
   successMessage.value = ''

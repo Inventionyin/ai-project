@@ -24,6 +24,10 @@ const fileLabel = computed(() => {
   return `${file.value.name}（${kb} KB）`
 })
 
+function showToast(message: string, type: 'success' | 'error' = 'success') {
+  window.dispatchEvent(new CustomEvent('app-toast', { detail: { message, type } }))
+}
+
 function reset() {
   file.value = null
   isUploading.value = false
@@ -46,7 +50,7 @@ function onFileChange(e: Event) {
   }
   const name = String(f.name || '').toLowerCase()
   if (!name.endsWith('.csv') && !name.endsWith('.xlsx')) {
-    window.alert('仅支持 CSV/XLSX 文件')
+    showToast('仅支持 CSV/XLSX 文件', 'error')
     input.value = ''
     file.value = null
     return
@@ -56,7 +60,7 @@ function onFileChange(e: Event) {
 
 async function handleImport() {
   if (!file.value) {
-    window.alert('请选择 CSV/XLSX 文件')
+    showToast('请选择 CSV/XLSX 文件', 'error')
     return
   }
   isUploading.value = true
@@ -69,7 +73,7 @@ async function handleImport() {
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : '上传失败'
-    window.alert(msg)
+    showToast(msg, 'error')
   } finally {
     isUploading.value = false
   }

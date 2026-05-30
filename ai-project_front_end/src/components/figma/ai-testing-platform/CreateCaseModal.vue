@@ -68,6 +68,10 @@ const expectedStatusCodeInput = ref('')
 const preconditions = ref('')
 const postconditions = ref('')
 
+function showToast(message: string, type: 'success' | 'error' = 'success') {
+  window.dispatchEvent(new CustomEvent('app-toast', { detail: { message, type } }))
+}
+
 function resetForm() {
   title.value = ''
   type.value = 'API'
@@ -103,7 +107,7 @@ function handleSave() {
   if (rawExpectedStatusCode) {
     const parsed = Number.parseInt(rawExpectedStatusCode, 10)
     if (!Number.isFinite(parsed) || parsed < 100 || parsed > 599) {
-      window.alert('期望状态码需为 100-599 的整数')
+      showToast('期望状态码需为 100-599 的整数', 'error')
       return
     }
     expectedStatusCode = parsed
@@ -111,23 +115,23 @@ function handleSave() {
   const cleanPreconditions = preconditions.value.trim()
   const cleanPostconditions = postconditions.value.trim()
   if (!cleanFeature) {
-    window.alert('请输入功能模块')
+    showToast('请输入功能模块', 'error')
     return
   }
   if (!cleanTitle) {
-    window.alert('请输入用例标题')
+    showToast('请输入用例标题', 'error')
     return
   }
   if (!cleanApiMethod) {
-    window.alert('请输入调用方式')
+    showToast('请输入调用方式', 'error')
     return
   }
   if (!cleanApiUrl) {
-    window.alert('请输入interfaceUrl')
+    showToast('请输入interfaceUrl', 'error')
     return
   }
   if (!cleanExpectedResult) {
-    window.alert('请输入预期结果')
+    showToast('请输入预期结果', 'error')
     return
   }
   let parsedApiParams: Record<string, unknown> = {}
@@ -135,12 +139,12 @@ function handleSave() {
     try {
       const parsed = JSON.parse(rawApiParams) as unknown
       if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
-        window.alert('接口参数需为合法JSON对象')
+        showToast('接口参数需为合法JSON对象', 'error')
         return
       }
       parsedApiParams = parsed as Record<string, unknown>
     } catch {
-      window.alert('接口参数需为合法JSON对象')
+      showToast('接口参数需为合法JSON对象', 'error')
       return
     }
   }
@@ -149,25 +153,25 @@ function handleSave() {
     try {
       const parsed = JSON.parse(rawApiHeaders) as unknown
       if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
-        window.alert('Header 需为合法JSON对象')
+        showToast('Header 需为合法JSON对象', 'error')
         return
       }
       const nextHeaders: Record<string, string> = {}
       for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
         const headerKey = String(key || '').trim()
         if (!headerKey) {
-          window.alert('Header 键不能为空')
+          showToast('Header 键不能为空', 'error')
           return
         }
         if (typeof value !== 'string') {
-          window.alert('Header 值必须为字符串')
+          showToast('Header 值必须为字符串', 'error')
           return
         }
         nextHeaders[headerKey] = value
       }
       parsedApiHeaders = nextHeaders
     } catch {
-      window.alert('Header 需为合法JSON对象')
+      showToast('Header 需为合法JSON对象', 'error')
       return
     }
   }

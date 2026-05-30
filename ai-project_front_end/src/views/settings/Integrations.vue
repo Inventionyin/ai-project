@@ -30,6 +30,7 @@ import {
   type StrategyCenterRuleItem,
   type StrategySimulationResult
 } from '@/lib/api/integrations'
+import { confirmAction } from '@/lib/ui/confirm'
 
 const route = useRoute()
 const projectId = computed(() => String(route.params.projectId || '').trim())
@@ -1754,7 +1755,7 @@ async function loadDeliveries() {
 }
 
 async function retryDelivery(row: NotificationDelivery) {
-  const ok = window.confirm(`确认重试投递 ${row.id} 吗？`)
+  const ok = await confirmAction(`确认重试投递 ${row.id} 吗？`, { danger: false })
   if (!ok) return
   deliveryErrorMessage.value = ''
   deliverySuccessMessage.value = ''
@@ -1843,7 +1844,7 @@ async function submitRollback(row: PromptTemplateGovernanceItem) {
     governanceSuccessMessage.value = ''
     return
   }
-  const ok = window.confirm(`确认将 ${row.scene} / ${row.name} 回滚到版本 ${targetVersion} 吗？`)
+  const ok = await confirmAction(`确认将 ${row.scene} / ${row.name} 回滚到版本 ${targetVersion} 吗？`)
   if (!ok) return
   governanceErrorMessage.value = ''
   governanceSuccessMessage.value = ''
@@ -1864,7 +1865,7 @@ async function submitRollback(row: PromptTemplateGovernanceItem) {
 }
 
 async function removeRule(rule: NotificationRule) {
-  const ok = window.confirm(`确认删除规则「${rule.channel} -> ${rule.target}」吗？`)
+  const ok = await confirmAction(`确认删除规则「${rule.channel} -> ${rule.target}」吗？`)
   if (!ok) return
   saveError.value = ''
   successMessage.value = ''

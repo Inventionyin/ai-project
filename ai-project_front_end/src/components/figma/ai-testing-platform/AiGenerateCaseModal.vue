@@ -130,7 +130,7 @@ function onSelectFile(e: Event) {
     input.value = ''
     selectedFileName.value = ''
     selectedFileRef.value = null
-    window.alert(`文件格式不支持，请上传 ${selectedSourceSubText.value} 文件`)
+    showToast(`文件格式不支持，请上传 ${selectedSourceSubText.value} 文件`, 'error')
     return
   }
   selectedFileName.value = file.name
@@ -218,20 +218,20 @@ function _applyDedup(items: PreviewCase[], strategy: DedupStrategy) {
 
 async function handleStart() {
   if (formData.source === 'figma' && !formData.figmaUrl.trim()) {
-    window.alert('请输入 Figma 链接')
+    showToast('请输入 Figma 链接', 'error')
     return
   }
   if (formData.source !== 'figma' && !selectedFileName.value) {
-    window.alert(`请上传 ${selectedSourceSubText.value} 文件`)
+    showToast(`请上传 ${selectedSourceSubText.value} 文件`, 'error')
     return
   }
   if (formData.source === 'figma') {
-    window.alert('暂不支持 Figma 源，请先使用文档文件')
+    showToast('暂不支持 Figma 源，请先使用文档文件', 'error')
     return
   }
   const file = selectedFileRef.value
   if (!file) {
-    window.alert('请选择文件')
+    showToast('请选择文件', 'error')
     return
   }
 

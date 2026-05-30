@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { deleteRunAllureReport, fetchProjectAllureReports, type RunAllureReportListItem } from '@/lib/aiTestingPlatformApi'
+import { confirmAction } from '@/lib/ui/confirm'
 
 const route = useRoute()
 const router = useRouter()
@@ -93,7 +94,7 @@ async function loadReports() {
 async function deleteReport(targetRunId: string) {
   const id = String(targetRunId || '').trim()
   if (!id) return
-  const confirmed = window.confirm('确定删除该报告吗？删除后不可恢复。')
+  const confirmed = await confirmAction('确定删除该报告吗？删除后不可恢复。')
   if (!confirmed) return
   deletingRunId.value = id
   try {
