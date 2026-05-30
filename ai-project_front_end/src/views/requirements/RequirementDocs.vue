@@ -24,6 +24,7 @@ const success = ref('')
 
 const q = ref('')
 const statusFilter = ref('')
+const totalDocs = ref(0)
 const docs = ref<RequirementDoc[]>([])
 const editingDocId = ref('')
 const editingDocForm = ref({
@@ -47,6 +48,57 @@ const statusOptions: Array<{ label: string; value: RequirementDocStatus }> = [
   { label: '已发布', value: 'PUBLISHED' },
   { label: '已归档', value: 'ARCHIVED' }
 ]
+
+const quickStatusOptions: Array<{ label: string; value: '' | RequirementDocStatus }> = [
+  { label: '全部', value: '' },
+  { label: '只看草稿', value: 'DRAFT' },
+  { label: '只看评审中', value: 'REVIEWING' },
+  { label: '只看已发布', value: 'PUBLISHED' }
+]
+
+const statusCounts = computed(() => {
+  return docs.value.reduce<Record<RequirementDocStatus, number>>((acc, doc) => {
+    acc[doc.status] = (acc[doc.status] || 0) + 1
+    return acc
+  }, {
+    DRAFT: 0,
+    REVIEWING: 0,
+    PUBLISHED: 0,
+    ARCHIVED: 0
+  })
+})
+
+const insightCards = computed(() => [
+  {
+    label: '当前列表',
+    value: totalDocs.value || docs.value.length,
+    hint: '符合当前筛选的需求文档'
+  },
+  {
+    label: '草稿',
+    value: statusCounts.value.DRAFT,
+    hint: '待补充或待提交评审'
+  },
+  {
+    label: '评审中',
+    value: statusCounts.value.REVIEWING,
+    hint: '需要业务或测试确认'
+  },
+  {
+    label: '已发布',
+    value: statusCounts.value.PUBLISHED,
+    hint: '可进入分析和用例转化'
+  }
+])
+
+const activeFilterLabels = computed(() => {
+  const labels: string[] = []
+  if (statusFilter.value) labels.push(statusText(statusFilter.value as RequirementDocStatus))
+  if (q.value.trim()) labels.push(`关键词：${q.value.trim()}`)
+  return labels
+})
+
+const hasActiveFilters = computed(() => activeFilterLabels.value.length > 0)
 
 function sourceTypeText(value: RequirementSourceType) {
   if (value === 'PRD') return 'PRD'
@@ -78,12 +130,31 @@ async function loadDocs() {
       q: q.value.trim() || undefined
     })
     docs.value = data.items
+    totalDocs.value = data.total
   } catch (e) {
     error.value = e instanceof Error ? e.message : '加载文档失败'
     docs.value = []
+    totalDocs.value = 0
   } finally {
     loading.value = false
   }
+}
+
+function quickStatusClass(value: '' | RequirementDocStatus) {
+  return statusFilter.value === value
+    ? 'border-[#155DFC] bg-[#EFF6FF] text-[#1447E6]'
+    : 'border-black/10 bg-white text-[#4A5565] hover:bg-[#F8FAFC]'
+}
+
+function applyQuickStatus(value: '' | RequirementDocStatus) {
+  statusFilter.value = value
+  void loadDocs()
+}
+
+function clearFilters() {
+  q.value = ''
+  statusFilter.value = ''
+  void loadDocs()
 }
 
 function resetCreateForm() {
@@ -197,10 +268,24 @@ watch(
   <div class="min-h-[calc(100vh-48px)] w-full bg-[rgba(236,236,240,0.3)] p-4 md:p-6">
     <div class="rounded-[12px] border border-black/10 bg-white">
       <div class="flex flex-wrap items-center justify-between gap-2 border-b border-black/10 px-4 py-3">
-        <div class="text-[14px] font-semibold leading-[20px] text-[#0A0A0A]">需求文档中心</div>
+        <div>
+          <div class="text-[14px] font-semibold leading-[20px] text-[#0A0A0A]">需求文档中心</div>
+          <div class="mt-1 text-[12px] text-[#717182]">统一管理 PRD、规格说明和原型需求，后续可进入 AI 分析与用例转化。</div>
+        </div>
         <button class="h-8 rounded-[8px] bg-[#155DFC] px-3 text-[12px] text-white" @click="createOpen = !createOpen">
           {{ createOpen ? '收起创建' : '新建文档' }}
         </button>
+      </div>
+
+      <div class="border-b border-black/10 p-4">
+        <div class="mb-3 text-[12px] font-semibold text-[#717182]">需求资产总览</div>
+        <div class="grid grid-cols-1 gap-3 md:grid-cols-4">
+          <div v-for="card in insightCards" :key="card.label" class="rounded-[8px] border border-black/10 bg-[#FAFAFA] px-3 py-2">
+            <div class="text-[12px] text-[#717182]">{{ card.label }}</div>
+            <div class="mt-1 text-[20px] font-semibold leading-[28px] text-[#0A0A0A]">{{ card.value }}</div>
+            <div class="mt-1 truncate text-[11px] text-[#717182]">{{ card.hint }}</div>
+          </div>
+        </div>
       </div>
 
       <div class="grid grid-cols-1 gap-3 border-b border-black/10 p-4 md:grid-cols-[minmax(0,1fr)_180px_auto]">
@@ -215,6 +300,24 @@ watch(
           <option v-for="item in statusOptions" :key="item.value" :value="item.value">{{ item.label }}</option>
         </select>
         <button class="h-9 rounded-[8px] border border-black/10 px-3 text-[13px]" @click="loadDocs">查询</button>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-2 border-b border-black/10 px-4 py-3">
+        <button
+          v-for="item in quickStatusOptions"
+          :key="item.label"
+          type="button"
+          class="h-8 rounded-[8px] border px-3 text-[12px] font-medium"
+          :class="quickStatusClass(item.value)"
+          @click="applyQuickStatus(item.value)"
+        >
+          {{ item.label }}
+        </button>
+        <div v-if="hasActiveFilters" class="ml-auto flex flex-wrap items-center gap-2">
+          <span class="text-[12px] text-[#717182]">当前条件</span>
+          <span v-for="label in activeFilterLabels" :key="label" class="rounded-full bg-[#F3F4F6] px-2 py-1 text-[12px] text-[#4A5565]">{{ label }}</span>
+          <button type="button" class="h-8 rounded-[8px] border border-black/10 px-3 text-[12px] text-[#155DFC]" @click="clearFilters">清空筛选</button>
+        </div>
       </div>
 
       <div v-if="createOpen" class="border-b border-black/10 bg-[#FAFAFA] p-4">
@@ -240,7 +343,18 @@ watch(
 
       <div v-if="loading" class="px-4 py-5 text-[13px] text-[#717182]">加载中...</div>
       <div v-else-if="error" class="px-4 py-5 text-[13px] text-[#B91C1C]">{{ error }}</div>
-      <div v-else-if="docs.length === 0" class="px-4 py-8 text-center text-[13px] text-[#717182]">暂无文档，先创建第一份需求文档。</div>
+      <div v-else-if="docs.length === 0" class="px-4 py-10 text-center">
+        <div class="text-[14px] font-medium text-[#0A0A0A]">{{ hasActiveFilters ? '当前筛选下暂无需求文档' : '暂无需求文档' }}</div>
+        <div class="mt-1 text-[13px] text-[#717182]">{{ hasActiveFilters ? '可以清空筛选后重新查看全部需求。' : '先创建第一份需求文档，再进入分析和用例转化。' }}</div>
+        <button
+          v-if="hasActiveFilters"
+          type="button"
+          class="mt-3 h-8 rounded-[8px] border border-black/10 px-3 text-[12px] text-[#155DFC]"
+          @click="clearFilters"
+        >
+          清空筛选
+        </button>
+      </div>
       <div v-else class="overflow-x-auto">
         <table class="w-full min-w-[860px] border-collapse">
           <thead>
@@ -307,6 +421,7 @@ watch(
                     <button class="h-8 rounded-[8px] border border-black/10 px-3 text-[12px] text-[#717182]" @click.stop="closeInlineEdit">取消</button>
                   </template>
                   <template v-else>
+                    <button class="h-8 rounded-[8px] border border-black/10 px-3 text-[12px] text-[#4A5565]" :aria-label="`查看 ${doc.title}`" @click.stop="openDetail(doc)">查看</button>
                     <button class="h-8 rounded-[8px] border border-black/10 px-3 text-[12px] text-[#155DFC]" :aria-label="`编辑 ${doc.title}`" @click.stop="openInlineEdit(doc)">编辑</button>
                     <button class="h-8 rounded-[8px] border border-red-200 px-3 text-[12px] text-red-700" :aria-label="`删除 ${doc.title}`" @click.stop="removeDoc(doc)">删除</button>
                   </template>

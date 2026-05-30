@@ -87,8 +87,54 @@ test.describe('资产中心操作闭环入口', () => {
         })
       }
 
+      if (url.pathname === '/api/projects/1/environments') {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ code: 0, data: [{ id: 'env-1', name: '测试环境', baseUrl: 'https://api.example.test' }] }),
+        })
+      }
+
+      if (url.pathname === '/api/suites') {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ code: 0, data: { page: 1, pageSize: 200, total: 0, items: [] } }),
+        })
+      }
+
       if (url.pathname === '/api/projects/1/requirements/docs') {
         if (req.method() === 'GET') {
+          const status = url.searchParams.get('status') || ''
+          const rows = [
+            {
+              id: 'doc-1',
+              projectId: '1',
+              title: '登录需求',
+              status: 'DRAFT',
+              sourceType: 'PRD',
+              tags: ['登录'],
+              updatedAt: '2026-05-25 10:00',
+            },
+            {
+              id: 'doc-2',
+              projectId: '1',
+              title: '支付评审需求',
+              status: 'REVIEWING',
+              sourceType: 'SPEC',
+              tags: ['支付'],
+              updatedAt: '2026-05-25 11:00',
+            },
+            {
+              id: 'doc-3',
+              projectId: '1',
+              title: '订单发布需求',
+              status: 'PUBLISHED',
+              sourceType: 'PROTOTYPE',
+              tags: ['订单'],
+              updatedAt: '2026-05-25 12:00',
+            },
+          ].filter((item) => !status || item.status === status)
           return route.fulfill({
             status: 200,
             contentType: 'application/json',
@@ -97,18 +143,8 @@ test.describe('资产中心操作闭环入口', () => {
               data: {
                 page: 1,
                 pageSize: 50,
-                total: 1,
-                items: [
-                  {
-                    id: 'doc-1',
-                    projectId: '1',
-                    title: '登录需求',
-                    status: 'DRAFT',
-                    sourceType: 'PRD',
-                    tags: ['登录'],
-                    updatedAt: '2026-05-25 10:00',
-                  },
-                ],
+                total: rows.length,
+                items: rows,
               },
             }),
           })
@@ -170,13 +206,24 @@ test.describe('资产中心操作闭环入口', () => {
                   collectionId: 'col-1',
                   name: '认证',
                   order: 1,
-                  requests: [{ id: 'req-1', collectionId: 'col-1', groupId: 'grp-1', name: '登录', method: 'POST', url: '/api/login' }],
+                  requests: [
+                    { id: 'req-1', collectionId: 'col-1', groupId: 'grp-1', name: '登录', method: 'POST', url: '/api/login' },
+                    { id: 'req-2', collectionId: 'col-1', groupId: 'grp-1', name: '登录状态', method: 'GET', url: '/api/session' },
+                  ],
                 },
               ],
               requests: [],
               updatedAt: 1710000000,
             },
           }),
+        })
+      }
+
+      if (url.pathname === '/api/projects/1/collections/col-1/bindings') {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ code: 0, data: [] }),
         })
       }
 
@@ -261,13 +308,52 @@ test.describe('资产中心操作闭环入口', () => {
     expect(dialogs).toHaveLength(0)
   })
 
+  test('需求中心展示总览并支持快捷筛选', async ({ page }) => {
+    await page.goto('/projects/1/requirements/docs', { waitUntil: 'domcontentloaded' })
+
+    await expect(page.getByText('需求资产总览')).toBeVisible()
+    await expect(page.getByText('当前列表')).toBeVisible()
+    await expect(page.getByText('评审中', { exact: true }).first()).toBeVisible()
+    await expect(page.getByText('已发布', { exact: true }).first()).toBeVisible()
+
+    await expect(page.getByText('登录需求')).toBeVisible()
+    await expect(page.getByText('支付评审需求')).toBeVisible()
+
+    await page.getByRole('button', { name: '只看评审中' }).click()
+    await expect(page.getByText('当前条件')).toBeVisible()
+    await expect(page.getByText('评审中', { exact: true }).first()).toBeVisible()
+    await expect(page.getByText('支付评审需求')).toBeVisible()
+    await expect(page.getByText('登录需求')).toBeHidden()
+
+    await page.getByRole('button', { name: '清空筛选' }).click()
+    await expect(page.getByText('登录需求')).toBeVisible()
+  })
+
   test('接口集合导入入口提供调试闭环引导', async ({ page }) => {
     await page.goto('/projects/1/assets/apis', { waitUntil: 'domcontentloaded' })
 
-    await expect(page.getByText('登录接口集合')).toBeVisible()
+    await expect(page.getByText('登录接口集合').first()).toBeVisible()
     await page.getByRole('button', { name: '导入接口集合' }).click()
     await expect(page.getByText('Postman / Swagger / OpenAPI')).toBeVisible()
     await expect(page.getByText('导入后进入集合详情页进行单请求运行、保存、导出和绑定用例')).toBeVisible()
     await expect(page.getByRole('button', { name: '去当前集合调试' })).toBeVisible()
+  })
+
+  test('接口管理展示总览并支持接口搜索与调试入口', async ({ page }) => {
+    await page.goto('/projects/1/assets/apis', { waitUntil: 'domcontentloaded' })
+
+    await expect(page.getByText('接口资产总览')).toBeVisible()
+    await expect(page.getByText('集合数')).toBeVisible()
+    await expect(page.getByText('请求数')).toBeVisible()
+    await expect(page.getByText('当前集合', { exact: true })).toBeVisible()
+
+    await page.getByPlaceholder('搜索集合 / 文件夹 / 接口').fill('状态')
+    await expect(page.getByText('登录状态')).toBeVisible()
+    await expect(page.getByText('登录', { exact: true })).toBeHidden()
+
+    await page.getByRole('button', { name: '清空搜索' }).click()
+    await expect(page.getByText('登录', { exact: true })).toBeVisible()
+    await page.getByRole('button', { name: '调试当前集合' }).click()
+    await expect(page).toHaveURL(/\/projects\/1\/assets\/apis\/col-1/)
   })
 })

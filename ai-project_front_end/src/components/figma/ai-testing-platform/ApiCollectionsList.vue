@@ -69,6 +69,7 @@ const postmanCloudSelectedUid = ref('')
 const postmanCloudLoading = ref(false)
 const postmanCloudSyncing = ref(false)
 const postmanCloudMessage = ref('')
+const apiQuery = ref('')
 
 const contextMenu = ref<{
   isOpen: boolean
@@ -87,6 +88,34 @@ const isCreateFolderOpen = ref(false)
 const isCreateRequestOpen = ref(false)
 const modalCollectionId = ref<string | null>(null)
 const projectId = computed(() => String(route.params.projectId || '').trim())
+const normalizedApiQuery = computed(() => apiQuery.value.trim().toLowerCase())
+const totalCollectionCount = computed(() => collections.value.length)
+const totalRequestCount = computed(() => collections.value.reduce((sum, collection) => sum + collectionCount(collection), 0))
+const activeCollection = computed(() => findCollection(activeCollectionId.value))
+const activeCollectionName = computed(() => activeCollection.value?.name || collections.value[0]?.name || '未选择')
+const activeRequestCount = computed(() => activeCollection.value ? collectionCount(activeCollection.value) : 0)
+const hasApiQuery = computed(() => normalizedApiQuery.value.length > 0)
+const displayCollections = computed(() => {
+  const keyword = normalizedApiQuery.value
+  if (!keyword) return collections.value
+  return collections.value
+    .map((collection) => {
+      const collectionMatched = collection.name.toLowerCase().includes(keyword)
+      const folders = collection.folders
+        .map((folder) => {
+          const folderMatched = folder.name.toLowerCase().includes(keyword)
+          const endpoints = collectionMatched || folderMatched
+            ? folder.endpoints
+            : folder.endpoints.filter((endpoint) => {
+              return endpoint.name.toLowerCase().includes(keyword) || endpoint.method.toLowerCase().includes(keyword)
+            })
+          return endpoints.length > 0 || folderMatched ? { ...folder, endpoints } : null
+        })
+        .filter((folder): folder is FolderNode => Boolean(folder))
+      return folders.length > 0 || collectionMatched ? { ...collection, folders } : null
+    })
+    .filter((collection): collection is CollectionNode => Boolean(collection))
+})
 
 function pickCollectionIcon(index: number) {
   return collectionIcons[index % collectionIcons.length]
@@ -204,6 +233,10 @@ function isActiveEndpoint(id: string) {
 
 function collectionCount(c: CollectionNode) {
   return c.folders.reduce((sum, f) => sum + f.endpoints.length, 0)
+}
+
+function clearApiSearch() {
+  apiQuery.value = ''
 }
 
 function toggleCollection(collection: CollectionNode) {
@@ -494,6 +527,33 @@ watch(projectId, () => {
           </button>
         </div>
 
+        <div class="rounded-[8px] border border-black/10 bg-white p-[8px]">
+          <div class="text-[12px] font-semibold leading-[16px] text-[#0A0A0A]">接口资产总览</div>
+          <div class="mt-[8px] grid grid-cols-2 gap-[6px]">
+            <div class="rounded-[6px] bg-[#F8FAFC] px-[8px] py-[6px]">
+              <div class="text-[11px] leading-[14px] text-[#717182]">集合数</div>
+              <div class="mt-[2px] text-[16px] font-semibold leading-[20px] text-[#0A0A0A]">{{ totalCollectionCount }}</div>
+            </div>
+            <div class="rounded-[6px] bg-[#F8FAFC] px-[8px] py-[6px]">
+              <div class="text-[11px] leading-[14px] text-[#717182]">请求数</div>
+              <div class="mt-[2px] text-[16px] font-semibold leading-[20px] text-[#0A0A0A]">{{ totalRequestCount }}</div>
+            </div>
+          </div>
+          <div class="mt-[8px] rounded-[6px] bg-[#EFF6FF] px-[8px] py-[6px]">
+            <div class="text-[11px] leading-[14px] text-[#1447E6]">当前集合</div>
+            <div class="mt-[2px] truncate text-[12px] font-medium leading-[16px] text-[#0A0A0A]">{{ activeCollectionName }}</div>
+            <div class="mt-[2px] text-[11px] leading-[14px] text-[#717182]">{{ activeRequestCount }} 个请求</div>
+          </div>
+          <button
+            type="button"
+            class="mt-[8px] h-[28px] w-full rounded-[8px] bg-[#155DFC] text-[12px] font-medium text-white disabled:opacity-50"
+            :disabled="!activeCollectionId && collections.length === 0"
+            @click="goActiveCollectionDebug"
+          >
+            调试当前集合
+          </button>
+        </div>
+
         <div v-if="importGuideOpen" class="rounded-[8px] border border-[#BEDBFF] bg-white p-[8px]">
           <div class="text-[12px] font-semibold leading-[16px] text-[#0A0A0A]">Postman / Swagger / OpenAPI</div>
           <div class="mt-[4px] text-[11px] leading-[16px] text-[#717182]">
@@ -552,15 +612,32 @@ watch(projectId, () => {
 
         <div class="relative h-[28px] w-full rounded-[10px] border border-black/10 bg-white pl-[28px] pr-[8px]">
           <img :src="apiSearch" alt="" class="absolute left-[10px] top-[8px] h-[12px] w-[12px]" />
-          <div class="flex h-full items-center text-[12px] leading-[16px] text-[#0A0A0A]">搜索接口...</div>
+          <input
+            v-model="apiQuery"
+            type="search"
+            class="h-full w-full bg-transparent text-[12px] leading-[16px] text-[#0A0A0A] outline-none placeholder:text-[#717182]"
+            placeholder="搜索集合 / 文件夹 / 接口"
+          />
+        </div>
+        <div v-if="hasApiQuery" class="flex items-center justify-between rounded-[8px] bg-[#F8FAFC] px-[8px] py-[6px]">
+          <span class="truncate text-[11px] leading-[14px] text-[#717182]">当前搜索：{{ apiQuery }}</span>
+          <button type="button" class="ml-[8px] shrink-0 text-[11px] font-medium leading-[14px] text-[#155DFC]" @click="clearApiSearch">
+            清空搜索
+          </button>
         </div>
       </div>
 
       <div class="flex min-h-0 flex-1 flex-col gap-[2px] overflow-auto px-[8px] pt-[12px]">
         <div v-if="loading" class="px-[8px] py-[6px] text-[12px] leading-[16px] text-[#717182]">正在加载接口集合...</div>
         <div v-else-if="loadError" class="px-[8px] py-[6px] text-[12px] leading-[16px] text-[#E7000B]">{{ loadError }}</div>
-        <div v-else-if="collections.length === 0" class="px-[8px] py-[6px] text-[12px] leading-[16px] text-[#717182]">暂无接口集合</div>
-        <div v-for="collection in collections" :key="collection.id" class="flex flex-col gap-[2px]">
+        <div v-else-if="collections.length === 0" class="rounded-[8px] border border-dashed border-black/10 px-[8px] py-[10px] text-[12px] leading-[18px] text-[#717182]">
+          暂无接口集合，先导入 Postman / Swagger，或新建集合。
+        </div>
+        <div v-else-if="displayCollections.length === 0" class="rounded-[8px] border border-dashed border-black/10 px-[8px] py-[10px] text-[12px] leading-[18px] text-[#717182]">
+          没有匹配的接口。
+          <button type="button" class="mt-[6px] block text-[#155DFC]" @click="clearApiSearch">清空搜索</button>
+        </div>
+        <div v-for="collection in displayCollections" :key="collection.id" class="flex flex-col gap-[2px]">
           <button
             type="button"
             class="flex h-[28px] w-full items-center gap-[8px] rounded-[10px] px-[8px]"
