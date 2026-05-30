@@ -348,12 +348,29 @@ test.describe('资产中心操作闭环入口', () => {
     await expect(page.getByText('当前集合', { exact: true })).toBeVisible()
 
     await page.getByPlaceholder('搜索集合 / 文件夹 / 接口').fill('状态')
+    await expect(page.getByText('匹配 1 个请求')).toBeVisible()
     await expect(page.getByText('登录状态')).toBeVisible()
     await expect(page.getByText('登录', { exact: true })).toBeHidden()
+
+    await page.getByPlaceholder('搜索集合 / 文件夹 / 接口').fill('不存在')
+    await expect(page.getByText('没有匹配的接口：不存在')).toBeVisible()
 
     await page.getByRole('button', { name: '清空搜索' }).click()
     await expect(page.getByText('登录', { exact: true })).toBeVisible()
     await page.getByRole('button', { name: '调试当前集合' }).click()
     await expect(page).toHaveURL(/\/projects\/1\/assets\/apis\/col-1/)
+  })
+
+  test('接口管理支持记录现场业务反馈', async ({ page }) => {
+    await page.goto('/projects/1/assets/apis', { waitUntil: 'domcontentloaded' })
+
+    await page.getByRole('button', { name: '记录反馈' }).click()
+    await expect(page.getByText('现场反馈')).toBeVisible()
+    await page.getByLabel('反馈类型').selectOption('USABILITY')
+    await page.getByPlaceholder('记录业务现场反馈').fill('搜索结果不够明显，需要显示命中数量')
+    await page.getByRole('button', { name: '保存反馈' }).click()
+
+    await expect(page.getByText('已记录反馈')).toBeVisible()
+    await expect(page.getByText('搜索结果不够明显，需要显示命中数量')).toBeVisible()
   })
 })

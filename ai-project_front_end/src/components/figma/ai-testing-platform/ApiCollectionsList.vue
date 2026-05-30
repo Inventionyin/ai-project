@@ -49,6 +49,15 @@ type CollectionNode = {
   folders: FolderNode[]
 }
 
+type FeedbackType = 'DATA' | 'USABILITY' | 'FIELD' | 'PERFORMANCE' | 'OTHER'
+
+type BusinessFeedback = {
+  id: string
+  type: FeedbackType
+  text: string
+  createdAt: number
+}
+
 const route = useRoute()
 const router = useRouter()
 const collectionIcons = [apiCollection, apiCollection2, apiCollection3]
@@ -70,6 +79,11 @@ const postmanCloudLoading = ref(false)
 const postmanCloudSyncing = ref(false)
 const postmanCloudMessage = ref('')
 const apiQuery = ref('')
+const feedbackOpen = ref(false)
+const feedbackType = ref<FeedbackType>('USABILITY')
+const feedbackText = ref('')
+const feedbackMessage = ref('')
+const feedbackItems = ref<BusinessFeedback[]>([])
 
 const contextMenu = ref<{
   isOpen: boolean
@@ -116,6 +130,9 @@ const displayCollections = computed(() => {
     })
     .filter((collection): collection is CollectionNode => Boolean(collection))
 })
+const matchedRequestCount = computed(() => displayCollections.value.reduce((sum, collection) => sum + collectionCount(collection), 0))
+const feedbackStorageKey = computed(() => `weitesting:business-feedback:${projectId.value || 'unknown'}:apis`)
+const recentFeedbackItems = computed(() => feedbackItems.value.slice(0, 3))
 
 function pickCollectionIcon(index: number) {
   return collectionIcons[index % collectionIcons.length]
@@ -237,6 +254,56 @@ function collectionCount(c: CollectionNode) {
 
 function clearApiSearch() {
   apiQuery.value = ''
+}
+
+function feedbackTypeText(type: FeedbackType) {
+  if (type === 'DATA') return '数据展示'
+  if (type === 'FIELD') return '字段缺口'
+  if (type === 'PERFORMANCE') return '性能体验'
+  if (type === 'OTHER') return '其他'
+  return '操作体验'
+}
+
+function loadFeedbackItems() {
+  feedbackMessage.value = ''
+  if (typeof window === 'undefined') return
+  try {
+    const raw = window.localStorage.getItem(feedbackStorageKey.value)
+    const parsed = raw ? JSON.parse(raw) : []
+    feedbackItems.value = Array.isArray(parsed)
+      ? parsed
+        .map((item) => ({
+          id: String(item?.id || ''),
+          type: String(item?.type || 'OTHER') as FeedbackType,
+          text: String(item?.text || ''),
+          createdAt: Number(item?.createdAt || Date.now())
+        }))
+        .filter((item) => item.id && item.text)
+      : []
+  } catch {
+    feedbackItems.value = []
+  }
+}
+
+function saveFeedback() {
+  const text = feedbackText.value.trim()
+  feedbackMessage.value = ''
+  if (!text) {
+    feedbackMessage.value = '请先填写反馈内容'
+    return
+  }
+  const next: BusinessFeedback = {
+    id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    type: feedbackType.value,
+    text,
+    createdAt: Date.now()
+  }
+  feedbackItems.value = [next, ...feedbackItems.value].slice(0, 20)
+  feedbackText.value = ''
+  feedbackMessage.value = '已记录反馈'
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem(feedbackStorageKey.value, JSON.stringify(feedbackItems.value))
+  }
 }
 
 function toggleCollection(collection: CollectionNode) {
@@ -480,6 +547,7 @@ async function handleCreateCollection(payload: { name: string; description: stri
 
 watch(projectId, () => {
   void loadCollections()
+  loadFeedbackItems()
 }, { immediate: true })
 
 </script>
@@ -552,6 +620,53 @@ watch(projectId, () => {
           >
             调试当前集合
           </button>
+          <button
+            type="button"
+            class="mt-[6px] h-[28px] w-full rounded-[8px] border border-black/10 bg-white text-[12px] font-medium text-[#155DFC]"
+            @click="feedbackOpen = !feedbackOpen"
+          >
+            记录反馈
+          </button>
+        </div>
+
+        <div v-if="feedbackOpen" class="rounded-[8px] border border-[#BEDBFF] bg-white p-[8px]">
+          <div class="flex items-center justify-between">
+            <div class="text-[12px] font-semibold leading-[16px] text-[#0A0A0A]">现场反馈</div>
+            <div class="text-[11px] leading-[14px] text-[#717182]">反馈 {{ feedbackItems.length }} 条</div>
+          </div>
+          <label for="api-feedback-type" class="mt-[8px] block text-[11px] leading-[14px] text-[#717182]">反馈类型</label>
+          <select
+            id="api-feedback-type"
+            v-model="feedbackType"
+            class="mt-[4px] h-[28px] w-full rounded-[8px] border border-black/10 bg-white px-[8px] text-[12px] leading-[16px] outline-none focus:border-[#155DFC]"
+          >
+            <option value="USABILITY">操作体验</option>
+            <option value="DATA">数据展示</option>
+            <option value="FIELD">字段缺口</option>
+            <option value="PERFORMANCE">性能体验</option>
+            <option value="OTHER">其他</option>
+          </select>
+          <textarea
+            v-model="feedbackText"
+            class="mt-[6px] h-[64px] w-full resize-none rounded-[8px] border border-black/10 px-[8px] py-[6px] text-[12px] leading-[16px] outline-none placeholder:text-[#717182] focus:border-[#155DFC]"
+            placeholder="记录业务现场反馈"
+          />
+          <button
+            type="button"
+            class="mt-[6px] h-[28px] w-full rounded-[8px] bg-[#155DFC] text-[12px] font-medium text-white"
+            @click="saveFeedback"
+          >
+            保存反馈
+          </button>
+          <div v-if="feedbackMessage" class="mt-[6px] text-[11px] leading-[14px]" :class="feedbackMessage === '已记录反馈' ? 'text-[#166534]' : 'text-[#E7000B]'">
+            {{ feedbackMessage }}
+          </div>
+          <div v-if="recentFeedbackItems.length" class="mt-[8px] grid gap-[6px]">
+            <div v-for="item in recentFeedbackItems" :key="item.id" class="rounded-[6px] bg-[#F8FAFC] px-[8px] py-[6px]">
+              <div class="text-[11px] font-medium leading-[14px] text-[#1447E6]">{{ feedbackTypeText(item.type) }}</div>
+              <div class="mt-[2px] text-[12px] leading-[16px] text-[#0A0A0A]">{{ item.text }}</div>
+            </div>
+          </div>
         </div>
 
         <div v-if="importGuideOpen" class="rounded-[8px] border border-[#BEDBFF] bg-white p-[8px]">
@@ -620,7 +735,7 @@ watch(projectId, () => {
           />
         </div>
         <div v-if="hasApiQuery" class="flex items-center justify-between rounded-[8px] bg-[#F8FAFC] px-[8px] py-[6px]">
-          <span class="truncate text-[11px] leading-[14px] text-[#717182]">当前搜索：{{ apiQuery }}</span>
+          <span class="truncate text-[11px] leading-[14px] text-[#717182]">当前搜索：{{ apiQuery }} · 匹配 {{ matchedRequestCount }} 个请求</span>
           <button type="button" class="ml-[8px] shrink-0 text-[11px] font-medium leading-[14px] text-[#155DFC]" @click="clearApiSearch">
             清空搜索
           </button>
@@ -634,8 +749,8 @@ watch(projectId, () => {
           暂无接口集合，先导入 Postman / Swagger，或新建集合。
         </div>
         <div v-else-if="displayCollections.length === 0" class="rounded-[8px] border border-dashed border-black/10 px-[8px] py-[10px] text-[12px] leading-[18px] text-[#717182]">
-          没有匹配的接口。
-          <button type="button" class="mt-[6px] block text-[#155DFC]" @click="clearApiSearch">清空搜索</button>
+          没有匹配的接口：{{ apiQuery }}
+          <button type="button" class="mt-[6px] block text-[#155DFC]" @click="clearApiSearch">清空并查看全部</button>
         </div>
         <div v-for="collection in displayCollections" :key="collection.id" class="flex flex-col gap-[2px]">
           <button
