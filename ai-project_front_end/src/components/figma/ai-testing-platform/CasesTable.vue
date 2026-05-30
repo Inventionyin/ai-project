@@ -40,7 +40,7 @@ const projectId = computed(() => {
 
 function openCaseDetail(id: string) {
   router.push({
-    path: `/projects/${projectId.value}/assets/testcases/${id}`,
+    path: `/projects/${encodeURIComponent(projectId.value)}/assets/testcases/${encodeURIComponent(id)}`,
     query: { tab: 'basic' }
   })
 }

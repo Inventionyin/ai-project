@@ -23,7 +23,7 @@ export interface PageData<T> {
 }
 
 export async function createDocParseJob(projectId: string, docId: string, docVersionId: string): Promise<DocParseJob> {
-  return requestJson<DocParseJob>(`/api/projects/${projectId}/doc-parse-jobs`, {
+  return requestJson<DocParseJob>(`/api/projects/${encodeURIComponent(projectId)}/doc-parse-jobs`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeader() },
     body: JSON.stringify({ docId, docVersionId }),
@@ -33,21 +33,21 @@ export async function createDocParseJob(projectId: string, docId: string, docVer
 export async function listDocParseJobs(projectId: string, page = 1, pageSize = 20, status?: string): Promise<PageData<DocParseJob>> {
   const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) })
   if (status) params.set('status', status)
-  return requestJson<PageData<DocParseJob>>(`/api/projects/${projectId}/doc-parse-jobs?${params}`, {
+  return requestJson<PageData<DocParseJob>>(`/api/projects/${encodeURIComponent(projectId)}/doc-parse-jobs?${params}`, {
     method: 'GET',
     headers: authHeader(),
   })
 }
 
 export async function getDocParseJob(projectId: string, jobId: string): Promise<DocParseJob> {
-  return requestJson<DocParseJob>(`/api/projects/${projectId}/doc-parse-jobs/${jobId}`, {
+  return requestJson<DocParseJob>(`/api/projects/${encodeURIComponent(projectId)}/doc-parse-jobs/${encodeURIComponent(jobId)}`, {
     method: 'GET',
     headers: authHeader(),
   })
 }
 
 export async function retryDocParseJob(projectId: string, jobId: string): Promise<DocParseJob> {
-  return requestJson<DocParseJob>(`/api/projects/${projectId}/doc-parse-jobs/${jobId}/retry`, {
+  return requestJson<DocParseJob>(`/api/projects/${encodeURIComponent(projectId)}/doc-parse-jobs/${encodeURIComponent(jobId)}/retry`, {
     method: 'POST',
     headers: authHeader(),
   })

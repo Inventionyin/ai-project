@@ -220,7 +220,7 @@ function selectEndpoint(collection: CollectionNode, endpoint: ApiEndpoint) {
   activeCollectionId.value = collection.id
   activeEndpointId.value = endpoint.id
   if (!projectId.value) return
-  void router.push(`/projects/${projectId.value}/assets/apis/${collection.id}?requestId=${encodeURIComponent(endpoint.id)}`)
+  void router.push(`/projects/${encodeURIComponent(projectId.value)}/assets/apis/${encodeURIComponent(collection.id)}?requestId=${encodeURIComponent(endpoint.id)}`)
 }
 
 function openImportGuide() {
@@ -230,7 +230,7 @@ function openImportGuide() {
 function goActiveCollectionDebug() {
   const target = activeCollectionId.value || collections.value[0]?.id || ''
   if (!target || !projectId.value) return
-  void router.push(`/projects/${projectId.value}/assets/apis/${target}`)
+  void router.push(`/projects/${encodeURIComponent(projectId.value)}/assets/apis/${encodeURIComponent(target)}`)
 }
 
 async function loadPostmanCloudCollections() {

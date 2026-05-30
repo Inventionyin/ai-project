@@ -16,6 +16,7 @@ const projectId = computed(() => String(route.params.projectId || '').trim())
 
 const totalRuns = ref(0)
 const isLoadingRuns = ref(false)
+const errorMessage = ref('')
 const statusFilter = ref<RunDetailData['status'] | ''>('')
 const searchText = ref('')
 const page = ref(1)
@@ -108,6 +109,13 @@ function mapRunToRow(run: RunDetailData): RunRow {
   }
 }
 
+function toLoadErrorMessage(error: unknown, fallback: string) {
+  if (!(error instanceof Error)) return fallback
+  const message = String(error.message || '').trim()
+  if (!message || message === 'Failed to fetch') return fallback
+  return message
+}
+
 async function loadNameMaps(pid: string) {
   const [suites, environments] = await Promise.all([fetchSuitesLite(pid, 1, 200), fetchProjectEnvironments(pid)])
   suiteNameMap.value = toNameMap(suites.items)
@@ -119,9 +127,11 @@ async function loadRuns() {
   if (!pid) {
     totalRuns.value = 0
     allRows.value = []
+    errorMessage.value = ''
     return
   }
   isLoadingRuns.value = true
+  errorMessage.value = ''
   try {
     await loadNameMaps(pid)
     const data = await fetchRuns({
@@ -135,8 +145,7 @@ async function loadRuns() {
   } catch (error) {
     totalRuns.value = 0
     allRows.value = []
-    const errorMessage = error instanceof Error ? error.message : '获取运行记录失败，请稍后重试'
-    window.alert(errorMessage)
+    errorMessage.value = toLoadErrorMessage(error, '获取运行记录失败，请检查网络后重试')
   } finally {
     isLoadingRuns.value = false
   }
@@ -203,6 +212,14 @@ watch(
       </div>
 
       <div class="flex flex-col gap-[12px] md:flex-row md:items-center md:justify-between">
+        <div
+          v-if="errorMessage"
+          class="flex w-full items-center justify-between gap-[12px] rounded-[10px] border border-[#FCA5A5] bg-[#FEF2F2] px-[12px] py-[10px] text-[13px] text-[#991B1B] md:order-2"
+        >
+          <span>{{ errorMessage }}</span>
+          <button type="button" class="shrink-0 text-[12px] font-medium text-[#B91C1C]" @click="refreshRuns">重试</button>
+        </div>
+
         <div class="flex flex-wrap items-center gap-[8px]">
           <img :src="runsFilter" alt="" class="h-[13px] w-[13px]" />
 

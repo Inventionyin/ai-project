@@ -25,7 +25,7 @@ export async function createExecutor(projectId: string, data: {
   name: string; executorType: string; description?: string;
   config?: Record<string, unknown>; version?: string;
 }): Promise<Executor> {
-  return requestJson<Executor>(`/api/projects/${projectId}/executors`, {
+  return requestJson<Executor>(`/api/projects/${encodeURIComponent(projectId)}/executors`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeader() },
     body: JSON.stringify(data),
@@ -33,21 +33,21 @@ export async function createExecutor(projectId: string, data: {
 }
 
 export async function listExecutors(projectId: string, page = 1, pageSize = 20): Promise<PageData<Executor>> {
-  return requestJson<PageData<Executor>>(`/api/projects/${projectId}/executors?page=${page}&pageSize=${pageSize}`, {
+  return requestJson<PageData<Executor>>(`/api/projects/${encodeURIComponent(projectId)}/executors?page=${page}&pageSize=${pageSize}`, {
     method: 'GET',
     headers: authHeader(),
   })
 }
 
 export async function getExecutor(projectId: string, executorId: string): Promise<Executor> {
-  return requestJson<Executor>(`/api/projects/${projectId}/executors/${executorId}`, {
+  return requestJson<Executor>(`/api/projects/${encodeURIComponent(projectId)}/executors/${encodeURIComponent(executorId)}`, {
     method: 'GET',
     headers: authHeader(),
   })
 }
 
 export async function updateExecutor(projectId: string, executorId: string, data: Partial<Executor>): Promise<Executor> {
-  return requestJson<Executor>(`/api/projects/${projectId}/executors/${executorId}`, {
+  return requestJson<Executor>(`/api/projects/${encodeURIComponent(projectId)}/executors/${encodeURIComponent(executorId)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...authHeader() },
     body: JSON.stringify(data),
@@ -55,7 +55,7 @@ export async function updateExecutor(projectId: string, executorId: string, data
 }
 
 export async function deleteExecutor(projectId: string, executorId: string): Promise<void> {
-  await requestJson<void>(`/api/projects/${projectId}/executors/${executorId}`, {
+  await requestJson<void>(`/api/projects/${encodeURIComponent(projectId)}/executors/${encodeURIComponent(executorId)}`, {
     method: 'DELETE',
     headers: authHeader(),
   })

@@ -21,6 +21,8 @@ const currentUserName = ref('张三')
 const currentUserId = ref('')
 const isCreatingProject = ref(false)
 const isUpdatingProject = ref(false)
+const initErrorMessage = ref('')
+const isInitializing = ref(false)
 
 const openProjectPermissionDeniedModal = () => {
   permissionDeniedModalMessage.value = '只有 创建人/管理员 能修改这个项目'
@@ -53,7 +55,7 @@ const handleSaveProject = async (data: { name: string; description: string }) =>
   try {
     const authorization = resolveAuthHeader()
     const projectId = selectedProject.value.id
-    const response = await fetch(`${resolveApiBaseUrl()}/api/projects/${projectId}`, {
+    const response = await fetch(`${resolveApiBaseUrl()}/api/projects/${encodeURIComponent(projectId)}`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
@@ -81,8 +83,8 @@ const handleSaveProject = async (data: { name: string; description: string }) =>
     isEditModalOpen.value = false
     selectedProject.value = null
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : '编辑项目失败，请稍后重试'
-    window.alert(errorMessage)
+    const errorMessage = toUserFacingError(error, '编辑项目失败，请稍后重试')
+    showToast(errorMessage, 'error')
   } finally {
     isUpdatingProject.value = false
   }
@@ -97,7 +99,7 @@ const confirmDeleteProject = async () => {
   const projectId = selectedProject.value.id
   try {
     const authorization = resolveAuthHeader()
-    const response = await fetch(`${resolveApiBaseUrl()}/api/projects/${projectId}`, {
+    const response = await fetch(`${resolveApiBaseUrl()}/api/projects/${encodeURIComponent(projectId)}`, {
       method: 'DELETE',
       headers: {
         Authorization: authorization
@@ -122,8 +124,8 @@ const confirmDeleteProject = async () => {
     isDeleteModalOpen.value = false
     selectedProject.value = null
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : '删除项目失败，请稍后重试'
-    window.alert(errorMessage)
+    const errorMessage = toUserFacingError(error, '删除项目失败，请稍后重试')
+    showToast(errorMessage, 'error')
   }
 }
 
@@ -256,6 +258,22 @@ const resolveOwnerDisplayName = (ownerId: string) => {
   return ownerId.slice(0, 8)
 }
 
+const toUserFacingError = (error: unknown, fallback: string) => {
+  if (!(error instanceof Error)) return fallback
+  const message = String(error.message || '').trim()
+  if (
+    !message ||
+    message === 'Failed to fetch' ||
+    message.includes('Unexpected end of JSON input') ||
+    message.includes('is not valid JSON')
+  ) return fallback
+  return message
+}
+
+const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+  window.dispatchEvent(new CustomEvent('app-toast', { detail: { message, type } }))
+}
+
 const toHomeProject = (project: ProjectListItem | ProjectData): HomeProject => ({
   id: project.id,
   title: project.name,
@@ -367,29 +385,33 @@ const handleCreateProject = async (data: { name: string; description: string }) 
     } catch {}
     isCreateModalOpen.value = false
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : '创建项目失败，请稍后重试'
-    window.alert(errorMessage)
+    const errorMessage = toUserFacingError(error, '创建项目失败，请稍后重试')
+    showToast(errorMessage, 'error')
   } finally {
     isCreatingProject.value = false
   }
 }
 
 const navigateToDashboard = (projectId: string) => {
-  router.push(`/projects/${projectId}/dashboard`)
+  router.push(`/projects/${encodeURIComponent(projectId)}/dashboard`)
+}
+
+const initializeHome = async () => {
+  isInitializing.value = true
+  initErrorMessage.value = ''
+  try {
+    const authorization = resolveAuthHeader()
+    await loadCurrentUser(authorization)
+    await loadProjects(authorization)
+    await loadHomeStats(authorization)
+  } catch (error) {
+    initErrorMessage.value = toUserFacingError(error, '获取首页数据失败，请检查网络后重试')
+  } finally {
+    isInitializing.value = false
+  }
 }
 
 onMounted(() => {
-  const initializeHome = async () => {
-    try {
-      const authorization = resolveAuthHeader()
-      await loadCurrentUser(authorization)
-      await loadProjects(authorization)
-      await loadHomeStats(authorization)
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : '获取项目列表失败，请稍后重试'
-      window.alert(errorMessage)
-    }
-  }
   void initializeHome()
 })
 </script>
@@ -423,6 +445,19 @@ onMounted(() => {
     <div class="flex-1 bg-gray-100 px-6 py-8">
       <div class="max-w-7xl mx-auto space-y-8">
         <!-- Stats Grid -->
+        <div v-if="initErrorMessage" class="rounded-[10px] border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <span>{{ initErrorMessage }}</span>
+            <button
+              type="button"
+              class="inline-flex items-center justify-center rounded-[8px] border border-red-300 bg-white px-3 py-1.5 text-sm font-medium text-red-700 transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
+              :disabled="isInitializing"
+              @click="initializeHome"
+            >
+              {{ isInitializing ? '重试中...' : '重试' }}
+            </button>
+          </div>
+        </div>
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           <StatsCard 
             v-for="(stat, idx) in stats" 

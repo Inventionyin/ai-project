@@ -75,14 +75,14 @@ export async function listPlugins(page = 1, pageSize = 20): Promise<PageData<Plu
 }
 
 export async function getPlugin(pluginId: string): Promise<Plugin> {
-  return requestJson<Plugin>(`/api/plugins/${pluginId}`, {
+  return requestJson<Plugin>(`/api/plugins/${encodeURIComponent(pluginId)}`, {
     method: 'GET',
     headers: authHeader(),
   })
 }
 
 export async function updatePlugin(pluginId: string, data: Partial<Plugin>): Promise<Plugin> {
-  return requestJson<Plugin>(`/api/plugins/${pluginId}`, {
+  return requestJson<Plugin>(`/api/plugins/${encodeURIComponent(pluginId)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...authHeader() },
     body: JSON.stringify(data),
@@ -90,14 +90,14 @@ export async function updatePlugin(pluginId: string, data: Partial<Plugin>): Pro
 }
 
 export async function deletePlugin(pluginId: string): Promise<void> {
-  await requestJson<void>(`/api/plugins/${pluginId}`, {
+  await requestJson<void>(`/api/plugins/${encodeURIComponent(pluginId)}`, {
     method: 'DELETE',
     headers: authHeader(),
   })
 }
 
 export async function installPlugin(projectId: string, pluginId: string, config?: Record<string, unknown>): Promise<PluginInstallation> {
-  return requestJson<PluginInstallation>(`/api/projects/${projectId}/plugins/install`, {
+  return requestJson<PluginInstallation>(`/api/projects/${encodeURIComponent(projectId)}/plugins/install`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeader() },
     body: JSON.stringify({ pluginId, config }),
@@ -105,21 +105,21 @@ export async function installPlugin(projectId: string, pluginId: string, config?
 }
 
 export async function listInstallations(projectId: string, page = 1, pageSize = 20): Promise<PageData<PluginInstallation>> {
-  return requestJson<PageData<PluginInstallation>>(`/api/projects/${projectId}/plugins/installations?page=${page}&pageSize=${pageSize}`, {
+  return requestJson<PageData<PluginInstallation>>(`/api/projects/${encodeURIComponent(projectId)}/plugins/installations?page=${page}&pageSize=${pageSize}`, {
     method: 'GET',
     headers: authHeader(),
   })
 }
 
 export async function uninstallPlugin(projectId: string, installationId: string): Promise<void> {
-  await requestJson<void>(`/api/projects/${projectId}/plugins/installations/${installationId}/uninstall`, {
+  await requestJson<void>(`/api/projects/${encodeURIComponent(projectId)}/plugins/installations/${encodeURIComponent(installationId)}/uninstall`, {
     method: 'POST',
     headers: authHeader(),
   })
 }
 
 export async function togglePlugin(projectId: string, installationId: string, enabled: boolean): Promise<PluginInstallation> {
-  return requestJson<PluginInstallation>(`/api/projects/${projectId}/plugins/installations/${installationId}/toggle`, {
+  return requestJson<PluginInstallation>(`/api/projects/${encodeURIComponent(projectId)}/plugins/installations/${encodeURIComponent(installationId)}/toggle`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeader() },
     body: JSON.stringify({ enabled }),
@@ -151,7 +151,7 @@ export interface PluginInvokeRecord {
 }
 
 export async function invokePlugin(projectId: string, installationId: string, payload?: Record<string, unknown>): Promise<PluginInvokeResponse> {
-  return requestJson<PluginInvokeResponse>(`/api/projects/${projectId}/plugins/installations/${installationId}/invoke`, {
+  return requestJson<PluginInvokeResponse>(`/api/projects/${encodeURIComponent(projectId)}/plugins/installations/${encodeURIComponent(installationId)}/invoke`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeader() },
     body: payload === undefined ? undefined : JSON.stringify({ payload }),
@@ -159,7 +159,7 @@ export async function invokePlugin(projectId: string, installationId: string, pa
 }
 
 export async function listPluginInvocations(projectId: string, installationId: string, page = 1, pageSize = 20): Promise<PageData<PluginInvokeRecord>> {
-  return requestJson<PageData<PluginInvokeRecord>>(`/api/projects/${projectId}/plugins/installations/${installationId}/invocations?page=${page}&pageSize=${pageSize}`, {
+  return requestJson<PageData<PluginInvokeRecord>>(`/api/projects/${encodeURIComponent(projectId)}/plugins/installations/${encodeURIComponent(installationId)}/invocations?page=${page}&pageSize=${pageSize}`, {
     method: 'GET',
     headers: authHeader(),
   })

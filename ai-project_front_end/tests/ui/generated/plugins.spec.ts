@@ -1,6 +1,96 @@
 import { expect, test } from '@playwright/test'
 
 test.describe('plugins 管理页冒烟', () => {
+  const pluginDetail = {
+    id: 'plugin/a b',
+    name: 'Encoded Plugin',
+    slug: 'encoded-plugin',
+    description: null,
+    version: '1.0.0',
+    author: null,
+    pluginType: 'executor',
+    configSchema: null,
+    entryPoint: null,
+    minPlatformVersion: null,
+    iconUrl: null,
+    enabled: true,
+    status: 'AVAILABLE',
+    downloadCount: 0,
+    createdAt: 1700000000,
+    updatedAt: 1700000000,
+    sandboxPolicy: {
+      permissions: [],
+      timeoutMs: 30000,
+      networkMode: 'none',
+      allowedHosts: [],
+      maxPayloadBytes: 1024
+    },
+    sandboxPolicyValid: true,
+    sandboxPolicyError: null
+  }
+
+  test('插件详情 API 会编码 pluginId 路径段', async ({ page }) => {
+    const pluginRequests: string[] = []
+
+    await page.addInitScript(() => {
+      localStorage.setItem('accessToken', 'e2e-smoke-token')
+      localStorage.setItem('accessTokenExpiresAt', String(Date.now() + 60 * 60 * 1000))
+    })
+
+    await page.route('**/*', async (route) => {
+      const req = route.request()
+      const url = new URL(req.url())
+      const path = url.pathname
+
+      if (req.resourceType() === 'document') {
+        await route.continue()
+        return
+      }
+      if (path === '/api/projects/1') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ code: 0, data: { id: '1', name: 'E2E Project' } })
+        })
+        return
+      }
+      if (path === '/api/plugins') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ code: 0, data: { page: 1, pageSize: 20, total: 0, items: [] } })
+        })
+        return
+      }
+      if (path.startsWith('/api/plugins/')) {
+        pluginRequests.push(path)
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ code: 0, data: pluginDetail })
+        })
+        return
+      }
+      if (path.startsWith('/api/projects/1/plugins')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ code: 0, data: { page: 1, pageSize: 20, total: 0, items: [] } })
+        })
+        return
+      }
+      await route.continue()
+    })
+
+    await page.goto('/projects/1/settings/plugins', { waitUntil: 'domcontentloaded' })
+    await page.evaluate(async () => {
+      const api = await import('/src/lib/api/plugins.ts')
+      await api.getPlugin('plugin/a b')
+    })
+
+    expect(pluginRequests).toContain('/api/plugins/plugin%2Fa%20b')
+  })
+
   test('页面标题与插件市场 Tab 可见', async ({ page }) => {
     await page.route('**/*', async (route) => {
       const req = route.request()

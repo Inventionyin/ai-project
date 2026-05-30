@@ -43,7 +43,7 @@ export async function createPipeline(projectId: string, data: {
   name: string; provider?: string; repoFullName?: string; workflowFile?: string;
   config?: Record<string, unknown>; webhookSecret?: string;
 }): Promise<DevOpsPipeline> {
-  return requestJson<DevOpsPipeline>(`/api/projects/${projectId}/devops/pipelines`, {
+  return requestJson<DevOpsPipeline>(`/api/projects/${encodeURIComponent(projectId)}/devops/pipelines`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeader() },
     body: JSON.stringify(data),
@@ -51,21 +51,21 @@ export async function createPipeline(projectId: string, data: {
 }
 
 export async function listPipelines(projectId: string, page = 1, pageSize = 20): Promise<PageData<DevOpsPipeline>> {
-  return requestJson<PageData<DevOpsPipeline>>(`/api/projects/${projectId}/devops/pipelines?page=${page}&pageSize=${pageSize}`, {
+  return requestJson<PageData<DevOpsPipeline>>(`/api/projects/${encodeURIComponent(projectId)}/devops/pipelines?page=${page}&pageSize=${pageSize}`, {
     method: 'GET',
     headers: authHeader(),
   })
 }
 
 export async function getPipeline(projectId: string, pipelineId: string): Promise<DevOpsPipeline> {
-  return requestJson<DevOpsPipeline>(`/api/projects/${projectId}/devops/pipelines/${pipelineId}`, {
+  return requestJson<DevOpsPipeline>(`/api/projects/${encodeURIComponent(projectId)}/devops/pipelines/${encodeURIComponent(pipelineId)}`, {
     method: 'GET',
     headers: authHeader(),
   })
 }
 
 export async function updatePipeline(projectId: string, pipelineId: string, data: Partial<DevOpsPipeline>): Promise<DevOpsPipeline> {
-  return requestJson<DevOpsPipeline>(`/api/projects/${projectId}/devops/pipelines/${pipelineId}`, {
+  return requestJson<DevOpsPipeline>(`/api/projects/${encodeURIComponent(projectId)}/devops/pipelines/${encodeURIComponent(pipelineId)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...authHeader() },
     body: JSON.stringify(data),
@@ -73,14 +73,14 @@ export async function updatePipeline(projectId: string, pipelineId: string, data
 }
 
 export async function deletePipeline(projectId: string, pipelineId: string): Promise<void> {
-  await requestJson<void>(`/api/projects/${projectId}/devops/pipelines/${pipelineId}`, {
+  await requestJson<void>(`/api/projects/${encodeURIComponent(projectId)}/devops/pipelines/${encodeURIComponent(pipelineId)}`, {
     method: 'DELETE',
     headers: authHeader(),
   })
 }
 
 export async function triggerPipeline(projectId: string, pipelineId: string, data?: { branch?: string; commitSha?: string; params?: Record<string, unknown> }): Promise<DevOpsRun> {
-  return requestJson<DevOpsRun>(`/api/projects/${projectId}/devops/pipelines/${pipelineId}/trigger`, {
+  return requestJson<DevOpsRun>(`/api/projects/${encodeURIComponent(projectId)}/devops/pipelines/${encodeURIComponent(pipelineId)}/trigger`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeader() },
     body: JSON.stringify(data || {}),
@@ -90,7 +90,7 @@ export async function triggerPipeline(projectId: string, pipelineId: string, dat
 export async function listRuns(projectId: string, pipelineId?: string, page = 1, pageSize = 20): Promise<PageData<DevOpsRun>> {
   const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) })
   if (pipelineId) params.set('pipelineId', pipelineId)
-  return requestJson<PageData<DevOpsRun>>(`/api/projects/${projectId}/devops/runs?${params}`, {
+  return requestJson<PageData<DevOpsRun>>(`/api/projects/${encodeURIComponent(projectId)}/devops/runs?${params}`, {
     method: 'GET',
     headers: authHeader(),
   })
