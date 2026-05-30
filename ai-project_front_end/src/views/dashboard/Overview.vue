@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { RefreshCw, CheckCircle, XCircle, Clock, Activity, SlidersHorizontal } from 'lucide-vue-next'
 import QualityGateCard from '@/components/figma/QualityGateCard.vue'
 import FailureTop5Card from '@/components/figma/FailureTop5Card.vue'
@@ -109,6 +109,7 @@ type DashboardModuleOption = {
 type DashboardFilterDimension = 'testcase' | 'suite'
 
 const route = useRoute()
+const router = useRouter()
 const isLoadingSummary = ref(false)
 const summary = ref<DashboardSummaryData | null>(null)
 const isLoadingFailureTop = ref(false)
@@ -121,6 +122,7 @@ const isLoadingRecentRuns = ref(false)
 const recentRuns = ref<RecentRunCardItem[]>([])
 const isCustomizeOpen = ref(false)
 const layoutMessage = ref('')
+const dashboardErrors = ref<string[]>([])
 const visibleModules = ref<Record<DashboardModuleKey, boolean>>({
   trend: true,
   qualityGate: true,
@@ -190,6 +192,24 @@ const recentRunRightColor: Record<RecentRunCardItem['status'], string> = {
   已取消: '#FB2C36'
 }
 
+const toDashboardErrorMessage = (error: unknown, fallback: string) => {
+  if (!(error instanceof Error)) return fallback
+  const message = String(error.message || '').trim()
+  if (!message || message === 'Failed to fetch') return fallback
+  return message
+}
+
+const pushDashboardError = (message: string) => {
+  const normalized = String(message || '').trim()
+  if (!normalized) return
+  if (dashboardErrors.value.includes(normalized)) return
+  dashboardErrors.value = [...dashboardErrors.value, normalized]
+}
+
+const clearDashboardErrors = () => {
+  dashboardErrors.value = []
+}
+
 const toNameMap = <T extends { id: string; name: string }>(items: T[]) => {
   return items.reduce<Record<string, string>>((acc, item) => {
     acc[item.id] = item.name
@@ -235,7 +255,7 @@ const loadSuiteNameMap = async (authorization: string) => {
 }
 
 const loadEnvironmentNameMap = async (authorization: string) => {
-  const response = await fetch(`${resolveApiBaseUrl()}/api/projects/${projectId.value}/environments`, {
+  const response = await fetch(`${resolveApiBaseUrl()}/api/projects/${encodeURIComponent(projectId.value)}/environments`, {
     method: 'GET',
     headers: {
       Authorization: authorization
@@ -253,7 +273,7 @@ const loadDashboardSummary = async () => {
   isLoadingSummary.value = true
   try {
     const authorization = resolveAuthHeader()
-    const response = await fetch(`${resolveApiBaseUrl()}/api/projects/${projectId.value}/dashboard/summary`, {
+    const response = await fetch(`${resolveApiBaseUrl()}/api/projects/${encodeURIComponent(projectId.value)}/dashboard/summary`, {
       method: 'GET',
       headers: {
         Authorization: authorization
@@ -265,8 +285,7 @@ const loadDashboardSummary = async () => {
     }
     summary.value = payload.data
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : '获取仪表盘汇总失败，请稍后重试'
-    window.alert(errorMessage)
+    pushDashboardError(toDashboardErrorMessage(error, '获取仪表盘汇总失败，请稍后重试'))
   } finally {
     isLoadingSummary.value = false
   }
@@ -282,7 +301,7 @@ const loadDashboardFailureTop = async () => {
       days: dashboardFilters.value.days,
       limit: '5'
     })
-    const response = await fetch(`${resolveApiBaseUrl()}/api/projects/${projectId.value}/dashboard/failure-top?${query.toString()}`, {
+    const response = await fetch(`${resolveApiBaseUrl()}/api/projects/${encodeURIComponent(projectId.value)}/dashboard/failure-top?${query.toString()}`, {
       method: 'GET',
       headers: {
         Authorization: authorization
@@ -301,8 +320,7 @@ const loadDashboardFailureTop = async () => {
       suiteNames: item.suiteNames ?? []
     }))
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : '获取失败 Top 5 失败，请稍后重试'
-    window.alert(errorMessage)
+    pushDashboardError(toDashboardErrorMessage(error, '获取失败 Top 5 失败，请稍后重试'))
   } finally {
     isLoadingFailureTop.value = false
   }
@@ -313,7 +331,7 @@ const loadDashboardQualityGate = async () => {
   isLoadingQualityGate.value = true
   try {
     const authorization = resolveAuthHeader()
-    const response = await fetch(`${resolveApiBaseUrl()}/api/projects/${projectId.value}/dashboard/quality-gate`, {
+    const response = await fetch(`${resolveApiBaseUrl()}/api/projects/${encodeURIComponent(projectId.value)}/dashboard/quality-gate`, {
       method: 'GET',
       headers: {
         Authorization: authorization
@@ -325,8 +343,7 @@ const loadDashboardQualityGate = async () => {
     }
     qualityGateData.value = payload.data
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : '获取质量门禁状态失败，请稍后重试'
-    window.alert(errorMessage)
+    pushDashboardError(toDashboardErrorMessage(error, '获取质量门禁状态失败，请稍后重试'))
   } finally {
     isLoadingQualityGate.value = false
   }
@@ -337,7 +354,7 @@ const loadDashboardTrend = async () => {
   isLoadingTrend.value = true
   try {
     const authorization = resolveAuthHeader()
-    const response = await fetch(`${resolveApiBaseUrl()}/api/projects/${projectId.value}/dashboard/trend?days=${dashboardFilters.value.days}`, {
+    const response = await fetch(`${resolveApiBaseUrl()}/api/projects/${encodeURIComponent(projectId.value)}/dashboard/trend?days=${dashboardFilters.value.days}`, {
       method: 'GET',
       headers: {
         Authorization: authorization
@@ -350,8 +367,7 @@ const loadDashboardTrend = async () => {
     trendItems.value = payload.data.items
   } catch (error) {
     trendItems.value = []
-    const errorMessage = error instanceof Error ? error.message : '获取近 7 天趋势失败，请稍后重试'
-    window.alert(errorMessage)
+    pushDashboardError(toDashboardErrorMessage(error, '获取近 7 天趋势失败，请稍后重试'))
   } finally {
     isLoadingTrend.value = false
   }
@@ -402,19 +418,33 @@ const loadRecentRuns = async () => {
     })
   } catch (error) {
     recentRuns.value = []
-    const errorMessage = error instanceof Error ? error.message : '获取最近运行失败，请稍后重试'
-    window.alert(errorMessage)
+    pushDashboardError(toDashboardErrorMessage(error, '获取最近运行失败，请稍后重试'))
   } finally {
     isLoadingRecentRuns.value = false
   }
 }
 
 const refreshDashboard = async () => {
+  clearDashboardErrors()
   await Promise.all([loadDashboardSummary(), loadDashboardFailureTop(), loadDashboardQualityGate(), loadDashboardTrend(), loadRecentRuns()])
 }
 
 const applyDashboardFilters = () => {
+  clearDashboardErrors()
   void Promise.all([loadDashboardFailureTop(), loadDashboardTrend()])
+}
+
+const openReports = () => {
+  if (!projectId.value) return
+  void router.push({
+    path: `/projects/${encodeURIComponent(projectId.value)}/reports`,
+    query: { tab: 'trend' }
+  })
+}
+
+const openRuns = () => {
+  if (!projectId.value) return
+  void router.push(`/projects/${encodeURIComponent(projectId.value)}/runs`)
 }
 
 const normalizeLayout = (source: unknown) => {
@@ -601,6 +631,10 @@ onMounted(() => {
         </div>
       </div>
 
+      <div v-if="dashboardErrors.length" class="rounded-[8px] border border-[#FB2C36]/30 bg-[#FEF2F2] px-[12px] py-[10px] text-[12px] text-[#B91C1C]">
+        <div v-for="message in dashboardErrors" :key="message">{{ message }}</div>
+      </div>
+
       <div class="flex flex-col gap-[8px] rounded-[10px] border border-black/10 bg-white px-[12px] py-[10px] md:flex-row md:items-center md:justify-between">
         <div class="text-[12px] leading-4 text-[#717182]">{{ dashboardFilterSummary }}</div>
         <div class="flex flex-wrap items-center gap-[8px]">
@@ -781,8 +815,20 @@ onMounted(() => {
         v-if="visibleModules.failureTop || visibleModules.recentRuns"
         class="grid grid-cols-1 gap-[16px] xl:grid-cols-2 xl:items-start"
       >
-        <FailureTop5Card v-if="visibleModules.failureTop" :items="failureTopItems" :loading="isLoadingFailureTop" class="w-full" />
-        <RecentRunsCard v-if="visibleModules.recentRuns" :items="recentRuns" :loading="isLoadingRecentRuns" class="w-full xl:justify-self-end" />
+        <FailureTop5Card
+          v-if="visibleModules.failureTop"
+          :items="failureTopItems"
+          :loading="isLoadingFailureTop"
+          class="w-full"
+          @open-report="openReports"
+        />
+        <RecentRunsCard
+          v-if="visibleModules.recentRuns"
+          :items="recentRuns"
+          :loading="isLoadingRecentRuns"
+          class="w-full xl:justify-self-end"
+          @open-all-runs="openRuns"
+        />
       </div>
     </div>
   </div>

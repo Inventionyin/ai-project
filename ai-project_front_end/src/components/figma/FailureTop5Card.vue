@@ -9,6 +9,10 @@ type FailItem = {
   suiteNames: string[]
 }
 
+const emit = defineEmits<{
+  'open-report': []
+}>()
+
 const props = withDefaults(defineProps<{
   items?: FailItem[]
   loading?: boolean
@@ -35,7 +39,12 @@ const barWidth = (count: number) => `${Math.max(8, Math.round((count / maxCount.
         <div class="text-sm font-semibold leading-5 text-[#0A0A0A]">失败 Top 5</div>
       </div>
 
-      <button class="h-4 w-16 flex items-center justify-center gap-1">
+      <button
+        type="button"
+        class="h-4 w-16 flex items-center justify-center gap-1"
+        aria-label="查看报告"
+        @click="emit('open-report')"
+      >
         <span class="text-xs font-medium leading-4 text-brand-blue">查看报告</span>
         <ArrowRight class="w-3 h-3 text-brand-blue" />
       </button>

@@ -15,11 +15,13 @@ test.describe('产品信息架构收敛', () => {
       const req = route.request()
       const url = new URL(req.url())
       if (req.resourceType() === 'document') return route.continue()
-      if (url.pathname === '/api/projects/1') {
+      const projectMatch = url.pathname.match(/^\/api\/projects\/([^/]+)$/)
+      if (projectMatch) {
+        const projectId = projectMatch[1]
         return route.fulfill({
           status: 200,
           contentType: 'application/json',
-          body: JSON.stringify({ code: 0, data: { id: '1', name: 'E2E Project' } }),
+          body: JSON.stringify({ code: 0, data: { id: projectId, name: `E2E Project ${projectId}` } }),
         })
       }
       if (url.pathname === '/api/projects/1/acceptance/summary') {
@@ -76,7 +78,8 @@ test.describe('产品信息架构收敛', () => {
           body: JSON.stringify({ code: 0, data: { markdown: '# 生产验收报告' } }),
         })
       }
-      if (url.pathname === '/api/projects/1/workspace/summary') {
+      const workspaceSummaryMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/workspace\/summary$/)
+      if (workspaceSummaryMatch) {
         return route.fulfill({
           status: 200,
           contentType: 'application/json',
@@ -111,6 +114,186 @@ test.describe('产品信息架构收敛', () => {
                 settings: true,
                 ops: true,
               },
+            },
+          }),
+        })
+      }
+      const requirementDocsMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/requirements\/docs$/)
+      if (requirementDocsMatch) {
+        const projectId = requirementDocsMatch[1]
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            code: 0,
+            data: {
+              items: [
+                {
+                  id: 'doc-1',
+                  projectId,
+                  title: '用户中心 PRD',
+                  status: 'PUBLISHED',
+                  tags: ['user', 'core'],
+                  sourceType: 'PRD',
+                  latestVersionId: 'ver-2',
+                  updatedAt: 1710000000,
+                },
+                {
+                  id: 'doc-2',
+                  projectId,
+                  title: '支付流程 Spec',
+                  status: 'REVIEWING',
+                  tags: ['payment'],
+                  sourceType: 'SPEC',
+                  latestVersionId: 'ver-1',
+                  updatedAt: 1710000100,
+                },
+              ],
+              total: 2,
+              page: 1,
+              pageSize: 8,
+            },
+          }),
+        })
+      }
+      const requirementAnalysesMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/requirements\/analyses$/)
+      if (requirementAnalysesMatch) {
+        const projectId = requirementAnalysesMatch[1]
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            code: 0,
+            data: [
+              {
+                id: 'analysis-1',
+                projectId,
+                docId: 'doc-1',
+                docVersionId: 'ver-2',
+                status: 'REVIEWED',
+                summary: '已提取核心流程、边界值与异常流。',
+                riskLevel: 'HIGH',
+                coverageScore: 86,
+                analysis: {
+                  featurePoints: [],
+                  businessRules: [],
+                  testPoints: [],
+                  riskPoints: [],
+                  boundaryCases: [],
+                  coverageSuggestions: [],
+                },
+                updatedAt: 1710000200,
+              },
+            ],
+          }),
+        })
+      }
+      const knowledgeRetrospectivesMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/knowledge\/retrospectives$/)
+      if (knowledgeRetrospectivesMatch) {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            code: 0,
+            data: {
+              items: [],
+              total: 0,
+              page: 1,
+              pageSize: 10,
+            },
+          }),
+        })
+      }
+      const platformAiJobsMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/platform\/ai-jobs$/)
+      if (platformAiJobsMatch) {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            code: 0,
+            data: {
+              items: [
+                {
+                  id: 'job-1',
+                  projectId: platformAiJobsMatch[1],
+                  jobType: 'CASE_GOVERNANCE',
+                  status: 'SUCCESS',
+                  triggerSource: 'MANUAL',
+                  summary: '完成一次治理建议生成',
+                  createdBy: 'user-1',
+                  createdAt: 1710000500,
+                },
+              ],
+            },
+          }),
+        })
+      }
+      const platformAuditLogsMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/platform\/audit-logs$/)
+      if (platformAuditLogsMatch) {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            code: 0,
+            data: {
+              items: [
+                {
+                  id: 'platform-audit-1',
+                  projectId: platformAuditLogsMatch[1],
+                  module: 'platform',
+                  action: 'REFRESH',
+                  resourceType: 'PlatformRecord',
+                  resourceId: 'platform-record-1',
+                  summary: '刷新平台记录',
+                  detail: {},
+                  userId: 'user-1',
+                  createdAt: 1710000600,
+                },
+              ],
+            },
+          }),
+        })
+      }
+      const defectsMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/defects$/)
+      if (defectsMatch) {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            code: 0,
+            data: {
+              items: [],
+              total: 0,
+            },
+          }),
+        })
+      }
+      const auditLogsMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/security\/audit-logs$/)
+      if (auditLogsMatch) {
+        const projectId = auditLogsMatch[1]
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            code: 0,
+            data: {
+              page: 1,
+              pageSize: 20,
+              total: 1,
+              items: [
+                {
+                  id: 'audit-1',
+                  projectId,
+                  userId: 'user-1',
+                  module: 'runs',
+                  action: 'CREATE',
+                  resourceType: 'Run',
+                  resourceId: 'run-1',
+                  summary: '创建运行记录',
+                  detail: {},
+                  createdAt: 1710000000,
+                },
+              ],
             },
           }),
         })
@@ -160,6 +343,170 @@ test.describe('产品信息架构收敛', () => {
                 { date: '05-19', passRate: 80, failCount: 2, totalRuns: 10 },
                 { date: '05-20', passRate: 90, failCount: 1, totalRuns: 10 },
               ],
+            },
+          }),
+        })
+      }
+      if (url.pathname === '/api/doc-ingest/perf-reports') {
+        if (url.pathname.endsWith('/perf-1')) {
+          return route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+              code: 0,
+              data: {
+                id: 'perf-1',
+                name: 'Smoke 压测',
+                status: 'PASSED',
+                createdAt: 1710000000,
+                duration: '5m',
+                vus: 20,
+                tps: 128.4,
+                avgResponseMs: 83.5,
+                p95ResponseMs: 124.1,
+                successRate: 99.8,
+                resources: {
+                  cpuAvg: 32.5,
+                  cpuMax: 58.2,
+                  memoryAvg: 41.7,
+                  memoryMax: 63.1,
+                  ioReadMb: 10.2,
+                  ioWriteMb: 6.8,
+                },
+                trendPoints: [
+                  { tps: 120, avgResponseMs: 80 },
+                  { tps: 128, avgResponseMs: 84 },
+                ],
+                latencyDistribution: [
+                  { label: '<100ms', count: 80 },
+                  { label: '100-200ms', count: 12 },
+                ],
+                asserts: [{ apiName: 'POST /api/login', passed: 20, failed: 0 }],
+              },
+            }),
+          })
+        }
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            code: 0,
+            data: {
+              items: [
+                {
+                  id: 'perf-1',
+                  name: 'Smoke 压测',
+                  status: 'PASSED',
+                  createdAt: 1710000000,
+                  duration: '5m',
+                  vus: 20,
+                },
+              ],
+            },
+          }),
+        })
+      }
+      if (url.pathname === '/api/doc-ingest/perf-reports/perf-1') {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            code: 0,
+            data: {
+              id: 'perf-1',
+              name: 'Smoke 压测',
+              status: 'PASSED',
+              createdAt: 1710000000,
+              duration: '5m',
+              vus: 20,
+              tps: 128.4,
+              avgResponseMs: 83.5,
+              p95ResponseMs: 124.1,
+              successRate: 99.8,
+              resources: {
+                cpuAvg: 32.5,
+                cpuMax: 58.2,
+                memoryAvg: 41.7,
+                memoryMax: 63.1,
+                ioReadMb: 10.2,
+                ioWriteMb: 6.8,
+              },
+              trendPoints: [
+                { tps: 120, avgResponseMs: 80 },
+                { tps: 128, avgResponseMs: 84 },
+              ],
+              latencyDistribution: [
+                { label: '<100ms', count: 80 },
+                { label: '100-200ms', count: 12 },
+              ],
+              asserts: [{ apiName: 'POST /api/login', passed: 20, failed: 0 }],
+            },
+          }),
+        })
+      }
+      if (url.pathname === '/api/ui-tests/reports') {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            code: 0,
+            data: {
+              items: [
+                {
+                  runId: 'ui-run-1',
+                  projectId: '1',
+                  pageId: 'login-page',
+                  status: 'COMPLETED',
+                  result: 'FAILED',
+                  assertLevel: 'P0',
+                  total: 12,
+                  passed: 10,
+                  failed: 2,
+                  skipped: 0,
+                  durationMs: 28500,
+                  reportDir: '/reports/ui-run-1',
+                  reportIndexUrl: 'https://example.com/ui-run-1/index.html',
+                  createdAt: 1710000300,
+                  finishedAt: 1710000400,
+                },
+              ],
+            },
+          }),
+        })
+      }
+      if (url.pathname === '/api/ui-tests/reports/ui-run-1') {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            code: 0,
+            data: {
+              runId: 'ui-run-1',
+              projectId: '1',
+              pageId: 'login-page',
+              status: 'COMPLETED',
+              result: 'FAILED',
+              assertLevel: 'P0',
+              specPath: 'tests/ui/login.spec.ts',
+              reportDir: '/reports/ui-run-1',
+              reportIndexUrl: 'https://example.com/ui-run-1/index.html',
+              summary: {
+                total: 12,
+                passed: 10,
+                failed: 2,
+                skipped: 0,
+                durationMs: 28500,
+              },
+              failedCases: [
+                {
+                  title: '登录失败提示',
+                  error: 'expect visible',
+                  screenshot: 'https://example.com/ui-run-1/failure.png',
+                  trace: 'https://example.com/ui-run-1/trace.zip',
+                },
+              ],
+              startedAt: 1710000300,
+              finishedAt: 1710000400,
             },
           }),
         })
@@ -553,6 +900,34 @@ test.describe('产品信息架构收敛', () => {
     await expect(page.getByText('质量门禁')).toBeVisible()
   })
 
+  test('仪表盘卡片入口可跳转到报告与运行记录', async ({ page }) => {
+    await page.goto('/projects/1/dashboard', { waitUntil: 'domcontentloaded' })
+
+    await page.getByRole('button', { name: '查看报告' }).click()
+    await expect(page).toHaveURL('/projects/1/reports?tab=trend')
+
+    await page.goto('/projects/1/dashboard', { waitUntil: 'domcontentloaded' })
+    await page.getByRole('button', { name: '全部记录' }).click()
+    await expect(page).toHaveURL('/projects/1/runs')
+  })
+
+  test('仪表盘请求失败时显示内联错误且不会弹原生提示', async ({ page }) => {
+    let dialogMessage = ''
+    page.on('dialog', async (dialog) => {
+      dialogMessage = dialog.message()
+      await dialog.dismiss()
+    })
+    await page.route('**/api/projects/1/dashboard/summary', async (route) => {
+      await route.abort('failed')
+    })
+
+    await page.goto('/projects/1/dashboard', { waitUntil: 'domcontentloaded' })
+
+    await expect(page.getByText('仪表盘')).toBeVisible()
+    await expect(page.getByText('获取仪表盘汇总失败，请稍后重试')).toBeVisible()
+    await expect.poll(() => dialogMessage).toBe('')
+  })
+
   test('AI生成页用下拉选择智能体类型', async ({ page }) => {
     await page.goto('/projects/1/ai/generate-cases', { waitUntil: 'domcontentloaded' })
 
@@ -581,14 +956,104 @@ test.describe('产品信息架构收敛', () => {
     await expect(page.getByText('性能参数')).toBeVisible()
   })
 
-  test('权限设置页提供最小可用角色与成员入口', async ({ page }) => {
-    await page.goto('/settings/rbac', { waitUntil: 'domcontentloaded' })
+  test('变更影响分析入口应展示匹配的页面标题，而不是需求文档中心', async ({ page }) => {
+    await page.goto('/projects/1/ai/change-impact', { waitUntil: 'domcontentloaded' })
 
+    await expect(page.getByText('变更影响分析')).toBeVisible()
+    await expect(page.getByText('需求文档中心')).not.toBeVisible()
+    await expect(page.getByRole('link', { name: '打开文档' }).first()).toBeVisible()
+  })
+
+  test('UI自动化入口应默认展示 UI 测试报告视图', async ({ page }) => {
+    await page.goto('/projects/1/automation/ui', { waitUntil: 'domcontentloaded' })
+
+    await expect(page.getByText('login-page · P0', { exact: true })).toBeVisible()
+    await expect(page.getByText('失败用例')).toBeVisible()
+    await expect(page.getByText('质量趋势与单次报告')).not.toBeVisible()
+  })
+
+  test('性能自动化入口应默认展示性能报告视图', async ({ page }) => {
+    await page.goto('/projects/1/automation/performance', { waitUntil: 'domcontentloaded' })
+
+    await expect(page.getByText('Smoke 压测', { exact: true })).toBeVisible()
+    await expect(page.getByText('TPS 趋势图 / 平均响应时间趋势图')).toBeVisible()
+    await expect(page.getByText('质量趋势与单次报告')).not.toBeVisible()
+  })
+
+  test('自动化执行入口应高亮自动化分组，而不是落到资产分组', async ({ page }) => {
+    await page.goto('/projects/1/automation/api', { waitUntil: 'domcontentloaded' })
+
+    await expect(page.getByRole('button', { name: '自动化执行' })).toHaveAttribute('aria-expanded', 'true')
+    await expect(page.getByRole('button', { name: '接口自动化' })).toBeVisible()
+  })
+
+  test('AI 用例治理入口应展开 AI 分组并显示用例治理导航', async ({ page }) => {
+    await page.goto('/projects/1/ai/case-governance', { waitUntil: 'domcontentloaded' })
+
+    await expect(page.getByRole('button', { name: 'AI能力' })).toHaveAttribute('aria-expanded', 'true')
+    await expect(page.getByRole('button', { name: '用例治理' })).toBeVisible()
+  })
+
+  test('知识沉淀入口应归属 AI 分组并显示导航入口', async ({ page }) => {
+    await page.goto('/projects/1/knowledge/retrospectives', { waitUntil: 'domcontentloaded' })
+
+    await expect(page.getByRole('button', { name: 'AI能力' })).toHaveAttribute('aria-expanded', 'true')
+    await expect(page.getByRole('button', { name: '知识沉淀' })).toBeVisible()
+  })
+
+  test('缺陷管理入口应归属自动化分组并显示导航入口', async ({ page }) => {
+    await page.goto('/projects/1/defects', { waitUntil: 'domcontentloaded' })
+
+    await expect(page.getByRole('button', { name: '自动化执行' })).toHaveAttribute('aria-expanded', 'true')
+    await expect(page.getByRole('button', { name: '缺陷管理' })).toBeVisible()
+  })
+
+  test('平台记录入口应归属设置分组并显示平台配置导航', async ({ page }) => {
+    await page.goto('/projects/1/settings/platform-records', { waitUntil: 'domcontentloaded' })
+
+    await expect(page.getByRole('button', { name: '设置', exact: true })).toHaveAttribute('aria-expanded', 'true')
+    await expect(page.getByRole('button', { name: '平台配置' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '平台记录' })).toBeVisible()
+  })
+
+  test('需求解析入口应展示解析工作台，而不是直接落到文档列表页', async ({ page }) => {
+    await page.goto('/projects/1/ai/requirements', { waitUntil: 'domcontentloaded' })
+
+    await expect(page.getByText('需求解析')).toBeVisible()
+    await expect(page.getByText('最近解析', { exact: true })).toBeVisible()
+    await expect(page.getByText('需求文档中心')).not.toBeVisible()
+    await expect(page.getByRole('link', { name: '查看解析' })).toBeVisible()
+  })
+
+  test('项目级权限入口保持当前 projectId，不会回落到 project 1', async ({ page }) => {
+    await page.goto('/projects/2/settings', { waitUntil: 'domcontentloaded' })
+
+    await page.getByRole('button', { name: /权限/ }).click()
+    await expect(page).toHaveURL('/projects/2/settings/rbac')
     await expect(page.getByRole('heading', { name: '权限与成员' })).toBeVisible()
     await expect(page.getByLabel('选择项目角色')).toBeVisible()
     await page.getByLabel('选择项目角色').selectOption('editor')
     await expect(page.getByText('可维护需求、用例、接口和执行资产')).toBeVisible()
-    await expect(page.getByRole('link', { name: '进入项目设置' })).toHaveAttribute('href', '/projects/1/settings')
+    await expect(page.getByRole('link', { name: '进入项目设置' })).toHaveAttribute('href', '/projects/2/settings')
+  })
+
+  test('遗留权限路径优先回到最近访问项目', async ({ page }) => {
+    await page.goto('/projects/2/dashboard', { waitUntil: 'domcontentloaded' })
+    await page.goto('/settings/rbac', { waitUntil: 'domcontentloaded' })
+
+    await expect(page).toHaveURL('/projects/2/settings/rbac')
+    await expect(page.getByRole('link', { name: '进入项目设置' })).toHaveAttribute('href', '/projects/2/settings')
+  })
+
+  test('设置侧边栏的审计日志入口进入真实项目审计页', async ({ page }) => {
+    await page.goto('/projects/1/settings', { waitUntil: 'domcontentloaded' })
+
+    await page.getByRole('button', { name: /审计日志/ }).click()
+    await expect(page).toHaveURL('/projects/1/settings/audit')
+    await expect(page.getByText('安全审计日志')).toBeVisible()
+    await expect(page.getByText('查看关键操作的审计记录，敏感信息已自动脱敏')).toBeVisible()
+    await expect(page.getByText('创建运行记录')).toBeVisible()
+    await expect(page.getByText('projectId: -')).not.toBeVisible()
   })
 
   test('接口集合详情支持调试请求并加入测试套件', async ({ page }) => {

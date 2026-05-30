@@ -44,8 +44,10 @@ const suites = ref<SuiteCardData[]>([])
 const totalSuites = ref(0)
 const isLoadingSuites = ref(false)
 const environments = ref<EnvironmentPublic[]>([])
+const errorMessage = ref('')
 
 const projectId = computed(() => String(route.params.projectId || '').trim())
+const hasProjectId = computed(() => Boolean(projectId.value))
 
 const resolveApiBaseUrl = () => {
   const envBase = String(import.meta.env.VITE_API_BASE_URL || '').trim()
@@ -66,6 +68,13 @@ const toNameMap = <T extends { id: string; name: string }>(items: T[]) => {
     acc[item.id] = item.name
     return acc
   }, {})
+}
+
+const toUserFacingError = (error: unknown, fallback: string) => {
+  if (!(error instanceof Error)) return fallback
+  const message = String(error.message || '').trim()
+  if (!message || message === 'Failed to fetch') return fallback
+  return message
 }
 
 const formatDateTime = (timestamp?: number | null) => {
@@ -104,7 +113,7 @@ const loadEnvironmentNameMap = async (authorization: string) => {
     environments.value = []
     return {}
   }
-  const response = await fetch(`${resolveApiBaseUrl()}/api/projects/${projectId.value}/environments`, {
+  const response = await fetch(`${resolveApiBaseUrl()}/api/projects/${encodeURIComponent(projectId.value)}/environments`, {
     method: 'GET',
     headers: {
       Authorization: authorization
@@ -120,8 +129,14 @@ const loadEnvironmentNameMap = async (authorization: string) => {
 }
 
 const loadSuites = async () => {
-  if (!projectId.value) return
+  if (!projectId.value) {
+    suites.value = []
+    totalSuites.value = 0
+    errorMessage.value = ''
+    return
+  }
   isLoadingSuites.value = true
+  errorMessage.value = ''
   try {
     const authorization = resolveAuthHeader()
     const query = new URLSearchParams({
@@ -145,14 +160,17 @@ const loadSuites = async () => {
   } catch (error) {
     suites.value = []
     totalSuites.value = 0
-    const errorMessage = error instanceof Error ? error.message : '获取测试套件失败，请稍后重试'
-    window.alert(errorMessage)
+    errorMessage.value = toUserFacingError(error, '获取测试套件失败，请检查网络后重试')
   } finally {
     isLoadingSuites.value = false
   }
 }
 
 function openCreateSuite() {
+  if (!hasProjectId.value) {
+    showToast('项目ID缺失，请先选择项目', 'error')
+    return
+  }
   isCreateSuiteOpen.value = true
 }
 
@@ -201,7 +219,7 @@ async function handleCreateSuite(data: {
     await loadSuites()
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : '新建测试套件失败，请稍后重试'
-    window.alert(errorMessage)
+    showToast(errorMessage, 'error')
   }
 }
 
@@ -215,7 +233,11 @@ function deleteSuite(index: number) {
 }
 
 async function runSuite(suite: SuiteCardData) {
-  const pid = projectId.value || '1'
+  if (!hasProjectId.value) {
+    showToast('项目ID缺失，无法运行套件', 'error')
+    return
+  }
+  const pid = projectId.value
   if (!suite.defaultEnvId) {
     showToast('套件未配置默认环境，无法运行', 'error')
     return
@@ -231,7 +253,7 @@ async function runSuite(suite: SuiteCardData) {
     const rid = String(run?.id || '').trim()
     if (!rid) throw new Error('运行创建成功但未返回 runId')
     showToast(`运行已触发：${rid}`)
-    await router.push(`/projects/${pid}/runs/${rid}`)
+    await router.push(`/projects/${encodeURIComponent(pid)}/runs/${encodeURIComponent(rid)}`)
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : '运行触发失败，请稍后重试'
     showToast(errorMessage, 'error')
@@ -239,7 +261,11 @@ async function runSuite(suite: SuiteCardData) {
 }
 
 function arrangeSuite(suiteId: string) {
-  router.push(`/projects/${projectId.value || '1'}/assets/suites/${suiteId}`)
+  if (!hasProjectId.value) {
+    showToast('项目ID缺失，无法进入套件编排', 'error')
+    return
+  }
+  router.push(`/projects/${encodeURIComponent(projectId.value)}/assets/suites/${encodeURIComponent(suiteId)}`)
 }
 
 onMounted(() => {
@@ -256,12 +282,25 @@ onMounted(() => {
           <div class="text-[14px] leading-[20px] text-[#717182]">{{ isLoadingSuites ? '加载中...' : `共 ${totalSuites} 个套件` }}</div>
         </div>
 
-        <button type="button" class="relative h-[32px] w-[100px] rounded-[10px] bg-[#155DFC]" @click="openCreateSuite">
+        <button
+          type="button"
+          class="relative h-[32px] w-[100px] rounded-[10px] bg-[#155DFC] disabled:cursor-not-allowed disabled:bg-[#8EA9FF]"
+          :disabled="!hasProjectId"
+          @click="openCreateSuite"
+        >
           <img :src="headerPlus" alt="" class="absolute left-[12px] top-[9px] h-[14px] w-[14px]" />
           <span class="absolute left-[32px] top-[6.33px] text-[14px] font-medium leading-[20px] text-white">
             新建套件
           </span>
         </button>
+      </div>
+
+      <div
+        v-if="errorMessage"
+        class="flex items-center justify-between gap-[12px] rounded-[10px] border border-[#FCA5A5] bg-[#FEF2F2] px-[12px] py-[10px] text-[13px] text-[#991B1B]"
+      >
+        <span>{{ errorMessage }}</span>
+        <button type="button" class="shrink-0 text-[12px] font-medium text-[#B91C1C]" @click="loadSuites">重试</button>
       </div>
 
       <div class="relative h-[32px] w-full">

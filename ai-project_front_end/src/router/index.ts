@@ -1,5 +1,5 @@
 import { defineAsyncComponent, defineComponent, h } from 'vue'
-import { createRouter, createWebHistory, useRoute } from 'vue-router'
+import { createRouter, createWebHistory } from 'vue-router'
 import AiTestingPlatformShell from '@/components/figma/ai-testing-platform/AiTestingPlatformShell.vue'
 
 const Overview = defineAsyncComponent(() => import('../views/dashboard/Overview.vue'))
@@ -29,18 +29,43 @@ const DocParseJobs = defineAsyncComponent(() => import('@/views/settings/DocPars
 const DevOps = defineAsyncComponent(() => import('@/views/settings/DevOps.vue'))
 const Executors = defineAsyncComponent(() => import('@/views/settings/Executors.vue'))
 const Plugins = defineAsyncComponent(() => import('@/views/settings/Plugins.vue'))
+const RequirementAnalysisHome = defineAsyncComponent(() => import('@/views/ai/RequirementAnalysisHome.vue'))
+const ChangeImpactHome = defineAsyncComponent(() => import('@/views/ai/ChangeImpactHome.vue'))
 const SecurityAudit = defineAsyncComponent(() => import('@/views/settings/SecurityAudit.vue'))
 const CiTokenGovernance = defineAsyncComponent(() => import('@/views/settings/CiTokenGovernance.vue'))
 const AiCapabilities = defineAsyncComponent(() => import('@/views/settings/AiCapabilities.vue'))
 const OpsHealth = defineAsyncComponent(() => import('@/views/settings/OpsHealth.vue'))
 const AcceptanceCenter = defineAsyncComponent(() => import('@/views/settings/AcceptanceCenter.vue'))
 const WorkspaceSectionHome = defineAsyncComponent(() => import('@/views/workspace/WorkspaceSectionHome.vue'))
+const Rbac = defineAsyncComponent(() => import('@/views/settings/Rbac.vue'))
 
 const LoginRoute = () => import('../views/Login.vue')
 const HomeRoute = () => import('../views/Home.vue')
 const CollectionDetailRoute = () => import('@/views/collections/CollectionDetail.vue')
-const RbacRoute = () => import('@/views/settings/Rbac.vue')
 const AiTestingPlatform16_3Route = () => import('@/views/figma/AiTestingPlatform16_3.vue')
+
+const LAST_PROJECT_ID_STORAGE_KEY = 'weitesting:lastProjectId'
+
+function normalizeProjectId(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+function resolvePreferredProjectId(explicitProjectId?: unknown): string {
+  const explicit = normalizeProjectId(explicitProjectId)
+  if (explicit) return explicit
+  if (typeof window !== 'undefined') {
+    const saved = normalizeProjectId(window.localStorage.getItem(LAST_PROJECT_ID_STORAGE_KEY))
+    if (saved) return saved
+  }
+  return '1'
+}
+
+function buildLegacyProjectPath(suffix: string, explicitProjectId?: unknown): string {
+  const projectId = resolvePreferredProjectId(explicitProjectId)
+  return `/projects/${encodeURIComponent(projectId)}/${suffix}`
+}
 
 function createProjectShellPage(activeAssetChild: string, Content: Parameters<typeof h>[0]) {
   return defineComponent({
@@ -60,26 +85,6 @@ function createProjectShellPage(activeAssetChild: string, Content: Parameters<ty
   })
 }
 
-function createPlaceholderPage(title: string) {
-  return defineComponent({
-    name: `Placeholder_${title}`,
-    setup() {
-      const route = useRoute()
-      return () =>
-        h('div', { class: 'min-h-[calc(100vh-48px)] w-full bg-[rgba(236,236,240,0.3)] p-6' }, [
-          h('div', { class: 'rounded-[14px] border border-black/10 bg-white p-6' }, [
-            h('div', { class: 'text-[14px] font-semibold leading-[20px] text-[#0A0A0A]' }, title),
-            h(
-              'div',
-              { class: 'mt-2 text-[12px] leading-[16px] text-[#717182]' },
-              `projectId: ${String(route.params.projectId ?? '-')}${route.params.id ? ` · id: ${String(route.params.id)}` : ''}${route.params.runId ? ` · runId: ${String(route.params.runId)}` : ''}`
-            )
-          ])
-        ])
-    }
-  })
-}
-
 const ProjectDashboard = createProjectShellPage('', Overview)
 const ProjectTrialOperation = createProjectShellPage('试运行看板', TrialOperation)
 const ProjectTestCases = createProjectShellPage('用例管理', CasesPanel)
@@ -90,18 +95,24 @@ const ProjectApis = createProjectShellPage('接口管理', ApiCollectionsPanel)
 const ProjectDataSets = createProjectShellPage('测试数据', DataSetsPanel)
 const ProjectRuns = createProjectShellPage('运行记录', RunsPanel)
 const ProjectRunDetail = createProjectShellPage('运行记录', RunDetail)
-const ProjectReports = createProjectShellPage('', ReportsPanel)
-const ProjectAllureReport = createProjectShellPage('', AllureReportPanel)
 const ProjectAiAssistant = createProjectShellPage('自动生成测试用例', AiAssistantPanel)
+const ProjectAiRequirementsHome = createProjectShellPage('需求解析', RequirementAnalysisHome)
+const ProjectAiCaseGovernance = createProjectShellPage('用例治理', TrialOperation)
+const ProjectAiChangeImpactHome = createProjectShellPage('变更影响分析', ChangeImpactHome)
 const ProjectRequirementDocs = createProjectShellPage('需求管理', RequirementDocs)
 const ProjectRequirementDocDetail = createProjectShellPage('需求管理', RequirementDocDetail)
 const ProjectRequirementAnalysisDetail = createProjectShellPage('需求解析', RequirementAnalysisDetail)
 const ProjectRequirementChangeSetDetail = createProjectShellPage('变更影响分析', RequirementChangeSetDetail)
 const ProjectKnowledgeRetrospectives = createProjectShellPage('知识沉淀', KnowledgeRetrospectives)
-const ProjectPlatformRecords = createProjectShellPage('平台记录', PlatformRecords)
+const ProjectPlatformRecords = createProjectShellPage('平台配置', PlatformRecords)
 const ProjectIntegrations = createProjectShellPage('集成配置', Integrations)
 const ProjectDefectsList = createProjectShellPage('缺陷管理', DefectsList)
 const ProjectDefectDetail = createProjectShellPage('缺陷管理', DefectDetail)
+const ProjectAutomationApi = createProjectShellPage('接口自动化', ApiCollectionsPanel)
+const ProjectAutomationUi = createProjectShellPage('UI自动化', ReportsPanel)
+const ProjectAutomationPerformance = createProjectShellPage('性能自动化', ReportsPanel)
+const ProjectReportsCenter = createProjectShellPage('报告中心', ReportsPanel)
+const ProjectAllureReportsCenter = createProjectShellPage('报告中心', AllureReportPanel)
 const ProjectAssetsHome = createProjectShellPage('资产中心', defineComponent({
   name: 'ProjectAssetsHome',
   setup: () => () => h(WorkspaceSectionHome, { section: 'assets' })
@@ -118,6 +129,7 @@ const ProjectSettingsHome = createProjectShellPage('设置', defineComponent({
   name: 'ProjectSettingsHome',
   setup: () => () => h(WorkspaceSectionHome, { section: 'settings' })
 }))
+const ProjectRbac = createProjectShellPage('权限', Rbac)
 
 const router = createRouter({
   history: createWebHistory(),
@@ -146,7 +158,7 @@ const router = createRouter({
     },
     {
       path: '/projects/:projectId',
-      redirect: (to) => `/projects/${String(to.params.projectId)}/dashboard`
+      redirect: (to) => `/projects/${encodeURIComponent(String(to.params.projectId))}/dashboard`
     },
     {
       path: '/projects/:projectId/dashboard',
@@ -198,27 +210,27 @@ const router = createRouter({
     },
     {
       path: '/projects/:projectId/ai/requirements',
-      component: ProjectRequirementDocs
+      component: ProjectAiRequirementsHome
     },
     {
       path: '/projects/:projectId/ai/case-governance',
-      component: ProjectTrialOperation
+      component: ProjectAiCaseGovernance
     },
     {
       path: '/projects/:projectId/ai/change-impact',
-      component: ProjectRequirementDocs
+      component: ProjectAiChangeImpactHome
     },
     {
       path: '/projects/:projectId/automation/ui',
-      component: ProjectReports
+      component: ProjectAutomationUi
     },
     {
       path: '/projects/:projectId/automation/api',
-      component: ProjectApis
+      component: ProjectAutomationApi
     },
     {
       path: '/projects/:projectId/automation/performance',
-      component: ProjectReports
+      component: ProjectAutomationPerformance
     },
     {
       path: '/projects/:projectId/automation',
@@ -234,19 +246,19 @@ const router = createRouter({
     },
     {
       path: '/projects/:projectId/workers',
-      redirect: (to) => `/projects/${String(to.params.projectId)}/automation`
+      redirect: (to) => `/projects/${encodeURIComponent(String(to.params.projectId))}/automation`
     },
     {
       path: '/projects/:projectId/reports',
-      component: ProjectReports
+      component: ProjectReportsCenter
     },
     {
       path: '/projects/:projectId/reports/allure',
-      component: ProjectAllureReport
+      component: ProjectAllureReportsCenter
     },
     {
       path: '/projects/:projectId/ai-assistant',
-      redirect: (to) => `/projects/${String(to.params.projectId)}/ai/generate-cases`
+      redirect: (to) => `/projects/${encodeURIComponent(String(to.params.projectId))}/ai/generate-cases`
     },
     {
       path: '/projects/:projectId/settings/environments',
@@ -255,6 +267,10 @@ const router = createRouter({
     {
       path: '/projects/:projectId/settings',
       component: ProjectSettingsHome
+    },
+    {
+      path: '/projects/:projectId/settings/rbac',
+      component: ProjectRbac
     },
     {
       path: '/projects/:projectId/settings/platform-records',
@@ -283,6 +299,10 @@ const router = createRouter({
     {
       path: '/projects/:projectId/settings/security-audit',
       component: createProjectShellPage('安全审计', SecurityAudit)
+    },
+    {
+      path: '/projects/:projectId/settings/audit',
+      component: createProjectShellPage('审计日志', SecurityAudit)
     },
     {
       path: '/projects/:projectId/settings/ci-token-governance',
@@ -330,51 +350,51 @@ const router = createRouter({
     },
     {
       path: '/settings/integrations',
-      redirect: '/projects/1/settings/integrations'
+      redirect: () => buildLegacyProjectPath('settings/integrations')
     },
     {
       path: '/settings/rbac',
-      component: RbacRoute
+      redirect: () => buildLegacyProjectPath('settings/rbac')
     },
     {
       path: '/settings/audit',
-      component: createPlaceholderPage('审计日志')
+      redirect: () => buildLegacyProjectPath('settings/audit')
     },
     {
       path: '/dashboard',
-      redirect: '/projects/1/dashboard'
+      redirect: () => buildLegacyProjectPath('dashboard')
     },
     {
       path: '/dashboard/overview',
-      redirect: '/projects/1/dashboard'
+      redirect: () => buildLegacyProjectPath('dashboard')
     },
     {
       path: '/figma/untitled-34-158',
-      redirect: '/projects/1/assets/testcases'
+      redirect: () => buildLegacyProjectPath('assets/testcases')
     },
     {
       path: '/figma/untitled-13-3',
-      redirect: '/projects/1/assets/testcases'
+      redirect: () => buildLegacyProjectPath('assets/testcases')
     },
     {
       path: '/figma/untitled-47-1415',
-      redirect: '/projects/1/assets/suites'
+      redirect: () => buildLegacyProjectPath('assets/suites')
     },
     {
       path: '/figma/untitled-88-3',
-      redirect: '/projects/1/assets/apis'
+      redirect: () => buildLegacyProjectPath('assets/apis')
     },
     {
       path: '/figma/untitled-97-879',
-      redirect: '/projects/1/assets/data'
+      redirect: () => buildLegacyProjectPath('assets/data')
     },
     {
       path: '/figma/untitled-140-6408',
-      redirect: '/projects/1/assets/suites/1'
+      redirect: () => buildLegacyProjectPath('assets/suites')
     },
     {
       path: '/figma/untitled-9-3',
-      component: ProjectTestCaseDetail
+      redirect: () => buildLegacyProjectPath('assets/testcases')
     },
     {
       path: '/figma/ai-testing-platform-16-3',
@@ -406,6 +426,14 @@ router.beforeEach((to) => {
   }
 
   return true
+})
+
+router.afterEach((to) => {
+  if (typeof window === 'undefined') return
+  const projectId = normalizeProjectId(to.params.projectId)
+  if (projectId) {
+    window.localStorage.setItem(LAST_PROJECT_ID_STORAGE_KEY, projectId)
+  }
 })
 
 export default router

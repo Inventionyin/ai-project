@@ -24,7 +24,7 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
 }
 
 function goBack() {
-  router.push(`/projects/${projectId.value}/assets/suites`)
+  router.push(`/projects/${encodeURIComponent(projectId.value)}/assets/suites`)
 }
 
 type PoolCase = { testcaseId: string; title: string; typeLabel: string; priority: string }

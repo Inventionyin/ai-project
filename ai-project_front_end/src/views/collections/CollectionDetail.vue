@@ -446,7 +446,7 @@ async function handleImport() {
     const newId = String(created?.id || '').trim()
     if (newId && newId !== collectionId.value) {
       await router.replace({
-        path: `/projects/${projectId.value}/assets/apis/${newId}`,
+        path: `/projects/${encodeURIComponent(projectId.value)}/assets/apis/${encodeURIComponent(newId)}`,
         query: {}
       })
     } else {

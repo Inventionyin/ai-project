@@ -544,47 +544,43 @@ const fallbackCopyText = (text: string) => {
   if (!copied) throw new Error('copy-failed')
 }
 
+const copyMarkdownText = async (
+  text: string,
+  successMessage: string,
+  messageTarget: { value: string } = reportMessage
+) => {
+  const normalized = text.trim()
+  if (!normalized) {
+    messageTarget.value = '暂无可复制内容'
+    return false
+  }
+  try {
+    await navigator.clipboard.writeText(normalized)
+    messageTarget.value = successMessage
+    return true
+  } catch {
+    try {
+      fallbackCopyText(normalized)
+      messageTarget.value = successMessage
+      return true
+    } catch {
+      messageTarget.value = '复制失败，请手动复制'
+      return false
+    }
+  }
+}
+
 const copyReport = async () => {
   const text = reportMarkdown.value.trim()
   if (!text) {
     reportMessage.value = '请先生成报告'
     return
   }
-  try {
-    await navigator.clipboard.writeText(text)
-    reportMessage.value = '报告内容已复制'
-  } catch {
-    try {
-      fallbackCopyText(text)
-      reportMessage.value = '报告内容已复制'
-    } catch {
-      reportMessage.value = '复制失败，请手动复制'
-    }
-  }
-}
-
-const copyMarkdownText = async (text: string, successMessage: string) => {
-  const normalized = text.trim()
-  if (!normalized) {
-    reportMessage.value = '暂无可复制内容'
-    return
-  }
-  try {
-    await navigator.clipboard.writeText(normalized)
-    reportMessage.value = successMessage
-  } catch {
-    try {
-      fallbackCopyText(normalized)
-      reportMessage.value = successMessage
-    } catch {
-      reportMessage.value = '复制失败，请手动复制'
-    }
-  }
+  await copyMarkdownText(text, '报告内容已复制')
 }
 
 const copyDeliveryNote = async () => {
-  await copyMarkdownText(deliveryNoteMarkdown.value, '验收汇报稿已复制')
-  deliveryNoteMessage.value = '验收汇报稿已复制'
+  await copyMarkdownText(deliveryNoteMarkdown.value, '验收汇报稿已复制', deliveryNoteMessage)
 }
 
 const downloadDeliveryNote = () => {
@@ -1301,7 +1297,7 @@ onMounted(() => {
             <div class="mt-[2px] text-[12px] leading-[16px] text-[#717182]">需求、用例和缺陷是本轮验收的数据资产入口。</div>
           </div>
           <RouterLink
-            :to="`/projects/${projectId}/assets`"
+            :to="`/projects/${encodeURIComponent(projectId)}/assets`"
             class="text-[12px] font-medium text-[#155DFC] hover:underline"
           >
             进入资产中心
@@ -2041,7 +2037,7 @@ onMounted(() => {
           <RouterLink
             v-for="item in dashboard?.topRiskHints || []"
             :key="item.defectId"
-            :to="`/projects/${projectId}/defects/${item.defectId}`"
+            :to="`/projects/${encodeURIComponent(projectId)}/defects/${encodeURIComponent(item.defectId)}`"
             class="block rounded-[8px] border border-black/10 p-[12px] hover:bg-[#F9FAFB]"
           >
             <div class="flex items-center justify-between gap-[12px]">

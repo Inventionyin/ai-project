@@ -13,6 +13,10 @@
         </div>
       </div>
 
+      <div v-if="errorMessage" class="mb-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-700">
+        {{ errorMessage }}
+      </div>
+
       <div v-if="loading" class="text-center py-8 text-[12px] text-[#717182]">加载中...</div>
       <div v-else-if="logs.length === 0" class="text-center py-8 text-[12px] text-[#717182]">暂无审计记录</div>
       <table v-else class="w-full text-[12px]">
@@ -77,21 +81,25 @@ const pageSize = ref(20)
 const total = ref(0)
 const moduleFilter = ref('')
 const actionFilter = ref('')
+const errorMessage = ref('')
 
 const formatDate = (ts: number) => new Date(ts * 1000).toLocaleString('zh-CN')
 
 async function load() {
   loading.value = true
+  errorMessage.value = ''
   try {
     const params = new URLSearchParams({ page: String(page.value), pageSize: String(pageSize.value) })
     if (moduleFilter.value) params.set('module', moduleFilter.value)
     if (actionFilter.value) params.set('action', actionFilter.value)
     const res = await requestJson<{ page: number; pageSize: number; total: number; items: AuditLog[] }>(
-      `/api/projects/${projectId}/security/audit-logs?${params}`,
+      `/api/projects/${encodeURIComponent(projectId)}/security/audit-logs?${params}`,
       { method: 'GET', headers: authHeader() },
     )
     logs.value = res.items
     total.value = res.total
+  } catch {
+    errorMessage.value = '审计日志加载失败，请检查网络后重试'
   } finally {
     loading.value = false
   }

@@ -82,7 +82,7 @@ const projectId = computed(() => {
 })
 
 const resolvedActiveAssetChild = computed(() => {
-  if (typeof activeAssetChild === 'string') return activeAssetChild
+  if (typeof activeAssetChild === 'string' && activeAssetChild.trim().length > 0) return activeAssetChild
   if (route.path.startsWith(`/projects/${projectId.value}/trial-operation`)) return '试运行看板'
   if (route.path === `/projects/${projectId.value}/assets`) return '资产中心'
   if (route.path.startsWith(`/projects/${projectId.value}/assets/suites`)) return '测试套件'
@@ -94,22 +94,27 @@ const resolvedActiveAssetChild = computed(() => {
   if (route.path.startsWith(`/projects/${projectId.value}/ai/requirements`)) return '需求解析'
   if (route.path.startsWith(`/projects/${projectId.value}/ai/case-governance`)) return '用例治理'
   if (route.path.startsWith(`/projects/${projectId.value}/ai/change-impact`)) return '变更影响分析'
+  if (route.path.startsWith(`/projects/${projectId.value}/knowledge/retrospectives`)) return '知识沉淀'
   if (route.path.startsWith(`/projects/${projectId.value}/automation/ui`)) return 'UI自动化'
   if (route.path.startsWith(`/projects/${projectId.value}/automation/api`)) return '接口自动化'
   if (route.path.startsWith(`/projects/${projectId.value}/automation/performance`)) return '性能自动化'
   if (route.path === `/projects/${projectId.value}/automation`) return '自动化执行'
   if (route.path.startsWith(`/projects/${projectId.value}/runs`)) return '运行记录'
+  if (route.path.startsWith(`/projects/${projectId.value}/reports`)) return '报告中心'
+  if (route.path.startsWith(`/projects/${projectId.value}/defects`)) return '缺陷管理'
   if (route.path.startsWith(`/projects/${projectId.value}/workers`)) return '执行资源'
   if (route.path.startsWith(`/projects/${projectId.value}/ai-assistant`)) return '自动生成测试用例'
   if (route.path.startsWith(`/projects/${projectId.value}/requirements/docs`)) return '需求管理'
-  if (route.path.startsWith(`/projects/${projectId.value}/settings/platform-records`)) return '平台记录'
+  if (route.path.startsWith(`/projects/${projectId.value}/settings/platform-records`)) return '平台配置'
   if (route.path === `/projects/${projectId.value}/settings`) return '设置'
+  if (route.path.startsWith(`/projects/${projectId.value}/settings/rbac`)) return '权限'
   if (route.path.startsWith(`/projects/${projectId.value}/settings/integrations`)) return '集成配置'
   if (route.path.startsWith(`/projects/${projectId.value}/settings/doc-parse-jobs`)) return '文档解析任务'
   if (route.path.startsWith(`/projects/${projectId.value}/settings/devops`)) return '平台配置'
   if (route.path.startsWith(`/projects/${projectId.value}/settings/executors`)) return '平台配置'
   if (route.path.startsWith(`/projects/${projectId.value}/settings/plugins`)) return '插件市场'
   if (route.path.startsWith(`/projects/${projectId.value}/settings/security-audit`)) return '安全审计'
+  if (route.path.startsWith(`/projects/${projectId.value}/settings/audit`)) return '审计日志'
   if (route.path.startsWith(`/projects/${projectId.value}/settings/ci-token-governance`)) return 'CI Token 治理'
   if (route.path.startsWith(`/projects/${projectId.value}/settings/ai-capabilities`)) return '平台配置'
   if (route.path.startsWith(`/projects/${projectId.value}/settings/ops-health`)) return '运维健康'
@@ -163,7 +168,8 @@ const groups = computed<GroupItem[]>(() => [
       { label: '自动生成测试用例', icon: navAiAssistant, to: `/projects/${projectId.value}/ai/generate-cases` },
       { label: '需求解析', icon: navAudit, to: `/projects/${projectId.value}/ai/requirements` },
       { label: '用例治理', icon: navCases, to: `/projects/${projectId.value}/ai/case-governance` },
-      { label: '变更影响分析', icon: navAudit, to: `/projects/${projectId.value}/ai/change-impact` }
+      { label: '变更影响分析', icon: navAudit, to: `/projects/${projectId.value}/ai/change-impact` },
+      { label: '知识沉淀', icon: navAudit, to: `/projects/${projectId.value}/knowledge/retrospectives` }
     ]
   },
   {
@@ -176,6 +182,7 @@ const groups = computed<GroupItem[]>(() => [
       { label: '接口自动化', icon: navApiCollection, to: `/projects/${projectId.value}/automation/api` },
       { label: '性能自动化', icon: navReports, to: `/projects/${projectId.value}/automation/performance` },
       { label: '运行记录', icon: navRunHistory, to: `/projects/${projectId.value}/runs` },
+      { label: '缺陷管理', icon: navAudit, to: `/projects/${projectId.value}/defects` },
       { label: '报告中心', icon: navReports, to: `/projects/${projectId.value}/reports` }
     ]
   }
@@ -183,7 +190,7 @@ const groups = computed<GroupItem[]>(() => [
 
 const settingsLinks = computed<LinkItem[]>(() => [
   { label: '设置总览', icon: navIntegrations, to: `/projects/${projectId.value}/settings` },
-  { label: '权限', icon: navMember, to: '/settings/rbac' },
+  { label: '权限', icon: navMember, to: `/projects/${projectId.value}/settings/rbac` },
   { label: '环境管理', icon: navEnv, to: `/projects/${projectId.value}/settings/environments` },
   { label: '集成配置', icon: navIntegrations, to: `/projects/${projectId.value}/settings/integrations` },
   { label: 'API Token / CI Token', icon: navIntegrations, to: `/projects/${projectId.value}/settings/ci-token-governance` },
@@ -196,7 +203,7 @@ const settingsLinks = computed<LinkItem[]>(() => [
   { label: 'DevOps 流水线', icon: navIntegrations, to: `/projects/${projectId.value}/settings/devops` },
   { label: '测试执行器', icon: navCases, to: `/projects/${projectId.value}/settings/executors` },
   { label: 'AI 能力中心', icon: navAsset, to: `/projects/${projectId.value}/settings/ai-capabilities` },
-  { label: '审计日志', icon: navAudit, to: '/settings/audit' }
+  { label: '审计日志', icon: navAudit, to: `/projects/${projectId.value}/settings/audit` }
 ])
 
 const activeGroupLabel = computed(() => {

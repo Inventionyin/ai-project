@@ -133,7 +133,7 @@ const loadProjectName = async () => {
     return
   }
   try {
-    const response = await fetch(`${resolveApiBaseUrl()}/api/projects/${projectId.value}`, {
+    const response = await fetch(`${resolveApiBaseUrl()}/api/projects/${encodeURIComponent(projectId.value)}`, {
       method: 'GET',
       headers: {
         Authorization: resolveAuthHeader()

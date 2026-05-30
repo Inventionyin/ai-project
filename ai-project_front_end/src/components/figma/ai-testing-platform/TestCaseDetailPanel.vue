@@ -69,7 +69,7 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
 }
 
 function goBack() {
-  router.push(`/projects/${projectId.value}/assets/testcases`)
+  router.push(`/projects/${encodeURIComponent(projectId.value)}/assets/testcases`)
 }
 
 function debugRun() {
@@ -307,7 +307,7 @@ async function saveCase() {
 
   isSaving.value = true
   try {
-    const response = await fetch(resolveApiUrl(`/api/testcases/${caseId.value}`), {
+    const response = await fetch(resolveApiUrl(`/api/testcases/${encodeURIComponent(caseId.value)}`), {
       method: 'PUT',
       headers: {
         Authorization: resolveAuthHeader(),
@@ -370,7 +370,7 @@ async function loadCaseDetail() {
   isLoading.value = true
   loadError.value = ''
   try {
-    const response = await fetch(resolveApiUrl(`/api/testcases/${caseId.value}`), {
+    const response = await fetch(resolveApiUrl(`/api/testcases/${encodeURIComponent(caseId.value)}`), {
       method: 'GET',
       headers: {
         Authorization: resolveAuthHeader()

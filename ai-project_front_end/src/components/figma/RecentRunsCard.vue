@@ -11,6 +11,10 @@ type RunItem = {
   right: { type: 'text'; value: string; color: string } | { type: 'spinner' }
 }
 
+const emit = defineEmits<{
+  'open-all-runs': []
+}>()
+
 const statusStyle: Record<RunStatus, { bg: string; text: string; width: string }> = {
   通过: { bg: '#DCFCE7', text: '#008236', width: '40px' },
   失败: { bg: '#FFE2E2', text: '#E7000B', width: '40px' },
@@ -38,7 +42,12 @@ const props = withDefaults(defineProps<{
         <div class="text-sm font-semibold leading-5 text-[#0A0A0A]">最近运行</div>
       </div>
 
-      <button class="h-4 w-16 flex items-center justify-center gap-1">
+      <button
+        type="button"
+        class="h-4 w-16 flex items-center justify-center gap-1"
+        aria-label="全部记录"
+        @click="emit('open-all-runs')"
+      >
         <span class="text-xs font-medium leading-4 text-brand-blue">全部记录</span>
         <ArrowRight class="w-3 h-3 text-brand-blue" :stroke-width="1" />
       </button>

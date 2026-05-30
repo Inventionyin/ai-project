@@ -1,10 +1,16 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
 
 type RoleKey = 'admin' | 'editor' | 'viewer'
 
 const selectedRole = ref<RoleKey>('admin')
+const route = useRoute()
+const projectSettingsHref = computed(() => {
+  const rawProjectId = typeof route.params.projectId === 'string' ? route.params.projectId.trim() : ''
+  const projectId = rawProjectId || '1'
+  return `/projects/${encodeURIComponent(projectId)}/settings`
+})
 
 const roles: Array<{
   key: RoleKey
@@ -50,7 +56,7 @@ const members = [
           <p class="mt-1 text-[12px] leading-4 text-[#717182]">内部平台仅保留邮箱密码登录，权限按项目角色收敛。</p>
         </div>
         <RouterLink
-          to="/projects/1/settings"
+          :to="projectSettingsHref"
           class="inline-flex h-9 items-center justify-center rounded-[8px] bg-[#155DFC] px-4 text-[13px] font-medium text-white"
         >
           进入项目设置

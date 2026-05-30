@@ -158,6 +158,14 @@ const summary = ref<WorkspaceSummary | null>(null)
 const selectedActionTitle = ref('')
 const selectedAssetOperationTitle = ref('导入')
 
+function encodeProjectId(value: string): string {
+  return encodeURIComponent(value)
+}
+
+function buildProjectPath(projectId: string, suffix: string): string {
+  return `/projects/${encodeProjectId(projectId)}/${suffix}`
+}
+
 const zeroSummary: WorkspaceSummary = {
   assets: {
     requirementDocs: 0,
@@ -190,12 +198,12 @@ const zeroSummary: WorkspaceSummary = {
 }
 
 const buildAssetOperations = (pid: string): AssetOperation[] => [
-  { title: '导入', description: '按模板导入需求、用例或接口集合，先校验预览再提交。', action: '前往用例管理', to: `/projects/${pid}/assets/testcases` },
-  { title: '导出', description: '导出当前筛选结果，用于评审、备份或给上面的人验收。', action: '前往用例管理', to: `/projects/${pid}/assets/testcases` },
-  { title: '上传', description: '上传需求文档、用例表格、Swagger/OpenAPI 或补充附件。', action: '前往需求管理', to: `/projects/${pid}/requirements/docs` },
-  { title: '编辑', description: '编辑标题、优先级、状态、负责人、模块和说明。', action: '前往用例管理', to: `/projects/${pid}/assets/testcases` },
-  { title: '删除', description: '删除前需要确认影响范围，避免误删正式资产。', action: '前往用例管理', to: `/projects/${pid}/assets/testcases` },
-  { title: '批量编辑', description: '批量编辑字段、标签、模块和关联关系。', action: '前往用例管理', to: `/projects/${pid}/assets/testcases` }
+  { title: '导入', description: '按模板导入需求、用例或接口集合，先校验预览再提交。', action: '前往用例管理', to: buildProjectPath(pid, 'assets/testcases') },
+  { title: '导出', description: '导出当前筛选结果，用于评审、备份或给上面的人验收。', action: '前往用例管理', to: buildProjectPath(pid, 'assets/testcases') },
+  { title: '上传', description: '上传需求文档、用例表格、Swagger/OpenAPI 或补充附件。', action: '前往需求管理', to: buildProjectPath(pid, 'requirements/docs') },
+  { title: '编辑', description: '编辑标题、优先级、状态、负责人、模块和说明。', action: '前往用例管理', to: buildProjectPath(pid, 'assets/testcases') },
+  { title: '删除', description: '删除前需要确认影响范围，避免误删正式资产。', action: '前往用例管理', to: buildProjectPath(pid, 'assets/testcases') },
+  { title: '批量编辑', description: '批量编辑字段、标签、模块和关联关系。', action: '前往用例管理', to: buildProjectPath(pid, 'assets/testcases') }
 ]
 
 function formatTime(value: number | null) {
@@ -219,10 +227,10 @@ const configs: Record<typeof props.section, SectionConfig> = {
       ]
     },
     actions: (pid) => [
-      { title: '需求管理', description: '导入、解析、版本比对和变更影响分析的源头。', action: '进入需求', to: `/projects/${pid}/requirements/docs` },
-      { title: '用例管理', description: '导入、导出、编辑、删除和批量执行测试用例。', action: '进入用例', to: `/projects/${pid}/assets/testcases` },
-      { title: '接口管理', description: '维护接口集合、请求、断言和接口自动化资产。', action: '进入接口', to: `/projects/${pid}/assets/apis` },
-      { title: '测试套件', description: '把回归用例组合成可重复执行的套件。', action: '进入套件', to: `/projects/${pid}/assets/suites` }
+      { title: '需求管理', description: '导入、解析、版本比对和变更影响分析的源头。', action: '进入需求', to: buildProjectPath(pid, 'requirements/docs') },
+      { title: '用例管理', description: '导入、导出、编辑、删除和批量执行测试用例。', action: '进入用例', to: buildProjectPath(pid, 'assets/testcases') },
+      { title: '接口管理', description: '维护接口集合、请求、断言和接口自动化资产。', action: '进入接口', to: buildProjectPath(pid, 'assets/apis') },
+      { title: '测试套件', description: '把回归用例组合成可重复执行的套件。', action: '进入套件', to: buildProjectPath(pid, 'assets/suites') }
     ],
     insights: (source) => {
       const s = source || zeroSummary
@@ -248,10 +256,10 @@ const configs: Record<typeof props.section, SectionConfig> = {
       ]
     },
     actions: (pid) => [
-      { title: '自动生成测试用例', description: '先检查文档，再生成候选用例，人工确认后入库。', action: '开始生成', to: `/projects/${pid}/ai/generate-cases` },
-      { title: '需求解析', description: '提取功能点、业务规则、风险点和测试点。', action: '进入解析', to: `/projects/${pid}/ai/requirements` },
-      { title: '用例治理', description: '识别重复、低价值、待转正式和 P0 覆盖不足。', action: '进入治理', to: `/projects/${pid}/ai/case-governance` },
-      { title: '变更影响分析', description: '对比需求版本，生成回归建议和影响范围。', action: '查看变更', to: `/projects/${pid}/ai/change-impact` }
+      { title: '自动生成测试用例', description: '先检查文档，再生成候选用例，人工确认后入库。', action: '开始生成', to: buildProjectPath(pid, 'ai/generate-cases') },
+      { title: '需求解析', description: '提取功能点、业务规则、风险点和测试点。', action: '进入解析', to: buildProjectPath(pid, 'ai/requirements') },
+      { title: '用例治理', description: '识别重复、低价值、待转正式和 P0 覆盖不足。', action: '进入治理', to: buildProjectPath(pid, 'ai/case-governance') },
+      { title: '变更影响分析', description: '对比需求版本，生成回归建议和影响范围。', action: '查看变更', to: buildProjectPath(pid, 'ai/change-impact') }
     ],
     insights: (source) => {
       const s = source || zeroSummary
@@ -277,10 +285,10 @@ const configs: Record<typeof props.section, SectionConfig> = {
       ]
     },
     actions: (pid) => [
-      { title: 'UI自动化', description: '维护浏览器自动化路径、截图、视频和失败定位证据。', action: '查看 UI 报告', to: `/projects/${pid}/automation/ui` },
-      { title: '接口自动化', description: '基于接口资产一键调试、执行和沉淀断言。', action: '进入接口执行', to: `/projects/${pid}/automation/api` },
-      { title: '性能自动化', description: '维护性能基线、压测报告和趋势对比。', action: '查看性能报告', to: `/projects/${pid}/automation/performance` },
-      { title: '运行记录', description: '查看历史运行、失败用例、外部系统回执和 Allure 报告。', action: '进入记录', to: `/projects/${pid}/runs` }
+      { title: 'UI自动化', description: '维护浏览器自动化路径、截图、视频和失败定位证据。', action: '查看 UI 报告', to: buildProjectPath(pid, 'automation/ui') },
+      { title: '接口自动化', description: '基于接口资产一键调试、执行和沉淀断言。', action: '进入接口执行', to: buildProjectPath(pid, 'automation/api') },
+      { title: '性能自动化', description: '维护性能基线、压测报告和趋势对比。', action: '查看性能报告', to: buildProjectPath(pid, 'automation/performance') },
+      { title: '运行记录', description: '查看历史运行、失败用例、外部系统回执和 Allure 报告。', action: '进入记录', to: buildProjectPath(pid, 'runs') }
     ],
     insights: (source) => {
       const s = source || zeroSummary
@@ -306,11 +314,11 @@ const configs: Record<typeof props.section, SectionConfig> = {
       ]
     },
     actions: (pid) => [
-      { title: '权限', description: '区分管理员、编辑者和普通查看者。', action: '进入权限', to: '/settings/rbac' },
-      { title: '集成配置', description: '维护 Jira、禅道、Jenkins、钉钉等外部系统。', action: '进入集成', to: `/projects/${pid}/settings/integrations` },
-      { title: '环境管理', description: '维护测试环境、变量和默认执行地址。', action: '进入环境', to: `/projects/${pid}/settings/environments` },
-      { title: 'API Token / CI Token', description: '管理多 Token、轮换、到期提醒和泄露处置。', action: '进入 Token', to: `/projects/${pid}/settings/ci-token-governance` },
-      { title: '运维健康', description: '查看健康聚合、Prometheus/Grafana/SLO 和诊断项。', action: '进入运维', to: `/projects/${pid}/settings/ops-health` }
+      { title: '权限', description: '区分管理员、编辑者和普通查看者。', action: '进入权限', to: buildProjectPath(pid, 'settings/rbac') },
+      { title: '集成配置', description: '维护 Jira、禅道、Jenkins、钉钉等外部系统。', action: '进入集成', to: buildProjectPath(pid, 'settings/integrations') },
+      { title: '环境管理', description: '维护测试环境、变量和默认执行地址。', action: '进入环境', to: buildProjectPath(pid, 'settings/environments') },
+      { title: 'API Token / CI Token', description: '管理多 Token、轮换、到期提醒和泄露处置。', action: '进入 Token', to: buildProjectPath(pid, 'settings/ci-token-governance') },
+      { title: '运维健康', description: '查看健康聚合、Prometheus/Grafana/SLO 和诊断项。', action: '进入运维', to: buildProjectPath(pid, 'settings/ops-health') }
     ],
     insights: (source) => {
       const s = source || zeroSummary
